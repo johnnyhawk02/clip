@@ -303,6 +303,15 @@ pub struct App {
     desk: Rect,
     cues: Vec<Cue>,
     cue_drag: Option<usize>,
+    /// ⌥-drag fine adjustment: (moving the end edge?, exact position in frames).
+    fine_edge: Option<(bool, f64)>,
+    /// The region the last double-click selected, so a second double-click selects everything.
+    last_double: Option<Sel>,
+    /// Space is held (temporary Hand tool), and whether it was used to scroll.
+    space_down: bool,
+    space_used: bool,
+    /// End of the last pencil stroke: (channel, frame, value), for Shift-click straight lines.
+    pencil_last: Option<(usize, usize, f32)>,
     show_cues: bool,
     recorder: Option<Recorder>,
     show_record: bool,
@@ -365,6 +374,11 @@ impl App {
             desk: Rect::NOTHING,
             cues: Vec::new(),
             cue_drag: None,
+            fine_edge: None,
+            last_double: None,
+            space_down: false,
+            space_used: false,
+            pencil_last: None,
             show_cues: false,
             recorder: None,
             show_record: false,
@@ -864,6 +878,21 @@ impl App {
         }
     }
 
+    /// ⌘-drag snapping: to a cue point within 8 pixels, otherwise to the nearest zero crossing.
+    fn snap(&self, f: usize, spp: f64) -> usize {
+        let radius = (8.0 * spp).max(1.0) as usize;
+        if let Some(c) = self.cues.iter().map(|c| c.frame).filter(|c| c.abs_diff(f) <= radius).min_by_key(|c| c.abs_diff(f)) {
+            return c;
+        }
+        self.snap_zero(f, spp)
+    }
+
+    /// Nearest zero crossing (of all channels summed) within 8 pixels, or `f` if there is none.
+    fn snap_zero(&self, f: usize, spp: f64) -> usize {
+        let Some(a) = &self.audio else { return f };
+        a.nearest_zero_crossing(f, ((8.0 * spp) as usize).clamp(32, 50_000)).unwrap_or(f)
+    }
+
     /// Move the insertion point to `f` and scroll it into view.
     fn go_to(&mut self, f: usize) {
         self.sel = None;
@@ -1191,12 +1220,24 @@ impl App {
 
     /// Plain-key shortcuts. ⌘ shortcuts come through the native menu bar instead.
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        // Space: a tap plays/pauses; holding it gives the Hand tool. Released before the text
+        // field check so a held Space can never get stuck.
+        let space_released = ctx.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Key { key: Key::Space, pressed: false, .. })));
+        if space_released && self.space_down {
+            self.space_down = false;
+            if !self.space_used {
+                self.run(Action::PlayPause, ctx);
+            }
+        }
         if ctx.egui_wants_keyboard_input() {
             return;
         }
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Space)) && !self.space_down {
+            self.space_down = true;
+            self.space_used = false;
+        }
         let none = Modifiers::NONE;
         let keys: &[(Modifiers, Key, Action)] = &[
-            (none, Key::Space, Action::PlayPause),
             (none, Key::Delete, Action::Delete),
             (none, Key::Backspace, Action::Delete),
             (none, Key::Home, Action::GoStart),
@@ -1805,20 +1846,30 @@ impl App {
                 });
                 self.zoom(1.0 / zoom as f64, anchor);
             }
+            let alt_scroll = ui.input(|i| i.modifiers.alt) && scroll_delta.y != 0.0;
+            if alt_scroll {
+                // ⌥-scroll zooms around the mouse.
+                let anchor = hover.map_or(self.view_start + self.view_len / 2.0, |p| {
+                    self.view_start + ((p.x - wave.left()) / wave.width()) as f64 * self.view_len
+                });
+                self.zoom((-scroll_delta.y as f64 / 150.0).exp(), anchor);
+            }
             let d = if scroll_delta.x.abs() > scroll_delta.y.abs() { scroll_delta.x } else { scroll_delta.y };
-            if d != 0.0 {
+            if d != 0.0 && !alt_scroll {
                 self.view_start -= d as f64 / wave.width() as f64 * self.view_len;
                 self.clamp_view();
             }
         }
 
-        let (shift, alt) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
+        let (shift, alt, command) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt, i.modifiers.command));
         // Where the button went down: egui only reports a drag after the pointer has moved a
         // few pixels, and anchoring there would shift the start of the drag.
         let press = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos());
-        match self.tool {
+        // Holding Space switches to the Hand tool for as long as it is held.
+        let tool = if self.space_down { Tool::Hand } else { self.tool };
+        match tool {
             Tool::Select => {
-                // Cue flags in the ruler can be dragged along, or clicked to jump there.
+                // Cue flags in the ruler can be dragged along (⌥-drag duplicates), or clicked to jump there.
                 let flag_at = |q: Pos2, cues: &[Cue], vs: f64, vl: f64| {
                     (q.y <= ruler.bottom()).then(|| {
                         cues.iter().position(|c| (wave.left() + ((c.frame as f64 - vs) / vl) as f32 * wave.width() - q.x).abs() < 6.0)
@@ -1826,20 +1877,32 @@ impl App {
                 };
                 let hover_flag = resp.hover_pos().and_then(|q| flag_at(q, &self.cues, self.view_start, self.view_len));
                 if hover_flag.is_some() || self.cue_drag.is_some() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    ui.ctx().set_cursor_icon(if alt && self.cue_drag.is_none() { egui::CursorIcon::Copy } else { egui::CursorIcon::ResizeHorizontal });
                 } else if resp.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
                 }
+                let clicked_flag = if resp.clicked() { resp.interact_pointer_pos().and_then(|q| flag_at(q, &self.cues, self.view_start, self.view_len)) } else { None };
                 if resp.drag_started() {
                     if let Some(i) = press.and_then(|q| flag_at(q, &self.cues, self.view_start, self.view_len)) {
-                        self.push_undo("Move Cue");
-                        self.cue_drag = Some(i);
+                        if alt {
+                            self.push_undo("Duplicate Cue");
+                            let copy = Cue { frame: self.cues[i].frame, name: format!("{} copy", self.cues[i].name) };
+                            self.cues.push(copy);
+                            self.cue_drag = Some(self.cues.len() - 1);
+                        } else {
+                            self.push_undo("Move Cue");
+                            self.cue_drag = Some(i);
+                        }
                     }
                 }
                 if let Some(i) = self.cue_drag {
                     if let Some(q) = resp.interact_pointer_pos() {
+                        let mut f = x_to_frame(q.x.clamp(wave.left(), wave.right()), self.view_start, self.view_len);
+                        if command {
+                            f = self.snap_zero(f, spp);
+                        }
                         if let Some(c) = self.cues.get_mut(i) {
-                            c.frame = x_to_frame(q.x.clamp(wave.left(), wave.right()), self.view_start, self.view_len);
+                            c.frame = f;
                         }
                     }
                     if resp.drag_stopped() {
@@ -1847,76 +1910,112 @@ impl App {
                         self.cues.sort_by_key(|c| c.frame);
                         self.dirty = true;
                     }
-                } else if resp.clicked() && resp.interact_pointer_pos().and_then(|q| flag_at(q, &self.cues, self.view_start, self.view_len)).is_some() {
-                    let i = resp.interact_pointer_pos().and_then(|q| flag_at(q, &self.cues, self.view_start, self.view_len)).unwrap();
+                } else if let Some(i) = clicked_flag {
                     let f = self.cues[i].frame;
                     self.go_to(f);
                 } else {
-                if resp.drag_started() {
-                    if let Some(p) = press {
-                        let f = x_to_frame(p.x, self.view_start, self.view_len);
-                        self.drag_anchor = Some(match (shift, self.sel) {
-                            // Shift-drag extends the existing selection from its far end.
-                            (true, Some((s, e))) => if f.abs_diff(s) < f.abs_diff(e) { e } else { s },
-                            (true, None) => self.cursor,
-                            _ => f,
-                        });
-                    }
-                }
-                if resp.dragged() {
-                    if let (Some(anchor), Some(p)) = (self.drag_anchor, resp.interact_pointer_pos()) {
-                        // Auto-scroll when dragging past the edges.
-                        if p.x < wave.left() {
-                            self.view_start -= self.view_len * 0.02;
-                            self.clamp_view();
-                        } else if p.x > wave.right() {
-                            self.view_start += self.view_len * 0.02;
-                            self.clamp_view();
+                    if resp.drag_started() {
+                        if let Some(p) = press {
+                            let f = x_to_frame(p.x, self.view_start, self.view_len);
+                            match (alt && !shift, self.sel) {
+                                // ⌥-drag moves the nearest selection edge at a tenth of the speed.
+                                (true, Some((s, e))) => {
+                                    let is_end = f.abs_diff(e) < f.abs_diff(s);
+                                    self.fine_edge = Some((is_end, if is_end { e } else { s } as f64));
+                                    self.status = "Fine adjust: the edge moves at 1/10 speed".into();
+                                }
+                                _ => {
+                                    let f = if command { self.snap(f, spp) } else { f };
+                                    self.drag_anchor = Some(match (shift, self.sel) {
+                                        // Shift-drag extends the existing selection from its far end.
+                                        (true, Some((s, e))) => {
+                                            if f.abs_diff(s) < f.abs_diff(e) { e } else { s }
+                                        }
+                                        (true, None) => self.cursor,
+                                        _ => f,
+                                    });
+                                }
+                            }
                         }
-                        let f = x_to_frame(p.x.clamp(wave.left(), wave.right()), self.view_start, self.view_len);
-                        let (s, e) = (anchor.min(f), anchor.max(f));
-                        if e > s {
-                            self.sel = Some((s, e));
-                            self.cursor = s;
-                            if !self.player.is_playing() {
+                    }
+                    if resp.dragged() {
+                        if let (Some((is_end, pos)), Some((s, e))) = (self.fine_edge, self.sel) {
+                            let pos = (pos + resp.drag_delta().x as f64 * spp * 0.1).clamp(0.0, n as f64);
+                            self.fine_edge = Some((is_end, pos));
+                            let other = if is_end { s } else { e };
+                            let f = pos.round() as usize;
+                            if f != other {
+                                self.sel = Some((f.min(other), f.max(other)));
+                                self.cursor = f.min(other);
+                            }
+                        } else if let (Some(anchor), Some(p)) = (self.drag_anchor, resp.interact_pointer_pos()) {
+                            // Auto-scroll when dragging past the edges.
+                            if p.x < wave.left() {
+                                self.view_start -= self.view_len * 0.02;
+                                self.clamp_view();
+                            } else if p.x > wave.right() {
+                                self.view_start += self.view_len * 0.02;
+                                self.clamp_view();
+                            }
+                            let mut f = x_to_frame(p.x.clamp(wave.left(), wave.right()), self.view_start, self.view_len);
+                            if command {
+                                f = self.snap(f, spp);
+                            }
+                            let (s, e) = (anchor.min(f), anchor.max(f));
+                            if e > s {
+                                self.sel = Some((s, e));
+                                self.cursor = s;
+                                if !self.player.is_playing() {
+                                    self.play_origin = s;
+                                }
+                            }
+                        }
+                    }
+                    if resp.drag_stopped() {
+                        self.drag_anchor = None;
+                        self.fine_edge = None;
+                        if self.player.is_playing() {
+                            if let Some((s, e)) = self.sel {
+                                self.player.play(s, e, self.looping);
                                 self.play_origin = s;
                             }
                         }
                     }
-                }
-                if resp.drag_stopped() {
-                    self.drag_anchor = None;
-                    if self.player.is_playing() {
-                        if let Some((s, e)) = self.sel {
-                            self.player.play(s, e, self.looping);
-                            self.play_origin = s;
-                        }
-                    }
-                }
-                if resp.clicked() {
-                    if let Some(p) = resp.interact_pointer_pos() {
-                        let f = x_to_frame(p.x, self.view_start, self.view_len);
-                        if shift {
-                            let (a, b) = match self.sel {
-                                Some((s, e)) => if f.abs_diff(s) < f.abs_diff(e) { (f, e) } else { (s, f) },
-                                None => (self.cursor, f),
-                            };
-                            if a.max(b) > a.min(b) {
-                                self.sel = Some((a.min(b), a.max(b)));
-                            }
-                        } else {
-                            self.sel = None;
-                            self.cursor = f;
-                            self.play_origin = f;
-                            if self.player.is_playing() {
-                                self.player.play(f, n, false);
+                    if resp.clicked() {
+                        if let Some(p) = resp.interact_pointer_pos() {
+                            let f = x_to_frame(p.x, self.view_start, self.view_len);
+                            let f = if command { self.snap(f, spp) } else { f };
+                            if shift {
+                                let (a, b) = match self.sel {
+                                    Some((s, e)) => {
+                                        if f.abs_diff(s) < f.abs_diff(e) { (f, e) } else { (s, f) }
+                                    }
+                                    None => (self.cursor, f),
+                                };
+                                if a.max(b) > a.min(b) {
+                                    self.sel = Some((a.min(b), a.max(b)));
+                                }
+                            } else {
+                                self.sel = None;
+                                self.cursor = f;
+                                self.play_origin = f;
+                                // ⌥-click plays from the mouse; while playing, any click jumps there.
+                                if alt || self.player.is_playing() {
+                                    self.player.play(f, n, false);
+                                }
                             }
                         }
                     }
-                }
-                if resp.double_clicked() && n > 0 {
-                    self.sel = Some((0, n));
-                }
+                    if resp.double_clicked() && n > 0 {
+                        // Double-click selects between the surrounding cues; again selects everything.
+                        let f = resp.interact_pointer_pos().map_or(0, |p| x_to_frame(p.x, self.view_start, self.view_len));
+                        let a = self.cues.iter().map(|c| c.frame).filter(|&c| c <= f).max().unwrap_or(0);
+                        let b = self.cues.iter().map(|c| c.frame).filter(|&c| c > f).min().unwrap_or(n);
+                        let region = (a, b);
+                        self.sel = Some(if self.last_double == Some(region) && (a, b) != (0, n) { (0, n) } else { region });
+                        self.last_double = self.sel.filter(|r| *r == region);
+                        self.cursor = self.sel.map_or(f, |(s, _)| s);
+                    }
                 }
             }
             Tool::Hand => {
@@ -1926,6 +2025,9 @@ impl App {
                 if resp.dragged() {
                     self.view_start -= resp.drag_delta().x as f64 / wave.width() as f64 * self.view_len;
                     self.clamp_view();
+                    if self.space_down {
+                        self.space_used = true;
+                    }
                 }
             }
             Tool::Zoom => {
@@ -1970,9 +2072,15 @@ impl App {
                     if spp > PENCIL_MAX_SPP || n == 0 {
                         self.status = "Zoom in closer to draw with the pencil".into();
                     } else if let Some(p) = press {
-                        let channel = (((p.y - wave.top()) / lane_h) as usize).min(n_ch - 1);
+                        let mut channel = (((p.y - wave.top()) / lane_h) as usize).min(n_ch - 1);
+                        // Shift-click draws a straight line on from the end of the last stroke.
+                        let mut last = None;
+                        if let (true, Some((ch, f, v))) = (shift, self.pencil_last) {
+                            channel = ch.min(n_ch - 1);
+                            last = Some((f.min(n - 1), v));
+                        }
                         self.push_undo("Pencil");
-                        self.pencil = Some(PencilStroke { channel, last: None });
+                        self.pencil = Some(PencilStroke { channel, last });
                         let f = x_to_frame(p.x, self.view_start, self.view_len).min(n - 1);
                         self.pencil_to(f, value_at(p.y, channel));
                     }
@@ -1983,7 +2091,9 @@ impl App {
                         self.pencil_to(f, value_at(p.y, ch));
                     }
                 }
-                if (resp.drag_stopped() || resp.clicked()) && self.pencil.take().is_some() {
+                if (resp.drag_stopped() || resp.clicked()) && self.pencil.is_some() {
+                    let stroke = self.pencil.take().unwrap();
+                    self.pencil_last = stroke.last.map(|(f, v)| (stroke.channel, f, v));
                     let a = self.audio.clone().unwrap();
                     self.set_audio(a);
                     self.dirty = true;

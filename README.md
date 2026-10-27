@@ -28,6 +28,22 @@ Every command is in the menu bar: **File, Edit, Insert, Effects, Control, View, 
 | Zoom | Z | Click to zoom in, ⌥-click to zoom out, drag a range to zoom to it |
 | Pencil | P | Redraw the waveform by hand (zoom in close first); each stroke is one undo step |
 
+**Mouse and modifier keys:**
+
+| Do this | How |
+|---|---|
+| Extend a selection | Shift-click or Shift-drag |
+| Fine-tune a selection edge | ⌥-drag near the edge: it moves at 1/10 speed |
+| Snap | Hold ⌘ while clicking or dragging: snaps to a cue within 8 pixels, otherwise to the nearest zero crossing (where the waveform crosses the centre line, so cuts don't click). ⌘-dragging a cue snaps it to a zero crossing. |
+| Zoom at the mouse | Pinch, ⌘-scroll or ⌥-scroll |
+| Scroll sideways | Scroll, two-finger swipe or Shift-scroll |
+| Temporary Hand tool | Hold Space and drag (a quick tap of Space still plays/pauses) |
+| Zoom out | ⌥-click with the Zoom tool |
+| Play from the mouse | ⌥-click in the waveform |
+| Straight pencil line | Shift-click with the Pencil: draws a line from the end of the last stroke |
+| Duplicate a cue | ⌥-drag its flag |
+| Select between cues | Double-click (double-click again for the whole sound) |
+
 The transport bar has rewind, play/pause, stop, record, loop and end buttons, a time counter and
 level meters. **Info** shows the format, length, selection and peak level.
 

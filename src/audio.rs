@@ -157,6 +157,23 @@ impl Audio {
         sounds
     }
 
+    /// The zero crossing (of all channels summed) nearest to `f`, searching `radius` frames
+    /// either way.
+    pub fn nearest_zero_crossing(&self, f: usize, radius: usize) -> Option<usize> {
+        let n = self.frames();
+        let m = |i: usize| self.channels.iter().map(|c| c[i]).sum::<f32>();
+        let crossing = |i: usize| i > 0 && i < n && (m(i) == 0.0 || (m(i - 1) < 0.0) != (m(i) < 0.0));
+        (0..=radius).find_map(|d| {
+            if crossing(f + d) {
+                Some(f + d)
+            } else if d <= f && crossing(f - d) {
+                Some(f - d)
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn peak(&self, a: usize, b: usize) -> f32 {
         self.channels
             .iter()
@@ -533,5 +550,16 @@ mod tests {
         // The audio still reads back correctly with the extra chunks.
         assert_eq!(load(&path).unwrap().frames(), 1000);
         std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn zero_crossings() {
+        // 100 Hz sine at 1 kHz: crosses zero every 5 frames.
+        let c: Vec<f32> = (0..100).map(|i| (i as f32 * 0.2 * std::f32::consts::PI + 0.3).sin()).collect();
+        let a = Audio { rate: 1000, channels: vec![c] };
+        let z = a.nearest_zero_crossing(12, 10).unwrap();
+        assert!((z as i64 - 12).abs() <= 3, "{z}");
+        assert!(a.channels[0][z - 1].signum() != a.channels[0][z].signum());
+        assert_eq!(Audio { rate: 1000, channels: vec![vec![0.5; 50]] }.nearest_zero_crossing(20, 10), None);
     }
 }
