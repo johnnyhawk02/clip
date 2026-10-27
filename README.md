@@ -14,24 +14,51 @@ Try the files in `samples/`.
 
 ## Using it
 
-All commands are in the macOS menu bar (**File, Edit, Effects, Play, View**). The common ones are
-also in the tool palette across the top of the window; hover over a tool to see its name and shortcut.
+The look is modelled on classic Mac sound editors: a platinum desktop, the sound in a document
+window (black waveform on white, selection shown inverted), and floating **Tools**, **Controls**
+and **Info** windows (Window menu, ⌘1 / ⌘2 / ⌘I). Every command is in the menu bar:
+**File, Edit, Insert, Effects, Control, View, Window**.
+
+**Tools** (palette, or press the key):
+
+| Tool | Key | What it does |
+|---|---|---|
+| Selection | S | Drag to select, shift-click to extend, double-click selects all, click sets the insertion point |
+| Hand | H | Drag to scroll through the sound |
+| Zoom | Z | Click to zoom in, ⌥-click to zoom out, drag a range to zoom to it |
+| Pencil | P | Redraw the waveform by hand (zoom in close first); each stroke is one undo step |
+
+**Controls** has rewind, play/pause, stop, loop and end buttons, a time counter and L/R level
+meters. **Info** shows the format, length, selection and peak level.
 
 | Do this | How |
 |---|---|
-| Select | Drag on the waveform. Shift-click/shift-drag extends. Double-click or ⌘A selects all, ⌘D/Esc none. |
-| Place cursor | Click |
-| Play / pause | Space. Plays the selection if there is one, otherwise from the cursor. |
-| Stop | Esc while playing (returns to where playback started). ⌘L (or L) loops the selection. |
-| Zoom | Pinch or ⌘-scroll over the waveform, ⌘= / ⌘- (or = / -), ⌘0 or F to fit, ⌘E or Z to zoom to the selection |
-| Scroll | Scroll / two-finger swipe, or drag the bar under the waveform |
-| Trim to selection | ⌘T |
-| Delete selection | ⌫ |
-| Cut / copy / paste | ⌘X / ⌘C / ⌘V (paste inserts at the cursor or replaces the selection) |
-| Undo / redo | ⌘Z / ⇧⌘Z |
-| Export WAV | ⌘S for the whole file, ⇧⌘S for just the selection. Bit depth is under File ▸ Export Format. |
-| Normalize / Gain | ⇧⌘N / ⇧⌘G — opens a small dialog for the dB value |
+| Play / pause | Space (plays the selection if there is one). Esc stops. ⌘L loops the selection. |
+| Zoom | Pinch or ⌘-scroll, ⌘= / ⌘-, ⌘0 shows the entire sound, ⌘E zooms to the selection |
+| Scroll | Scroll / two-finger swipe, the Hand tool, or the bar under the waveform |
+| Cut / Copy / Paste / Clear | ⌘X / ⌘C / ⌘V / ⌫ |
+| Mix Paste | ⌥⌘V — mixes the clipboard in at the cursor (with a level) instead of inserting it |
+| Trim | ⌘T keeps only the selection |
+| Undo / Redo | ⌘Z / ⇧⌘Z |
+| New | ⌘N gives an empty 44.1 kHz stereo sound to build up with Insert, Paste or Mix Paste |
+| Export | ⌘S whole sound, ⇧⌘S selection. Bit depth is under File ▸ Export Format. |
 | Split into sounds | ⇧⌘K — see below |
+
+**Insert menu:** Silence, Tone (sine/square/triangle/sawtooth, frequency, level, length) and
+Noise, at the insertion point or replacing the selection.
+
+**Effects menu** (selection, or the whole sound if nothing is selected): Amplify, Normalize,
+Fade In/Out, Backwards, Echo, Reverb, Flanger, Smooth (low-pass), Noise Gate, Change Pitch (keeps
+the length), Change Tempo (keeps the pitch), Change Speed (tape-style) and Convert to Mono. Each
+opens a small dialog for its settings.
+
+**Split into Sounds…** cuts a recording of separate clicks/hits into one file per sound and saves
+them as `sound01.wav`, `sound02.wav`… in a folder you pick. A sound starts at the first non-zero
+sample and ends once there have been at least that many zero samples in a row (10 by default; the
+dialog shows how many sounds it will find). It uses the selection, or the whole sound, and the WAV
+format chosen under File ▸ Export Format. It looks for exact zeros, so it suits recordings with
+true digital silence. For noisy recordings, run **Noise Gate** first: it turns quiet parts into
+exact zeros.
 
 Edits are never written to your original file. You'll be asked before quitting or opening another
 file with unexported changes.
