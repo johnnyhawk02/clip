@@ -67,6 +67,26 @@ to make it the one you're editing: selections, effects, pasting, recording and t
 work on that track. Export writes the mix of all tracks, and Tracks ▸ Mix Down to One Track
 combines them into a single track (undoable).
 
+**Loops and regions:** Insert ▸ Set Loop to Selection (⇧⌘L) marks loop points (a black bar in the
+ruler); with Loop on (⌘L) and nothing selected, Play repeats them. Insert ▸ Region from Selection
+(⇧⌘R) adds a named region (a grey band in the ruler; click it to select it). Window ▸ Regions lists
+them; File ▸ Export Regions saves each as its own file. Cues, regions and loop points are all saved
+in WAV files.
+
+**Typed-in times:** the Info panel's Start, End and Length fields take typed times (or drag them).
+View ▸ Ruler Units switches the ruler, counter and fields between minutes:seconds, samples and
+30 fps timecode.
+
+**Tracks, further:** each track header also has a colour swatch (click to change) and a pan slider
+(double-click to centre). Tracks ▸ Offset Track moves a track later or earlier, and Tracks ▸ Mix…
+picks which tracks to mix, at what volume and pan, into a new track or in place of them all.
+
+**Spectrum** (Window ▸ Spectrum, ⌘4): 2D shows the frequencies in the selection (or at the cursor,
+following playback live); 3D shows a waterfall of spectra across the selection.
+
+**Batch Convert** (File menu): convert many files at once to WAV (8/16/24/32-bit float) or AIFF,
+optionally changing the sample rate or channels and normalizing.
+
 **Recording:** Control ▸ Record… (⌘R), or the record button in the transport bar, opens the Record window.
 Press Record, then Stop: the take goes in at the insertion point (or replaces the selection), or
 becomes a new sound if nothing is open. It records from the Mac's current input (System Settings ▸
@@ -78,11 +98,13 @@ Cues panel lists them so you can rename, jump to or remove them. Cues move with 
 saved in exported WAV files (and read back when you open one).
 
 **Insert menu:** Silence, Tone (sine/square/triangle/sawtooth, frequency, level, length),
-Noise and Touch Tones (phone-dial DTMF beeps for any keys you type, e.g. `555-0123`; a comma adds a
+Noise, FM Synthesis (two-operator: carrier, ratio, brightness, attack, decay) and Touch Tones (phone-dial DTMF beeps for any keys you type, e.g. `555-0123`; a comma adds a
 pause), at the insertion point or replacing the selection.
 
 **Effects menu** (selection, or the whole sound if nothing is selected): Amplify, Normalize,
-Fade In/Out, Backwards, Echo, Reverb, Flanger, Smooth (low-pass), Noise Gate, Change Pitch (keeps
+Fade In/Out, Fade… (from/to level with Linear/Smooth/Fast/Slow curves), Backwards, Delay (one
+repeat, optional ping-pong), Echo, Reverb (with Small room/Studio/Hall/Cathedral/Plate presets),
+Flanger, Smooth (low-pass), Emphasize (treble lift), Compressor, Noise Gate, Change Pitch (keeps
 the length), Change Tempo (keeps the pitch), Change Speed (tape-style) and Convert to Mono. Each
 opens a small dialog for its settings. Also:
 

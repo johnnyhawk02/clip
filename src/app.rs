@@ -11,7 +11,7 @@ use eframe::egui::{
 };
 
 use crate::actions::{self, Action};
-use crate::audio::{self, Audio, Cue, Peaks, WavFormat};
+use crate::audio::{self, Audio, Cue, Markers, Peaks, Region, WavFormat};
 use crate::effects::{self, Wave};
 use crate::menu::NativeMenu;
 use crate::player::Player;
@@ -30,14 +30,31 @@ struct Track {
     peaks: Arc<Peaks>,
     /// Linear volume (1 = unchanged).
     gain: f32,
+    /// -1 (left) .. 1 (right).
+    pan: f32,
+    /// Index into `TRACK_COLORS` (0 is the default grey).
+    color: usize,
     mute: bool,
     solo: bool,
 }
 
+/// Waveform colours a track can be given; muted tones so they sit with the grey look.
+const TRACK_COLORS: [Color32; 6] = [
+    Color32::from_gray(55),
+    Color32::from_rgb(70, 95, 145),
+    Color32::from_rgb(55, 120, 85),
+    Color32::from_rgb(170, 115, 35),
+    Color32::from_rgb(160, 60, 60),
+    Color32::from_rgb(115, 75, 145),
+];
+
+/// Height of the time ruler: tick labels and cues, the regions band, then loop and tick marks.
+const RULER_H: f32 = 30.0;
+
 impl Track {
     fn new(name: impl Into<String>, audio: Arc<Audio>) -> Track {
         let peaks = Arc::new(Peaks::build(&audio));
-        Track { name: name.into(), audio, peaks, gain: 1.0, mute: false, solo: false }
+        Track { name: name.into(), audio, peaks, gain: 1.0, pan: 0.0, color: 0, mute: false, solo: false }
     }
 }
 
@@ -46,9 +63,51 @@ struct Snapshot {
     tracks: Vec<Track>,
     active: usize,
     cues: Vec<Cue>,
+    regions: Vec<Region>,
+    loop_points: Option<Sel>,
     sel: Option<Sel>,
     cursor: usize,
     label: &'static str,
+}
+
+/// Output formats for batch conversion: (label, file extension, sample format).
+const BATCH_FORMATS: [(&str, &str, WavFormat); 6] = [
+    ("WAV 16-bit", "wav", WavFormat::Pcm16),
+    ("WAV 24-bit", "wav", WavFormat::Pcm24),
+    ("WAV 32-bit float", "wav", WavFormat::Float32),
+    ("WAV 8-bit", "wav", WavFormat::Pcm8),
+    ("AIFF 16-bit", "aiff", WavFormat::Pcm16),
+    ("AIFF 24-bit", "aiff", WavFormat::Pcm24),
+];
+
+#[derive(Default)]
+struct BatchProgress {
+    done: usize,
+    total: usize,
+    errors: Vec<String>,
+    finished: bool,
+}
+
+/// Settings and progress for File ▸ Batch Convert.
+#[derive(Default)]
+struct Batch {
+    files: Vec<PathBuf>,
+    out_dir: Option<PathBuf>,
+    format: usize,
+    /// 0 keeps each file's own rate.
+    rate: u32,
+    /// 0 keeps each file's own channels.
+    channels: usize,
+    normalize: bool,
+    progress: Option<Arc<std::sync::Mutex<BatchProgress>>>,
+}
+
+/// How positions are shown in the ruler, counter and readouts.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RulerUnits {
+    Time,
+    Samples,
+    Timecode,
 }
 
 /// Pencil drawing only works this close in (frames per pixel), so each stroke is precise.
@@ -88,6 +147,12 @@ enum Dialog {
     MixPaste,
     Convert,
     Equalizer,
+    Delay,
+    Emphasize,
+    Compressor,
+    Fade,
+    FmSynth,
+    OffsetTrack,
 }
 
 struct Field {
@@ -140,11 +205,12 @@ impl CurveKind {
 }
 
 impl Dialog {
-    const ALL: [Dialog; 18] = [
+    const ALL: [Dialog; 24] = [
         Dialog::Normalize, Dialog::Amplify, Dialog::Split, Dialog::Echo, Dialog::Reverb, Dialog::Flanger,
         Dialog::Smooth, Dialog::NoiseGate, Dialog::Pitch, Dialog::Tempo, Dialog::Speed,
         Dialog::InsertSilence, Dialog::InsertTone, Dialog::InsertNoise, Dialog::MixPaste,
-        Dialog::Convert, Dialog::Equalizer, Dialog::InsertDtmf,
+        Dialog::Convert, Dialog::Equalizer, Dialog::InsertDtmf, Dialog::Delay, Dialog::Emphasize,
+        Dialog::Compressor, Dialog::Fade, Dialog::FmSynth, Dialog::OffsetTrack,
     ];
 
     fn title(self) -> &'static str {
@@ -167,6 +233,12 @@ impl Dialog {
             Dialog::MixPaste => "Mix Paste",
             Dialog::Convert => "Convert Format",
             Dialog::Equalizer => "Equalizer",
+            Dialog::Delay => "Delay",
+            Dialog::Emphasize => "Emphasize",
+            Dialog::Compressor => "Compressor",
+            Dialog::Fade => "Fade",
+            Dialog::FmSynth => "FM Synthesis",
+            Dialog::OffsetTrack => "Offset Track",
         }
     }
 
@@ -197,6 +269,12 @@ impl Dialog {
                                 also sets the export format."
                 .to_string(),
             Dialog::Equalizer => format!("Boost or cut frequency bands in {scope}."),
+            Dialog::Delay => format!("Add one delayed copy of {scope}. Ping-pong bounces it to the other side (stereo)."),
+            Dialog::Emphasize => format!("Brighten {scope} by lifting the high frequencies, so speech and detail stand out."),
+            Dialog::Compressor => format!("Even out the loud and quiet parts of {scope}: levels above the threshold are turned down by the ratio."),
+            Dialog::Fade => format!("Fade {scope} from one level to another, with a choice of curve."),
+            Dialog::FmSynth => "Make a tone by frequency modulation (bells, brass, metallic sounds). Inserted at the cursor, or replaces the selection.".to_string(),
+            Dialog::OffsetTrack => "Move the track later (positive: adds silence at the start) or earlier (negative: removes the start).".to_string(),
         }
     }
 
@@ -211,6 +289,9 @@ impl Dialog {
                 field("echo_mix", "Echo level", 0.0, 100.0, 50.0, 0.5, " %", 0),
             ] },
             Dialog::Reverb => const { &[
+                    choice("rev_preset", "Preset", -1.0, &[
+                        ("Custom", -1.0), ("Small room", 0.0), ("Studio", 1.0), ("Hall", 2.0), ("Cathedral", 3.0), ("Plate", 4.0),
+                    ]),
                 field("rev_size", "Room size", 0.0, 100.0, 50.0, 0.5, " %", 0),
                 field("rev_mix", "Reverb level", 0.0, 100.0, 30.0, 0.5, " %", 0),
             ] },
@@ -257,6 +338,42 @@ impl Dialog {
                     choice("conv_bits", "Resolution", 0.0, &[("Keep", 0.0), ("8-bit", 8.0), ("12-bit", 12.0), ("16-bit", 16.0)]),
                 ]
             },
+            Dialog::Delay => const {
+                &[
+                    field("delay_ms", "Delay", 1.0, 2000.0, 300.0, 1.0, " ms", 0),
+                    field("delay_mix", "Level", 0.0, 100.0, 50.0, 0.5, " %", 0),
+                    choice("delay_pp", "Ping-pong", 0.0, &[("Off", 0.0), ("On", 1.0)]),
+                ]
+            },
+            Dialog::Emphasize => const { &[field("emph_db", "Amount", 0.0, 18.0, 6.0, 0.1, " dB", 1)] },
+            Dialog::Compressor => const {
+                &[
+                    field("comp_thr", "Threshold", -60.0, 0.0, -18.0, 0.2, " dB", 1),
+                    field("comp_ratio", "Ratio", 1.0, 20.0, 4.0, 0.05, " : 1", 1),
+                    field("comp_att", "Attack", 0.1, 200.0, 10.0, 0.2, " ms", 1),
+                    field("comp_rel", "Release", 5.0, 2000.0, 150.0, 1.0, " ms", 0),
+                    field("comp_gain", "Make-up gain", 0.0, 24.0, 6.0, 0.1, " dB", 1),
+                ]
+            },
+            Dialog::Fade => const {
+                &[
+                    field("fade_from", "From", 0.0, 200.0, 100.0, 0.5, " %", 0),
+                    field("fade_to", "To", 0.0, 200.0, 0.0, 0.5, " %", 0),
+                    choice("fade_shape", "Curve", 1.0, &[("Linear", 0.0), ("Smooth", 1.0), ("Fast", 2.0), ("Slow", 3.0)]),
+                ]
+            },
+            Dialog::FmSynth => const {
+                &[
+                    field("fm_hz", "Carrier", 20.0, 5000.0, 220.0, 1.0, " Hz", 1),
+                    field("fm_ratio", "Modulator ratio", 0.1, 16.0, 2.0, 0.01, " ×", 2),
+                    field("fm_index", "Brightness", 0.0, 20.0, 4.0, 0.05, "", 2),
+                    field("fm_att", "Attack", 0.0, 2000.0, 5.0, 0.5, " ms", 0),
+                    field("fm_decay", "Decay", 0.0, 99.0, 90.0, 0.2, " %", 0),
+                    field("fm_secs", "Length", 0.05, 30.0, 1.5, 0.01, " s", 2),
+                    field("fm_db", "Level", -60.0, 0.0, -6.0, 0.2, " dB", 1),
+                ]
+            },
+            Dialog::OffsetTrack => const { &[field("offset_secs", "Offset", -60.0, 60.0, 0.5, 0.01, " s", 3)] },
             Dialog::Equalizer => const {
                 &[
                     field("eq0", "100 Hz", -12.0, 12.0, 0.0, 0.1, " dB", 1),
@@ -329,6 +446,19 @@ pub struct App {
     /// The area behind the document window; floating windows are placed relative to it.
     desk: Rect,
     cues: Vec<Cue>,
+    regions: Vec<Region>,
+    loop_points: Option<Sel>,
+    show_regions: bool,
+    ruler: RulerUnits,
+    show_spectrum: bool,
+    spectrum_3d: bool,
+    /// Cached 3D spectrum slices, keyed by (audio pointer, range).
+    spectrum_cache: Option<((usize, Sel), Vec<Vec<f32>>)>,
+    show_batch: bool,
+    batch: Batch,
+    /// Mix dialog: which tracks to include (open while Some), and whether to add a new track.
+    mix_include: Option<Vec<bool>>,
+    mix_to_new: bool,
     cue_drag: Option<usize>,
     /// ⌥-drag fine adjustment: (moving the end edge?, exact position in frames).
     fine_edge: Option<(bool, f64)>,
@@ -403,6 +533,17 @@ impl App {
             info_peak: None,
             desk: Rect::NOTHING,
             cues: Vec::new(),
+            regions: Vec::new(),
+            loop_points: None,
+            show_regions: false,
+            ruler: RulerUnits::Time,
+            show_spectrum: false,
+            spectrum_3d: false,
+            spectrum_cache: None,
+            show_batch: false,
+            batch: Batch::default(),
+            mix_include: None,
+            mix_to_new: true,
             cue_drag: None,
             fine_edge: None,
             last_double: None,
@@ -509,7 +650,10 @@ impl App {
                 self.sel = None;
                 self.cursor = 0;
                 self.dirty = false;
-                self.cues = audio::read_wav_cues(&path);
+                let markers = audio::read_wav_markers(&path);
+                self.cues = markers.cues;
+                self.regions = markers.regions;
+                self.loop_points = markers.loop_points;
                 let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Track 1".into());
                 let a = Arc::new(a);
                 self.tracks = vec![Track::new(name, a.clone())];
@@ -558,13 +702,13 @@ impl App {
     fn mixdown(&self) -> Audio {
         let rate = self.audio.as_ref().map_or(44100, |a| a.rate);
         let any_solo = self.tracks.iter().any(|t| t.solo);
-        let inputs: Vec<(&Audio, f32)> = self
+        let inputs: Vec<(&Audio, f32, f32)> = self
             .tracks
             .iter()
             .filter(|t| if any_solo { t.solo } else { !t.mute })
-            .map(|t| (&*t.audio, t.gain))
+            .map(|t| (&*t.audio, t.gain, t.pan))
             .collect();
-        effects::mix(&inputs, rate)
+        effects::mix_panned(&inputs, rate)
     }
 
     /// Length of the longest track: the extent of the timeline.
@@ -655,6 +799,7 @@ impl App {
             .unwrap_or_else(|| "untitled".into());
         let mut dialog = rfd::FileDialog::new()
             .add_filter("WAV audio", &["wav"])
+            .add_filter("AIFF audio", &["aif", "aiff"])
             .set_file_name(format!("{stem}{suffix}.wav"));
         if let Some(dir) = self.path.as_ref().and_then(|p| p.parent()) {
             dialog = dialog.set_directory(dir);
@@ -667,13 +812,24 @@ impl App {
             (true, Some(r)) => r,
             _ => (0, usize::MAX),
         };
-        let cues: Vec<Cue> = self
-            .cues
-            .iter()
-            .filter(|c| c.frame >= lo && c.frame < hi)
-            .map(|c| Cue { frame: c.frame - lo, name: c.name.clone() })
-            .collect();
-        match audio::save_wav(&a, &out, self.wav_format).and_then(|_| audio::write_wav_cues(&out, &cues)) {
+        let markers = Markers {
+            cues: self
+                .cues
+                .iter()
+                .filter(|c| c.frame >= lo && c.frame < hi)
+                .map(|c| Cue { frame: c.frame - lo, name: c.name.clone() })
+                .collect(),
+            regions: self
+                .regions
+                .iter()
+                .filter(|r| r.start >= lo && r.end <= hi)
+                .map(|r| Region { start: r.start - lo, end: r.end - lo, name: r.name.clone() })
+                .collect(),
+            loop_points: self.loop_points.filter(|(s, e)| *s >= lo && *e <= hi).map(|(s, e)| (s - lo, e - lo)),
+        };
+        let is_wav = !matches!(out.extension().and_then(|e| e.to_str()), Some("aif" | "aiff" | "AIF" | "AIFF"));
+        let saved = audio::save_any(&a, &out, self.wav_format).and_then(|_| if is_wav { audio::write_wav_markers(&out, &markers, a.rate) } else { Ok(()) });
+        match saved {
             Ok(()) => {
                 self.status = format!(
                     "Exported {} ({}, {})",
@@ -702,7 +858,17 @@ impl App {
 
     fn push_undo(&mut self, label: &'static str) {
         let Some(a) = self.audio.clone() else { return };
-        self.undo.push(Snapshot { audio: a, tracks: self.tracks.clone(), active: self.active, cues: self.cues.clone(), sel: self.sel, cursor: self.cursor, label });
+        self.undo.push(Snapshot {
+            audio: a,
+            tracks: self.tracks.clone(),
+            active: self.active,
+            cues: self.cues.clone(),
+            regions: self.regions.clone(),
+            loop_points: self.loop_points,
+            sel: self.sel,
+            cursor: self.cursor,
+            label,
+        });
         self.redo.clear();
         // Drop oldest steps beyond the memory budget (always keep at least one).
         let mut total: usize = self.undo.iter().map(|s| s.audio.bytes()).sum();
@@ -738,6 +904,26 @@ impl App {
         if removed == inserted {
             return;
         }
+        let moved = |f: usize| -> Option<usize> {
+            if f < at {
+                Some(f)
+            } else if f < at + removed {
+                (inserted > 0).then(|| at + ((f - at) as f64 * inserted as f64 / removed as f64) as usize)
+            } else {
+                Some(f + inserted - removed)
+            }
+        };
+        self.regions.retain_mut(|r| {
+            let s = moved(r.start).unwrap_or(at);
+            let e = moved(r.end).unwrap_or(at);
+            r.start = s;
+            r.end = e;
+            e > s
+        });
+        self.loop_points = self.loop_points.and_then(|(s, e)| {
+            let (s, e) = (moved(s).unwrap_or(at), moved(e).unwrap_or(at));
+            (e > s).then_some((s, e))
+        });
         self.cues.retain_mut(|c| {
             if c.frame < at {
                 true
@@ -762,6 +948,8 @@ impl App {
             tracks: std::mem::replace(&mut self.tracks, snap.tracks),
             active: std::mem::replace(&mut self.active, snap.active),
             cues: std::mem::replace(&mut self.cues, snap.cues),
+            regions: std::mem::replace(&mut self.regions, snap.regions),
+            loop_points: std::mem::replace(&mut self.loop_points, snap.loop_points),
             sel: self.sel,
             cursor: self.cursor,
             label: snap.label,
@@ -781,6 +969,8 @@ impl App {
             tracks: std::mem::replace(&mut self.tracks, snap.tracks),
             active: std::mem::replace(&mut self.active, snap.active),
             cues: std::mem::replace(&mut self.cues, snap.cues),
+            regions: std::mem::replace(&mut self.regions, snap.regions),
+            loop_points: std::mem::replace(&mut self.loop_points, snap.loop_points),
             sel: self.sel,
             cursor: self.cursor,
             label: snap.label,
@@ -936,7 +1126,13 @@ impl App {
                 self.process("Echo", |c| effects::echo(c, dl, fb, mx));
             }
             Dialog::Reverb => {
-                let (sz, mx) = (p("rev_size") / 100.0, p("rev_mix") / 100.0);
+                let preset = p("rev_preset");
+                let (sz, mx) = if preset >= 0.0 {
+                    let (_, size, mix) = effects::REVERB_PRESETS[preset as usize];
+                    (size, mix)
+                } else {
+                    (p("rev_size") / 100.0, p("rev_mix") / 100.0)
+                };
                 self.process("Reverb", |c| effects::reverb(c, sz, mx));
             }
             Dialog::Flanger => {
@@ -978,6 +1174,27 @@ impl App {
             }
             Dialog::InsertNoise => self.insert_clip("Insert Noise", effects::noise(rate, nch, p("noise_secs"), p("noise_db"))),
             Dialog::MixPaste => self.mix_paste(),
+            Dialog::Delay => {
+                let (ms, mx, pp) = (p("delay_ms"), p("delay_mix") / 100.0, p("delay_pp") > 0.5);
+                self.process("Delay", |c| effects::delay(c, ms, mx, pp));
+            }
+            Dialog::Emphasize => {
+                let db = p("emph_db");
+                self.process("Emphasize", |c| effects::emphasize(c, db));
+            }
+            Dialog::Compressor => {
+                let (t, r, a, rl, g) = (p("comp_thr"), p("comp_ratio"), p("comp_att"), p("comp_rel"), p("comp_gain"));
+                self.process("Compressor", |c| effects::compress(c, t, r, a, rl, g));
+            }
+            Dialog::Fade => {
+                let (from, to, shape) = (p("fade_from") / 100.0, p("fade_to") / 100.0, effects::FadeShape::from_index(p("fade_shape") as usize));
+                self.process("Fade", |c| effects::fade(c, from, to, shape));
+            }
+            Dialog::FmSynth => {
+                let clip = effects::fm_synth(rate, nch, p("fm_secs"), p("fm_hz"), p("fm_ratio"), p("fm_index"), p("fm_att"), p("fm_decay") / 100.0, p("fm_db"));
+                self.insert_clip("FM Synthesis", clip);
+            }
+            Dialog::OffsetTrack => self.offset_track(p("offset_secs")),
             Dialog::Equalizer => {
                 let g = [p("eq0"), p("eq1"), p("eq2"), p("eq3"), p("eq4")];
                 self.process("Equalizer", |c| effects::equalize(c, g));
@@ -1116,6 +1333,71 @@ impl App {
         }
     }
 
+    /// Pad the start of the active track with silence (positive) or trim it (negative).
+    fn offset_track(&mut self, secs: f32) {
+        let Some(a) = self.audio.clone() else { return };
+        let frames = (secs.abs() as f64 * a.rate as f64) as usize;
+        if frames == 0 {
+            return;
+        }
+        let new = if secs > 0.0 {
+            a.insert(0, 0, &effects::silence(a.rate, a.num_channels(), secs))
+        } else {
+            a.delete(0, frames.min(a.frames()))
+        };
+        self.apply("Offset Track", new, None);
+    }
+
+    fn set_loop(&mut self) {
+        if let Some(sel) = self.sel {
+            self.push_undo("Set Loop");
+            self.loop_points = Some(sel);
+            self.dirty = true;
+            self.status = "Loop set — turn on Loop (⌘L) and play to hear it repeat".into();
+        }
+    }
+
+    fn add_region(&mut self) {
+        let Some((s, e)) = self.sel else { return };
+        let n = (1..).find(|i| !self.regions.iter().any(|r| r.name == format!("Region {i}"))).unwrap();
+        self.push_undo("Region");
+        self.regions.push(Region { start: s, end: e, name: format!("Region {n}") });
+        self.regions.sort_by_key(|r| r.start);
+        self.show_regions = true;
+        self.dirty = true;
+        self.status = format!("Added Region {n} — rename it in the Regions panel");
+    }
+
+    /// Save each region as its own file, named after the region.
+    fn export_regions(&mut self) {
+        if self.regions.is_empty() {
+            return;
+        }
+        let Some(a) = self.audio.clone() else { return };
+        let src = if self.tracks.len() > 1 { Arc::new(self.mixdown()) } else { a };
+        let Some(dir) = rfd::FileDialog::new().set_title(format!("Choose a folder for {} regions", self.regions.len())).pick_folder() else { return };
+        let mut saved = 0;
+        for r in &self.regions {
+            let clean: String = r.name.chars().map(|c| if c.is_alphanumeric() || " -_".contains(c) { c } else { '_' }).collect();
+            let path = dir.join(format!("{}.wav", clean.trim()));
+            let e = r.end.min(src.frames());
+            if r.start >= e {
+                continue;
+            }
+            if let Err(err) = audio::save_wav(&src.slice(r.start, e), &path, self.wav_format) {
+                self.status = format!("Couldn't save {}: {err}", path.display());
+                return;
+            }
+            saved += 1;
+        }
+        self.status = format!("Saved {saved} regions to {}", dir.display());
+    }
+
+    /// A position (in frames) in the current ruler units.
+    fn fmt_pos(&self, f: usize) -> String {
+        fmt_pos_in(self.ruler, self.audio.as_ref().map_or(44100, |a| a.rate), f)
+    }
+
     fn new_sound(&mut self) {
         self.player.stop();
         self.undo.clear();
@@ -1125,6 +1407,8 @@ impl App {
         self.dirty = false;
         self.path = None;
         self.cues.clear();
+        self.regions.clear();
+        self.loop_points = None;
         let a = Arc::new(Audio { rate: 44100, channels: vec![Vec::new(); 2] });
         self.tracks = vec![Track::new("Track 1", a.clone())];
         self.active = 0;
@@ -1195,6 +1479,12 @@ impl App {
             return;
         }
         let n = self.timeline_frames();
+        if let (true, None, Some((ls, le))) = (self.looping, self.sel, self.loop_points) {
+            // Loop points: play them round and round.
+            self.play_origin = ls;
+            self.player.play(ls, le.min(n), true);
+            return;
+        }
         let (start, end) = match self.sel {
             Some((s, e)) if self.cursor > s && self.cursor < e => (self.cursor, e),
             Some((s, e)) => (s, e),
@@ -1252,7 +1542,13 @@ impl App {
             Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop => true,
             Action::ShowCues | Action::Record => true,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack | Action::SoloTrack => has,
-            Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack => has && self.tracks.len() > 1,
+            Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack | Action::MixDialog => has && self.tracks.len() > 1,
+            Action::SetLoop | Action::AddRegion => sel,
+            Action::ClearLoop => has && self.loop_points.is_some(),
+            Action::ExportRegions => has && !self.regions.is_empty(),
+            Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
+            Action::ShowSpectrum | Action::BatchConvert | Action::ShowRegions => true,
+            Action::FmSynth | Action::OffsetTrack | Action::TrackColor => has,
             Action::AddCue => has,
             Action::NextCue | Action::PrevCue => has && !self.cues.is_empty(),
             Action::ShowTools | Action::ShowControls | Action::ShowInfo => true,
@@ -1293,6 +1589,11 @@ impl App {
             Action::ShowCues => self.show_cues,
             Action::Record => self.recorder.is_some(),
             Action::MuteTrack => self.tracks.get(self.active).is_some_and(|t| t.mute),
+            Action::RulerTime => self.ruler == RulerUnits::Time,
+            Action::RulerSamples => self.ruler == RulerUnits::Samples,
+            Action::RulerTimecode => self.ruler == RulerUnits::Timecode,
+            Action::ShowSpectrum => self.show_spectrum,
+            Action::ShowRegions => self.show_regions,
             Action::SoloTrack => self.tracks.get(self.active).is_some_and(|t| t.solo),
             _ => false,
         }
@@ -1363,7 +1664,7 @@ impl App {
             Action::Stop => self.stop(),
             Action::Loop => {
                 self.looping = !self.looping;
-                self.player.set_looping(self.looping && self.sel.is_some());
+                self.player.set_looping(self.looping && (self.sel.is_some() || self.loop_points.is_some()));
             }
             Action::GoStart => {
                 self.cursor = 0;
@@ -1419,6 +1720,31 @@ impl App {
                 self.refresh_playback();
             }
             Action::NextTrack => self.set_active((self.active + 1) % self.tracks.len()),
+            Action::Delay => self.dialog = Some(Dialog::Delay),
+            Action::Emphasize => self.dialog = Some(Dialog::Emphasize),
+            Action::Compressor => self.dialog = Some(Dialog::Compressor),
+            Action::FadeDialog => self.dialog = Some(Dialog::Fade),
+            Action::FmSynth => self.dialog = Some(Dialog::FmSynth),
+            Action::OffsetTrack => self.dialog = Some(Dialog::OffsetTrack),
+            Action::SetLoop => self.set_loop(),
+            Action::ClearLoop => {
+                self.push_undo("Clear Loop");
+                self.loop_points = None;
+                self.dirty = true;
+            }
+            Action::AddRegion => self.add_region(),
+            Action::ExportRegions => self.export_regions(),
+            Action::RulerTime => self.ruler = RulerUnits::Time,
+            Action::RulerSamples => self.ruler = RulerUnits::Samples,
+            Action::RulerTimecode => self.ruler = RulerUnits::Timecode,
+            Action::ShowSpectrum => self.show_spectrum = !self.show_spectrum,
+            Action::ShowRegions => self.show_regions = !self.show_regions,
+            Action::BatchConvert => self.show_batch = true,
+            Action::MixDialog => self.mix_include = Some(vec![true; self.tracks.len()]),
+            Action::TrackColor => {
+                let t = &mut self.tracks[self.active];
+                t.color = (t.color + 1) % TRACK_COLORS.len();
+            }
             Action::PrevTrack => self.set_active((self.active + self.tracks.len() - 1) % self.tracks.len()),
             Action::NextCue => self.jump_cue(true),
             Action::PrevCue => self.jump_cue(false),
@@ -1568,11 +1894,10 @@ impl App {
                 self.palette_button(ui, a, Vec2::new(34.0, 28.0));
             }
             ui.add_space(12.0);
-            let rate = self.audio.as_ref().map_or(44100, |a| a.rate) as f64;
             let at = if playing { pos } else { self.cursor };
-            ui.label(egui::RichText::new(fmt_time(at as f64 / rate)).monospace().size(20.0).color(INK));
+            ui.label(egui::RichText::new(self.fmt_pos(at)).monospace().size(20.0).color(INK));
             if let Some((s, e)) = self.sel {
-                ui.label(egui::RichText::new(format!("sel {}", fmt_time((e - s) as f64 / rate))).monospace().size(12.0).color(MUTED));
+                ui.label(egui::RichText::new(format!("sel {}", self.fmt_pos(e - s))).monospace().size(12.0).color(MUTED));
             }
             ui.add_space(12.0);
             let meters = self.meter.clone();
@@ -1598,6 +1923,82 @@ impl App {
             ui.label(egui::RichText::new("CUES").size(11.0).color(MUTED).strong());
             ui.add_space(4.0);
             self.cues_section(ui);
+            ui.add_space(14.0);
+        }
+        if self.show_regions {
+            ui.label(egui::RichText::new("REGIONS").size(11.0).color(MUTED).strong());
+            ui.add_space(4.0);
+            self.regions_section(ui);
+        }
+    }
+
+    /// List of labelled regions: rename, select, delete; plus the loop points.
+    fn regions_section(&mut self, ui: &mut egui::Ui) {
+        let mut select: Option<Sel> = None;
+        let mut remove: Option<usize> = None;
+        let mut renamed = false;
+        if self.regions.is_empty() {
+            ui.label(egui::RichText::new("No regions yet. Select something and choose Insert ▸ Region from Selection (⇧⌘R).").color(MUTED));
+        }
+        let units = self.ruler;
+        let rate = self.audio.as_ref().map_or(44100, |a| a.rate);
+        egui::ScrollArea::vertical().id_salt("regions").max_height(200.0).show(ui, |ui| {
+            egui::Grid::new("regions").num_columns(3).spacing(Vec2::new(6.0, 4.0)).show(ui, |ui| {
+                for (i, r) in self.regions.iter_mut().enumerate() {
+                    if ui.add_sized([110.0, 20.0], egui::TextEdit::singleline(&mut r.name)).changed() {
+                        renamed = true;
+                    }
+                    if ui.small_button("Select").on_hover_text(format!("{} – {}", fmt_pos_in(units, rate, r.start), fmt_pos_in(units, rate, r.end))).clicked() {
+                        select = Some((r.start, r.end));
+                    }
+                    if ui.small_button("×").on_hover_text("Remove this region").clicked() {
+                        remove = Some(i);
+                    }
+                    ui.end_row();
+                }
+            });
+        });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if ui.add_enabled(self.sel.is_some(), Button::new("Add from Selection")).clicked() {
+                self.add_region();
+            }
+            if ui.add_enabled(!self.regions.is_empty(), Button::new("Export…")).on_hover_text("Save each region as its own file").clicked() {
+                self.export_regions();
+            }
+        });
+        ui.add_space(6.0);
+        match self.loop_points {
+            Some((s, e)) => {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("Loop {} – {}", fmt_pos_in(units, rate, s), fmt_pos_in(units, rate, e))).color(MUTED));
+                    if ui.small_button("Select").clicked() {
+                        select = Some((s, e));
+                    }
+                    if ui.small_button("×").on_hover_text("Clear the loop").clicked() {
+                        self.push_undo("Clear Loop");
+                        self.loop_points = None;
+                        self.dirty = true;
+                    }
+                });
+            }
+            None => {
+                if ui.add_enabled(self.sel.is_some(), Button::new("Set Loop to Selection")).clicked() {
+                    self.set_loop();
+                }
+            }
+        }
+        if renamed {
+            self.dirty = true;
+        }
+        if let Some((s, e)) = select {
+            self.sel = Some((s.min(self.frames()), e.min(self.frames()))).filter(|(s, e)| e > s);
+            self.cursor = s;
+        }
+        if let Some(i) = remove {
+            self.push_undo("Remove Region");
+            self.regions.remove(i);
+            self.dirty = true;
         }
     }
 
@@ -1645,20 +2046,39 @@ impl App {
             key(ui, "Length");
             ui.label(format!("{}  ({} samples)", fmt_time(a.duration_secs()), a.frames()));
             ui.end_row();
-            match self.sel {
-                Some((s, e)) => {
-                    key(ui, "Selection");
-                    ui.label(format!("{} – {}", fmt_time(s as f64 / r), fmt_time(e as f64 / r)));
-                    ui.end_row();
-                    key(ui, "Sel. length");
-                    ui.label(format!("{}  ({} samples)", fmt_time((e - s) as f64 / r), e - s));
-                    ui.end_row();
+            // Selection times can be typed in (in the ruler's units) or dragged.
+            let (units, rate, n) = (self.ruler, a.rate, a.frames() as f64);
+            let time_field = |ui: &mut egui::Ui, v: &mut f64| {
+                ui.add(
+                    egui::DragValue::new(v)
+                        .range(0.0..=n)
+                        .speed(if units == RulerUnits::Samples { 10.0 } else { r * 0.002 })
+                        .custom_formatter(move |x, _| fmt_pos_in(units, rate, x.max(0.0) as usize))
+                        .custom_parser(move |t| parse_pos(units, rate, t)),
+                )
+                .on_hover_text("Type a time, or drag")
+                .changed()
+            };
+            let (mut s0, mut e0) = self.sel.map_or((self.cursor as f64, self.cursor as f64), |(s, e)| (s as f64, e as f64));
+            let mut len = e0 - s0;
+            key(ui, "Start");
+            let cs = time_field(ui, &mut s0);
+            ui.end_row();
+            key(ui, "End");
+            let ce = time_field(ui, &mut e0);
+            ui.end_row();
+            key(ui, "Length");
+            let cl = time_field(ui, &mut len);
+            ui.end_row();
+            if cs || ce || cl {
+                let (s, e) = if cl { (s0, (s0 + len).min(n)) } else if ce { (s0.min(e0), e0.max(s0)) } else { (s0, e0.max(s0)) };
+                let (s, e) = (s as usize, e as usize);
+                if e > s {
+                    self.sel = Some((s, e));
+                } else {
+                    self.sel = None;
                 }
-                None => {
-                    key(ui, "Cursor");
-                    ui.label(fmt_time(self.cursor as f64 / r));
-                    ui.end_row();
-                }
+                self.cursor = s;
             }
             if let Some(p) = peak {
                 key(ui, "Peak");
@@ -1864,6 +2284,337 @@ impl App {
         }
     }
 
+    /// Spectrum window: a frequency plot (2D) or a waterfall over time (3D).
+    fn spectrum_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_spectrum;
+        let src = self.play_audio.clone().or_else(|| self.audio.clone());
+        let playing = self.player.is_playing();
+        let pos = if playing { self.player.position() } else { self.cursor };
+        let mut three_d = self.spectrum_3d;
+        let sel = self.sel;
+        let cache = &mut self.spectrum_cache;
+        let center = self.desk.center();
+        egui::Window::new("Spectrum")
+            .open(&mut open)
+            .default_pos(center - Vec2::new(280.0, 150.0))
+            .default_size(Vec2::new(560.0, 300.0))
+            .resizable(true)
+            .fade_in(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut three_d, false, "2D");
+                    ui.selectable_value(&mut three_d, true, "3D");
+                    ui.label(
+                        egui::RichText::new(match (sel, playing) {
+                            (Some(_), _) => "Selection",
+                            (None, true) => "Following playback",
+                            (None, false) => "At the cursor",
+                        })
+                        .color(MUTED),
+                    );
+                });
+                let Some(a) = src else {
+                    ui.label("No sound open.");
+                    return;
+                };
+                let (rect, _) = ui.allocate_exact_size(ui.available_size().max(Vec2::new(200.0, 120.0)), Sense::hover());
+                let p = ui.painter_at(rect);
+                p.rect_filled(rect, 4.0, Color32::WHITE);
+                let plot = rect.shrink2(Vec2::new(34.0, 18.0)).translate(Vec2::new(10.0, -2.0));
+                let nyq = a.rate as f32 / 2.0;
+                let fx = |hz: f32| plot.left() + ((hz.max(20.0) / 20.0).ln() / (nyq / 20.0).ln()) * plot.width();
+                let dby = |db: f32, r: Rect| r.top() + (-db / 96.0).clamp(0.0, 1.0) * r.height();
+                for hz in [100.0, 1000.0, 10000.0] {
+                    if hz < nyq {
+                        let x = fx(hz);
+                        p.line_segment([Pos2::new(x, plot.top()), Pos2::new(x, plot.bottom())], Stroke::new(1.0, Color32::from_gray(232)));
+                        let label = if hz >= 1000.0 { format!("{}k", hz / 1000.0) } else { format!("{hz}") };
+                        p.text(Pos2::new(x, plot.bottom() + 3.0), Align2::CENTER_TOP, label, FontId::proportional(10.0), MUTED);
+                    }
+                }
+                let n = a.frames();
+                if !three_d {
+                    for db in [0.0, -24.0, -48.0, -72.0] {
+                        let y = dby(db, plot);
+                        p.line_segment([Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)], Stroke::new(1.0, Color32::from_gray(232)));
+                        p.text(Pos2::new(plot.left() - 4.0, y), Align2::RIGHT_CENTER, format!("{db:.0}"), FontId::proportional(10.0), MUTED);
+                    }
+                    // Average several FFTs across a selection; otherwise one at the position.
+                    let size = 4096;
+                    let (s, e) = sel.unwrap_or((pos, pos + size));
+                    let count = ((e.saturating_sub(s)) / size).clamp(1, 16);
+                    let mut avg = vec![0.0f32; size / 2];
+                    for k in 0..count {
+                        let start = s + k * (e.saturating_sub(s).saturating_sub(size)) / count.max(1);
+                        for (acc, v) in avg.iter_mut().zip(effects::spectrum(&a, start.min(n), size)) {
+                            *acc += v / count as f32;
+                        }
+                    }
+                    let pts: Vec<Pos2> = (1..avg.len())
+                        .map(|k| Pos2::new(fx(k as f32 * nyq / avg.len() as f32), dby(avg[k], plot)))
+                        .filter(|q| q.x >= plot.left())
+                        .collect();
+                    let mut fill = pts.clone();
+                    fill.push(Pos2::new(plot.right(), plot.bottom()));
+                    fill.push(Pos2::new(plot.left(), plot.bottom()));
+                    for w in pts.windows(2) {
+                        p.add(egui::Shape::convex_polygon(
+                            vec![w[0], w[1], Pos2::new(w[1].x, plot.bottom()), Pos2::new(w[0].x, plot.bottom())],
+                            Color32::from_gray(228),
+                            Stroke::NONE,
+                        ));
+                    }
+                    p.add(egui::Shape::line(pts, Stroke::new(1.2, INK)));
+                    if playing && sel.is_none() {
+                        ctx.request_repaint();
+                    }
+                } else {
+                    // Waterfall: successive spectra stacked back to front.
+                    let (s, e) = sel.unwrap_or((pos, (pos + a.rate as usize * 2).min(n)));
+                    let key = (Arc::as_ptr(&a) as usize, (s, e));
+                    if cache.as_ref().map(|c| c.0) != Some(key) {
+                        let slices = 40;
+                        let size = 1024;
+                        let data = (0..slices)
+                            .map(|k| effects::spectrum(&a, s + k * e.saturating_sub(s).saturating_sub(size) / slices, size))
+                            .collect();
+                        *cache = Some((key, data));
+                    }
+                    let data = &cache.as_ref().unwrap().1;
+                    let depth = Vec2::new(plot.width() * 0.25, -plot.height() * 0.55);
+                    let front = Rect::from_min_max(Pos2::new(plot.left(), plot.top() - depth.y), Pos2::new(plot.right() - depth.x, plot.bottom()));
+                    let fxf = |hz: f32| front.left() + ((hz.max(20.0) / 20.0).ln() / (nyq / 20.0).ln()) * front.width();
+                    for (k, spec) in data.iter().enumerate().rev() {
+                        let off = depth * (k as f32 / data.len() as f32);
+                        let base = front.bottom() + off.y;
+                        let mut pts: Vec<Pos2> = Vec::new();
+                        let bins = spec.len();
+                        let mut last_x = f32::MIN;
+                        for b in 1..bins {
+                            let x = fxf(b as f32 * nyq / bins as f32) + off.x;
+                            if x - last_x < 2.0 {
+                                continue;
+                            }
+                            last_x = x;
+                            let h = ((spec[b] + 96.0) / 96.0).clamp(0.0, 1.0) * front.height() * 0.8;
+                            pts.push(Pos2::new(x, base - h));
+                        }
+                        if pts.len() < 2 {
+                            continue;
+                        }
+                        // White fill hides the slices behind; then the outline.
+                        for w in pts.windows(2) {
+                            p.add(egui::Shape::convex_polygon(
+                                vec![w[0], w[1], Pos2::new(w[1].x, base), Pos2::new(w[0].x, base)],
+                                Color32::WHITE,
+                                Stroke::NONE,
+                            ));
+                        }
+                        let shade = (60.0 + 140.0 * k as f32 / data.len() as f32) as u8;
+                        p.add(egui::Shape::line(pts, Stroke::new(1.0, Color32::from_gray(shade))));
+                    }
+                    p.text(Pos2::new(front.left(), front.bottom() + 14.0), Align2::LEFT_TOP, "front: start of range · back: end", FontId::proportional(10.0), MUTED);
+                }
+            });
+        self.spectrum_3d = three_d;
+        self.show_spectrum = open;
+    }
+
+    /// File ▸ Batch Convert: convert many files to WAV or AIFF in one go.
+    fn batch_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_batch;
+        let b = &mut self.batch;
+        let running = b.progress.as_ref().is_some_and(|p| !p.lock().unwrap().finished);
+        let center = self.desk.center();
+        egui::Window::new("Batch Convert")
+            .open(&mut open)
+            .default_pos(center - Vec2::new(210.0, 180.0))
+            .default_width(420.0)
+            .resizable(false)
+            .fade_in(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(!running, Button::new("Add Files…")).clicked() {
+                        if let Some(files) = rfd::FileDialog::new()
+                            .add_filter("Audio", &["wav", "mp3", "flac", "ogg", "oga", "m4a", "mp4", "aac", "aif", "aiff", "caf"])
+                            .pick_files()
+                        {
+                            for f in files {
+                                if !b.files.contains(&f) {
+                                    b.files.push(f);
+                                }
+                            }
+                        }
+                    }
+                    if ui.add_enabled(!running && !b.files.is_empty(), Button::new("Clear")).clicked() {
+                        b.files.clear();
+                    }
+                    ui.label(egui::RichText::new(format!("{} file{}", b.files.len(), if b.files.len() == 1 { "" } else { "s" })).color(MUTED));
+                });
+                egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                    for f in &b.files {
+                        ui.label(egui::RichText::new(file_name(f)).size(12.0));
+                    }
+                });
+                ui.add_space(6.0);
+                egui::Grid::new("batch").num_columns(2).spacing(Vec2::new(10.0, 6.0)).show(ui, |ui| {
+                    ui.label("Save to");
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(!running, Button::new("Choose…")).clicked() {
+                            if let Some(d) = rfd::FileDialog::new().pick_folder() {
+                                b.out_dir = Some(d);
+                            }
+                        }
+                        ui.label(egui::RichText::new(b.out_dir.as_ref().map_or("(pick a folder)".into(), |d| d.display().to_string())).color(MUTED));
+                    });
+                    ui.end_row();
+                    ui.label("Format");
+                    egui::ComboBox::from_id_salt("bfmt").selected_text(BATCH_FORMATS[b.format].0).show_ui(ui, |ui| {
+                        for (i, f) in BATCH_FORMATS.iter().enumerate() {
+                            ui.selectable_value(&mut b.format, i, f.0);
+                        }
+                    });
+                    ui.end_row();
+                    ui.label("Sample rate");
+                    let rates = [0u32, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 96000];
+                    let label = |r: u32| if r == 0 { "Keep".to_string() } else { format!("{} Hz", r) };
+                    egui::ComboBox::from_id_salt("brate").selected_text(label(b.rate)).show_ui(ui, |ui| {
+                        for r in rates {
+                            ui.selectable_value(&mut b.rate, r, label(r));
+                        }
+                    });
+                    ui.end_row();
+                    ui.label("Channels");
+                    let chl = |c: usize| ["Keep", "Mono", "Stereo"][c.min(2)];
+                    egui::ComboBox::from_id_salt("bch").selected_text(chl(b.channels)).show_ui(ui, |ui| {
+                        for c in 0..3 {
+                            ui.selectable_value(&mut b.channels, c, chl(c));
+                        }
+                    });
+                    ui.end_row();
+                    ui.label("");
+                    ui.checkbox(&mut b.normalize, "Normalize to -1 dB");
+                    ui.end_row();
+                });
+                ui.add_space(6.0);
+                let can_go = !running && !b.files.is_empty() && b.out_dir.is_some();
+                if ui.add_enabled(can_go, Button::new(format!("Convert {} files", b.files.len()))).clicked() {
+                    let progress = Arc::new(std::sync::Mutex::new(BatchProgress { total: b.files.len(), ..Default::default() }));
+                    b.progress = Some(progress.clone());
+                    let (files, dir, (_, ext, fmt), rate, ch, norm) =
+                        (b.files.clone(), b.out_dir.clone().unwrap(), BATCH_FORMATS[b.format], b.rate, b.channels, b.normalize);
+                    let ctx = ctx.clone();
+                    std::thread::spawn(move || {
+                        for f in files {
+                            let result = audio::load(&f).and_then(|mut a| {
+                                if ch > 0 {
+                                    a = effects::convert_channels(&a, ch);
+                                }
+                                if rate > 0 {
+                                    a = effects::convert_rate(&a, rate);
+                                }
+                                if norm {
+                                    if let Some(x) = a.normalize(0, a.frames(), -1.0) {
+                                        a = x;
+                                    }
+                                }
+                                let stem = f.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "sound".into());
+                                audio::save_any(&a, &dir.join(format!("{stem}.{ext}")), fmt)
+                            });
+                            let mut p = progress.lock().unwrap();
+                            p.done += 1;
+                            if let Err(e) = result {
+                                p.errors.push(format!("{}: {e}", file_name(&f)));
+                            }
+                            ctx.request_repaint();
+                        }
+                        progress.lock().unwrap().finished = true;
+                        ctx.request_repaint();
+                    });
+                }
+                if let Some(p) = &b.progress {
+                    let p = p.lock().unwrap();
+                    ui.add(egui::ProgressBar::new(p.done as f32 / p.total.max(1) as f32).text(format!("{} of {}", p.done, p.total)));
+                    if p.finished {
+                        ui.label(if p.errors.is_empty() { "Done.".to_string() } else { format!("Done, with {} problem(s):", p.errors.len()) });
+                    }
+                    for e in &p.errors {
+                        ui.label(egui::RichText::new(e).size(11.0).color(MUTED));
+                    }
+                }
+            });
+        if running {
+            ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        }
+        self.show_batch = open;
+    }
+
+    /// Tracks ▸ Mix: choose tracks and their levels and pan, then mix into a new track or
+    /// replace all tracks with the mix.
+    fn mix_dialog(&mut self, ctx: &egui::Context) {
+        let Some(mut include) = self.mix_include.take() else { return };
+        include.resize(self.tracks.len(), true);
+        let mut ok = false;
+        let mut cancel = false;
+        let resp = egui::Modal::new(egui::Id::unique("mix")).show(ctx, |ui| {
+            ui.set_width(440.0);
+            ui.heading("Mix");
+            ui.label("Choose which tracks to mix and set their volume and pan.");
+            ui.add_space(6.0);
+            egui::Grid::new("mixgrid").num_columns(4).spacing(Vec2::new(10.0, 6.0)).show(ui, |ui| {
+                ui.label("");
+                ui.label(egui::RichText::new("Track").color(MUTED));
+                ui.label(egui::RichText::new("Volume").color(MUTED));
+                ui.label(egui::RichText::new("Pan").color(MUTED));
+                ui.end_row();
+                for (t, inc) in self.tracks.iter_mut().zip(include.iter_mut()) {
+                    ui.checkbox(inc, "");
+                    ui.label(&t.name);
+                    ui.add(egui::Slider::new(&mut t.gain, 0.0..=2.0).custom_formatter(|v, _| format!("{:.0}%", v * 100.0)));
+                    ui.add(egui::Slider::new(&mut t.pan, -1.0..=1.0).custom_formatter(|v, _| match v {
+                        v if v.abs() < 0.01 => "C".to_string(),
+                        v if v < 0.0 => format!("L{:.0}", -v * 100.0),
+                        v => format!("R{:.0}", v * 100.0),
+                    }));
+                    ui.end_row();
+                }
+            });
+            ui.add_space(6.0);
+            ui.radio_value(&mut self.mix_to_new, true, "Mix into a new track (keeps the originals)");
+            ui.radio_value(&mut self.mix_to_new, false, "Replace all tracks with the mix");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ok = ui.add_enabled(include.iter().any(|i| *i), Button::new("Mix")).clicked();
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+        if cancel || resp.should_close() {
+            self.refresh_playback();
+            return;
+        }
+        if !ok {
+            self.mix_include = Some(include);
+            return;
+        }
+        let rate = self.audio.as_ref().map_or(44100, |a| a.rate);
+        let inputs: Vec<(&Audio, f32, f32)> =
+            self.tracks.iter().zip(&include).filter(|(_, i)| **i).map(|(t, _)| (&*t.audio, t.gain, t.pan)).collect();
+        let mix = Arc::new(effects::mix_panned(&inputs, rate));
+        if self.mix_to_new {
+            self.add_track(Track::new("Mix", mix), "Mix");
+            self.status = "Mixed into a new track — ⌘Z to undo".into();
+        } else {
+            self.push_undo("Mix");
+            self.tracks = vec![Track::new("Mix", mix.clone())];
+            self.active = 0;
+            self.set_audio(mix);
+            self.dirty = true;
+            self.status = "Replaced the tracks with their mix — ⌘Z to undo".into();
+        }
+    }
+
     /// Record window: record from the default input, then insert at the cursor.
     fn record_window(&mut self, ctx: &egui::Context) {
         let mut open = self.show_record;
@@ -2005,15 +2756,14 @@ impl App {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
             if let Some(a) = &self.audio {
-                let r = a.rate as f64;
                 if self.tracks.len() > 1 {
                     ui.label(format!("{} ·", self.tracks[self.active].name));
                 }
                 ui.label(format!("{} Hz · {} ch · {}", a.rate, a.num_channels(), fmt_time(a.duration_secs())));
                 ui.separator();
                 match self.sel {
-                    Some((s, e)) => ui.label(format!("Sel {} – {} ({})", fmt_time(s as f64 / r), fmt_time(e as f64 / r), fmt_time((e - s) as f64 / r))),
-                    None => ui.label(format!("Cursor {}", fmt_time(self.cursor as f64 / r))),
+                    Some((s, e)) => ui.label(format!("Sel {} – {} ({})", self.fmt_pos(s), self.fmt_pos(e), self.fmt_pos(e - s))),
+                    None => ui.label(format!("Cursor {}", self.fmt_pos(self.cursor))),
                 };
                 ui.separator();
             }
@@ -2044,7 +2794,7 @@ impl App {
         let n_tracks = self.tracks.len().max(1);
         let header_w = if n_tracks > 1 { 150.0 } else { 0.0 };
         let total = self.timeline_frames();
-        let ruler = Rect::from_min_max(Pos2::new(full.left() + header_w, full.top()), Pos2::new(full.right(), full.top() + 18.0));
+        let ruler = Rect::from_min_max(Pos2::new(full.left() + header_w, full.top()), Pos2::new(full.right(), full.top() + RULER_H));
         let scroll = Rect::from_min_max(Pos2::new(full.left() + header_w, full.bottom() - 15.0), full.max);
         let wave = Rect::from_min_max(Pos2::new(full.left() + header_w, ruler.bottom()), Pos2::new(full.right(), scroll.top()));
         let header = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.left() + header_w, scroll.top()));
@@ -2107,7 +2857,7 @@ impl App {
             Tool::Select => {
                 // Cue flags in the ruler can be dragged along (⌥-drag duplicates), or clicked to jump there.
                 let flag_at = |q: Pos2, cues: &[Cue], vs: f64, vl: f64| {
-                    (q.y <= ruler.bottom()).then(|| {
+                    (q.y <= ruler.top() + 14.0).then(|| {
                         cues.iter().position(|c| (wave.left() + ((c.frame as f64 - vs) / vl) as f32 * wave.width() - q.x).abs() < 6.0)
                     })?
                 };
@@ -2118,6 +2868,15 @@ impl App {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
                 }
                 let clicked_flag = if resp.clicked() { resp.interact_pointer_pos().and_then(|q| flag_at(q, &self.cues, self.view_start, self.view_len)) } else { None };
+                // A click on a region's bar in the ruler selects that region.
+                let clicked_region = if resp.clicked() && clicked_flag.is_none() {
+                    resp.interact_pointer_pos().filter(|q| q.y >= ruler.top() + 15.0 && q.y <= ruler.top() + 23.0).and_then(|q| {
+                        let f = x_to_frame(q.x, self.view_start, self.view_len);
+                        self.regions.iter().find(|r| f >= r.start && f < r.end).map(|r| (r.start, r.end))
+                    })
+                } else {
+                    None
+                };
                 if resp.drag_started() {
                     if let Some(i) = press.and_then(|q| flag_at(q, &self.cues, self.view_start, self.view_len)) {
                         if alt {
@@ -2149,6 +2908,9 @@ impl App {
                 } else if let Some(i) = clicked_flag {
                     let f = self.cues[i].frame;
                     self.go_to(f);
+                } else if let Some((rs, re)) = clicked_region {
+                    self.sel = Some((rs.min(n), re.min(n))).filter(|(s, e)| e > s);
+                    self.cursor = rs.min(n);
                 } else {
                     if resp.drag_started() {
                         if let Some(p) = press {
@@ -2406,7 +3168,7 @@ impl App {
                 painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, MUTED));
                 if major {
                     painter.line_segment([Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, Color32::from_gray(242)));
-                    painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, fmt_tick(t, step), FontId::proportional(11.0), MUTED);
+                    painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, ruler_label(self.ruler, rate as u32, t, step), FontId::proportional(11.0), MUTED);
                 }
             }
             k += 1;
@@ -2445,12 +3207,13 @@ impl App {
                     painter.rect_filled(Rect::from_min_max(Pos2::new(x0, lane.top()), Pos2::new(x1, lane.bottom())), 0.0, Color32::from_gray(222));
                 }
             }
+            let tc = TRACK_COLORS[self.tracks.get(ti).map_or(0, |t| t.color) % TRACK_COLORS.len()];
             let base = if muted {
                 Color32::from_gray(190)
             } else if is_active || n_tracks == 1 {
-                Color32::from_gray(55)
+                tc
             } else {
-                Color32::from_gray(110)
+                tc.lerp_to_gamma(Color32::WHITE, 0.35)
             };
             let tch = audio.num_channels().max(1);
             let lane_h = lane.height() / tch as f32;
@@ -2459,7 +3222,7 @@ impl App {
                 let mid = top + lane_h / 2.0;
                 let amp = lane_h / 2.0 * 0.92;
                 let in_sel = |f: usize| is_active && matches!(self.sel, Some((s, e)) if f >= s && f < e);
-                let color_at = |f: usize| if in_sel(f) && !muted { black } else { base };
+                let color_at = |f: usize| if in_sel(f) && !muted { base.lerp_to_gamma(black, 0.6) } else { base };
                 painter.line_segment([Pos2::new(wave.left(), mid), Pos2::new(wave.right(), mid)], Stroke::new(1.0, Color32::from_gray(212)));
                 if ci > 0 {
                     painter.line_segment([Pos2::new(wave.left(), top), Pos2::new(wave.right(), top)], Stroke::new(1.0, Color32::from_gray(232)));
@@ -2536,6 +3299,35 @@ impl App {
             painter.galley(bg.min + Vec2::new(2.0, 0.0), label, INK);
         }
 
+        // Regions: a band across the middle of the ruler with their names.
+        let band = Rect::from_min_max(Pos2::new(ruler.left(), ruler.top() + 15.0), Pos2::new(ruler.right(), ruler.top() + 23.0));
+        for r in &self.regions {
+            let (x0, x1) = (frame_to_x(r.start as f64).max(wave.left()), frame_to_x(r.end as f64).min(wave.right()));
+            if x1 <= x0 {
+                continue;
+            }
+            let rr = Rect::from_min_max(Pos2::new(x0, band.top()), Pos2::new(x1, band.bottom()));
+            painter.rect_filled(rr, 2.0, Color32::from_gray(150));
+            let label = painter.layout_no_wrap(r.name.clone(), FontId::proportional(9.0), Color32::WHITE);
+            if label.size().x + 6.0 < rr.width() {
+                painter.galley(Pos2::new(rr.left() + 3.0, rr.center().y - label.size().y / 2.0), label, Color32::WHITE);
+            }
+        }
+        // Loop points: a black bar with end ticks along the bottom of the ruler.
+        if let Some((ls, le)) = self.loop_points {
+            let (x0, x1) = (frame_to_x(ls as f64), frame_to_x(le as f64));
+            let y = ruler.bottom() - 4.0;
+            let (c0, c1) = (x0.max(wave.left()), x1.min(wave.right()));
+            if c1 > c0 {
+                painter.line_segment([Pos2::new(c0, y), Pos2::new(c1, y)], Stroke::new(2.5, black));
+            }
+            for x in [x0, x1] {
+                if x >= wave.left() && x <= wave.right() {
+                    painter.line_segment([Pos2::new(x, y - 5.0), Pos2::new(x, ruler.bottom())], Stroke::new(1.5, black));
+                }
+            }
+        }
+
         // Insertion point (blinks like a text caret) and playhead.
         let cx = frame_to_x(self.cursor as f64);
         let blink = (ui.input(|i| i.time) * 2.0) as i64 % 2 == 0;
@@ -2566,14 +3358,14 @@ impl App {
         // Hover time readout.
         if let Some(p) = resp.hover_pos() {
             let f = x_to_frame(p.x, vs, vl);
-            painter.text(Pos2::new(wave.right() - 6.0, ruler.top() + 1.0), Align2::RIGHT_TOP, fmt_time(f as f64 / rate), FontId::monospace(11.0), MUTED);
+            painter.text(Pos2::new(wave.right() - 6.0, ruler.top() + 1.0), Align2::RIGHT_TOP, self.fmt_pos(f), FontId::monospace(11.0), MUTED);
         }
     }
 
     /// Per-track controls beside each lane: name, mute, solo and volume.
     fn track_headers(&mut self, ui: &mut egui::Ui, header: Rect, n_tracks: usize, lane: &dyn Fn(usize) -> Rect) {
         // The whole column, including the corners beside the ruler and scroll bar.
-        let column = Rect::from_min_max(Pos2::new(header.left(), header.top() - 18.0), Pos2::new(header.right(), header.bottom() + 15.0));
+        let column = Rect::from_min_max(Pos2::new(header.left(), header.top() - RULER_H), Pos2::new(header.right(), header.bottom() + 15.0));
         ui.painter().rect_filled(column, 0.0, PANEL);
         ui.painter().line_segment([header.right_top(), header.right_bottom()], Stroke::new(1.0, LINE));
         let mut activate = None;
@@ -2614,6 +3406,30 @@ impl App {
                         ui.spacing_mut().slider_width = (inner.width() - 60.0).max(30.0);
                         let vol = ui.add(egui::Slider::new(&mut t.gain, 0.0..=2.0).show_value(false)).on_hover_text(format!("Volume {:.0}%", t.gain * 100.0));
                         if vol.drag_stopped() || (vol.changed() && !vol.dragged()) {
+                            changed = true;
+                        }
+                    });
+                }
+                if inner.height() > 70.0 {
+                    ui.horizontal(|ui| {
+                        let (sw, swr) = ui.allocate_exact_size(Vec2::new(24.0, 20.0), Sense::click());
+                        ui.painter().rect_filled(sw.shrink(3.0), 3.0, TRACK_COLORS[t.color % TRACK_COLORS.len()]);
+                        if swr.on_hover_text("Track colour (click to change)").clicked() {
+                            t.color = (t.color + 1) % TRACK_COLORS.len();
+                        }
+                        ui.label(egui::RichText::new("Pan").size(11.0).color(MUTED));
+                        ui.spacing_mut().slider_width = (inner.width() - 64.0).max(30.0);
+                        let pan_tip = match t.pan {
+                            p if p.abs() < 0.01 => "Pan centre".to_string(),
+                            p if p < 0.0 => format!("Pan {:.0}% left", -p * 100.0),
+                            p => format!("Pan {:.0}% right", p * 100.0),
+                        };
+                        let pan = ui.add(egui::Slider::new(&mut t.pan, -1.0..=1.0).show_value(false)).on_hover_text(pan_tip);
+                        if pan.double_clicked() {
+                            t.pan = 0.0;
+                            changed = true;
+                        }
+                        if pan.drag_stopped() || (pan.changed() && !pan.dragged()) {
                             changed = true;
                         }
                     });
@@ -2720,7 +3536,7 @@ impl eframe::App for App {
         let title = if self.audio.is_some() { format!("{name}{} — Sound Edit", if self.dirty { " (edited)" } else { "" }) } else { "Sound Edit".into() };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        let modal_open = self.pending.is_some() || self.dialog.is_some() || self.curve.is_some();
+        let modal_open = self.pending.is_some() || self.dialog.is_some() || self.curve.is_some() || self.mix_include.is_some();
         for a in self.menu.poll() {
             if !modal_open {
                 self.run(a, &ctx);
@@ -2747,7 +3563,7 @@ impl eframe::App for App {
                 .resizable(false)
                 .show(ui, |ui| self.tools_panel(ui));
         }
-        if self.show_info || self.show_cues {
+        if self.show_info || self.show_cues || self.show_regions {
             egui::Panel::right("side")
                 .frame(egui::Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(12, 4)))
                 .resizable(false)
@@ -2763,6 +3579,13 @@ impl eframe::App for App {
             self.show_record = true;
             self.record_window(&ctx);
         }
+        if self.show_spectrum {
+            self.spectrum_window(&ctx);
+        }
+        if self.show_batch {
+            self.batch_window(&ctx);
+        }
+        self.mix_dialog(&ctx);
 
         // Highlight when a file is dragged over the window.
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
@@ -2812,7 +3635,7 @@ fn clean_style(ctx: &egui::Context) {
     v.popup_shadow = Shadow { offset: [0, 3], blur: 12, spread: 0, color: Color32::from_black_alpha(35) };
     v.extreme_bg_color = Color32::WHITE;
     v.faint_bg_color = Color32::from_gray(250);
-    v.override_text_color = Some(INK);
+    v.override_text_color = None;
     v.selection.bg_fill = Color32::from_gray(30);
     v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
     v.window_highlight_topmost = false;
@@ -2822,7 +3645,8 @@ fn clean_style(ctx: &egui::Context) {
         w.fg_stroke = Stroke::new(1.0, INK);
     }
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, LINE);
-    v.widgets.inactive.bg_fill = Color32::WHITE;
+    // bg_fill draws slider rails and checkbox boxes; buttons use weak_bg_fill.
+    v.widgets.inactive.bg_fill = Color32::from_gray(222);
     v.widgets.inactive.weak_bg_fill = Color32::WHITE;
     v.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_gray(205));
     v.widgets.hovered.bg_fill = Color32::from_gray(238);
@@ -2925,6 +3749,7 @@ impl App {
                             }
                         }
                     }
+                    "spectrum3d" => self.spectrum_3d = true,
                     "run" => match Action::from_id(arg) {
                         Some(act) => self.run(act, ctx),
                         None => eprintln!("unknown action id {arg}"),
@@ -3167,6 +3992,52 @@ fn fmt_time(secs: f64) -> String {
     let m = (secs / 60.0).floor() as u64;
     let s = secs - m as f64 * 60.0;
     format!("{m}:{s:06.3}")
+}
+
+fn fmt_pos_in(units: RulerUnits, rate: u32, f: usize) -> String {
+    match units {
+        RulerUnits::Time => fmt_time(f as f64 / rate as f64),
+        RulerUnits::Samples => f.to_string(),
+        RulerUnits::Timecode => {
+            let secs = f as f64 / rate as f64;
+            let total = secs.floor() as u64;
+            let frames = ((secs - total as f64) * 30.0).floor() as u64;
+            format!("{:02}:{:02}:{:02}:{:02}", total / 3600, total / 60 % 60, total % 60, frames)
+        }
+    }
+}
+
+/// Parse a typed position: samples ("44100"), seconds ("1.5"), m:ss.mmm ("0:01.500") or
+/// timecode ("00:00:01:15"). Returns frames.
+fn parse_pos(units: RulerUnits, rate: u32, text: &str) -> Option<f64> {
+    let t = text.trim();
+    let parts: Vec<&str> = t.split(':').collect();
+    let secs = match parts.len() {
+        1 if units == RulerUnits::Samples => return t.parse::<f64>().ok(),
+        1 => t.parse::<f64>().ok()?,
+        2 => parts[0].parse::<f64>().ok()? * 60.0 + parts[1].parse::<f64>().ok()?,
+        3 => parts[0].parse::<f64>().ok()? * 3600.0 + parts[1].parse::<f64>().ok()? * 60.0 + parts[2].parse::<f64>().ok()?,
+        4 => {
+            parts[0].parse::<f64>().ok()? * 3600.0
+                + parts[1].parse::<f64>().ok()? * 60.0
+                + parts[2].parse::<f64>().ok()?
+                + parts[3].parse::<f64>().ok()? / 30.0
+        }
+        _ => return None,
+    };
+    Some(secs * rate as f64)
+}
+
+/// Ruler tick label for time `t` (seconds), given the tick spacing.
+fn ruler_label(units: RulerUnits, rate: u32, t: f64, step: f64) -> String {
+    match units {
+        RulerUnits::Time => fmt_tick(t, step),
+        RulerUnits::Samples => {
+            let f = (t * rate as f64).round() as u64;
+            if f >= 1_000_000 { format!("{:.2}M", f as f64 / 1e6) } else if f >= 10_000 { format!("{}k", f / 1000) } else { f.to_string() }
+        }
+        RulerUnits::Timecode => fmt_pos_in(units, rate, (t * rate as f64).round() as usize),
+    }
 }
 
 fn fmt_tick(t: f64, step: f64) -> String {

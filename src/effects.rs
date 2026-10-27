@@ -304,6 +304,175 @@ pub fn dtmf(rate: u32, channels: usize, digits: &str, tone_ms: f32, gap_ms: f32,
     Audio { rate, channels: vec![out; channels.max(1)] }
 }
 
+/// A single delayed copy (no repeats), optionally ping-ponging between left and right.
+pub fn delay(clip: &Audio, delay_ms: f32, mix: f32, ping_pong: bool) -> Audio {
+    let d = ms_to_frames(clip.rate, delay_ms);
+    let n_ch = clip.num_channels();
+    Audio {
+        rate: clip.rate,
+        channels: clip
+            .channels
+            .iter()
+            .enumerate()
+            .map(|(ci, c)| {
+                // Ping-pong: each side hears the other side's delayed copy.
+                let src = if ping_pong && n_ch > 1 { &clip.channels[(ci + 1) % n_ch] } else { c };
+                c.iter().enumerate().map(|(i, x)| x + if i >= d { src[i - d] * mix } else { 0.0 }).collect()
+            })
+            .collect(),
+    }
+}
+
+/// Emphasize: lift the high frequencies (above ~2.5 kHz) to make speech or detail clearer.
+pub fn emphasize(clip: &Audio, amount_db: f32) -> Audio {
+    let sr = clip.rate as f32;
+    let f = Biquad::new(2, sr, 2500f32.min(sr * 0.45), amount_db, 0.707);
+    map_channels(clip, |c| f.run(c))
+}
+
+/// Compressor: reduce the level above `threshold_db` by `ratio`, with attack/release smoothing
+/// and make-up gain. Channels are linked so the stereo image stays put.
+pub fn compress(clip: &Audio, threshold_db: f32, ratio: f32, attack_ms: f32, release_ms: f32, makeup_db: f32) -> Audio {
+    let sr = clip.rate as f32;
+    let att = (-1.0 / (attack_ms.max(0.1) * 0.001 * sr)).exp();
+    let rel = (-1.0 / (release_ms.max(1.0) * 0.001 * sr)).exp();
+    let makeup = db_to_gain(makeup_db);
+    let n = clip.frames();
+    let mut env_db = -120.0f32;
+    let mut gains = Vec::with_capacity(n);
+    for i in 0..n {
+        let peak = clip.channels.iter().fold(0.0f32, |m, c| m.max(c[i].abs()));
+        let level = 20.0 * peak.max(1e-6).log10();
+        let coeff = if level > env_db { att } else { rel };
+        env_db = level + coeff * (env_db - level);
+        let over = env_db - threshold_db;
+        let reduction = if over > 0.0 { over - over / ratio.max(1.0) } else { 0.0 };
+        gains.push(db_to_gain(-reduction) * makeup);
+    }
+    map_channels(clip, |c| c.iter().zip(&gains).map(|(s, g)| s * g).collect())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FadeShape {
+    Linear,
+    Smooth,
+    Fast,
+    Slow,
+}
+
+impl FadeShape {
+    pub fn from_index(i: usize) -> FadeShape {
+        [FadeShape::Linear, FadeShape::Smooth, FadeShape::Fast, FadeShape::Slow][i.min(3)]
+    }
+
+    /// Gain at position t (0..1) for a fade in.
+    fn gain(self, t: f32) -> f32 {
+        match self {
+            FadeShape::Linear => t,
+            FadeShape::Smooth => (t * PI / 2.0).sin(),
+            FadeShape::Fast => 1.0 - (1.0 - t).powi(3),
+            FadeShape::Slow => t.powi(3),
+        }
+    }
+}
+
+/// Fade from `from` to `to` (gains, 0..1) across the clip using `shape`.
+pub fn fade(clip: &Audio, from: f32, to: f32, shape: FadeShape) -> Audio {
+    let n = clip.frames().max(1) as f32;
+    map_channels(clip, |c| {
+        c.iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let t = i as f32 / n;
+                let g = if to >= from { from + (to - from) * shape.gain(t) } else { to + (from - to) * shape.gain(1.0 - t) };
+                s * g
+            })
+            .collect()
+    })
+}
+
+/// Reverb presets: (name, room size 0..1, mix 0..1).
+pub const REVERB_PRESETS: [(&str, f32, f32); 5] =
+    [("Small room", 0.15, 0.2), ("Studio", 0.35, 0.25), ("Hall", 0.65, 0.3), ("Cathedral", 0.95, 0.4), ("Plate", 0.5, 0.35)];
+
+/// Two-operator FM synthesis with an attack/decay envelope.
+pub fn fm_synth(rate: u32, channels: usize, secs: f32, carrier_hz: f32, ratio: f32, index: f32, attack_ms: f32, decay: f32, level_db: f32) -> Audio {
+    let n = (secs * rate as f32) as usize;
+    let sr = rate as f32;
+    let amp = db_to_gain(level_db);
+    let att = ms_to_frames(rate, attack_ms).max(1) as f32;
+    let modulator = carrier_hz * ratio;
+    let ramp = ms_to_frames(rate, 5.0).min(n / 2).max(1);
+    let c: Vec<f32> = (0..n)
+        .map(|i| {
+            let t = i as f32 / sr;
+            // Envelope: linear attack, then exponential decay (decay = how much of the level is
+            // gone by the end, 0..1); the modulation index follows it, as in classic FM bells.
+            let env = if (i as f32) < att { i as f32 / att } else { (1.0 - decay.clamp(0.0, 0.999)).powf((i as f32 - att) / (n as f32 - att).max(1.0)) };
+            let tail = ((n - 1 - i) as f32 / ramp as f32).min(1.0);
+            let m = (2.0 * PI * modulator * t).sin() * index * env;
+            (2.0 * PI * carrier_hz * t + m).sin() * amp * env * tail
+        })
+        .collect();
+    Audio { rate, channels: vec![c; channels.max(1)] }
+}
+
+/// In-place radix-2 FFT on (re, im); `re.len()` must be a power of two.
+pub fn fft(re: &mut [f32], im: &mut [f32]) {
+    let n = re.len();
+    let mut j = 0;
+    for i in 1..n {
+        let mut bit = n >> 1;
+        while j & bit != 0 {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j |= bit;
+        if i < j {
+            re.swap(i, j);
+            im.swap(i, j);
+        }
+    }
+    let mut len = 2;
+    while len <= n {
+        let ang = -2.0 * PI / len as f32;
+        for start in (0..n).step_by(len) {
+            for k in 0..len / 2 {
+                let (wr, wi) = ((ang * k as f32).cos(), (ang * k as f32).sin());
+                let (a, b) = (start + k, start + k + len / 2);
+                let (xr, xi) = (re[b] * wr - im[b] * wi, re[b] * wi + im[b] * wr);
+                re[b] = re[a] - xr;
+                im[b] = im[a] - xi;
+                re[a] += xr;
+                im[a] += xi;
+            }
+        }
+        len <<= 1;
+    }
+}
+
+/// Magnitude spectrum in dB (0 dB = full scale sine) of `size` frames starting at `start`,
+/// all channels summed, with a Hann window. Returns size/2 bins from 0 Hz to Nyquist.
+pub fn spectrum(a: &Audio, start: usize, size: usize) -> Vec<f32> {
+    let n = a.frames();
+    let mut re: Vec<f32> = (0..size)
+        .map(|i| {
+            let f = start + i;
+            let w = 0.5 - 0.5 * (2.0 * PI * i as f32 / size as f32).cos();
+            if f < n { a.channels.iter().map(|c| c[f]).sum::<f32>() / a.num_channels().max(1) as f32 * w } else { 0.0 }
+        })
+        .collect();
+    let mut im = vec![0.0; size];
+    fft(&mut re, &mut im);
+    (0..size / 2).map(|k| 20.0 * ((re[k] * re[k] + im[k] * im[k]).sqrt() * 4.0 / size as f32).max(1e-7).log10()).collect()
+}
+
+/// Equal-power pan gains (left, right) for pan -1 (left) .. 1 (right).
+pub fn pan_gains(pan: f32) -> (f32, f32) {
+    let a = (pan.clamp(-1.0, 1.0) + 1.0) * PI / 4.0;
+    (a.cos() * std::f32::consts::SQRT_2, a.sin() * std::f32::consts::SQRT_2)
+}
+
 pub fn noise(rate: u32, channels: usize, secs: f32, level_db: f32) -> Audio {
     let n = (secs * rate as f32) as usize;
     let amp = db_to_gain(level_db);
@@ -331,18 +500,26 @@ pub fn silence(rate: u32, channels: usize, secs: f32) -> Audio {
 /// Mix several sounds (each with a linear gain) into one. All must share a sample rate. The
 /// result is as long as the longest input and has as many channels as the widest one; mono
 /// inputs are spread across every channel.
-pub fn mix(inputs: &[(&Audio, f32)], rate: u32) -> Audio {
-    let frames = inputs.iter().map(|(a, _)| a.frames()).max().unwrap_or(0);
-    let channels = inputs.iter().map(|(a, _)| a.num_channels()).max().unwrap_or(1).max(1);
+/// Each input has a pan (-1 left .. 1 right); any panned input makes the result stereo.
+pub fn mix_panned(inputs: &[(&Audio, f32, f32)], rate: u32) -> Audio {
+    let frames = inputs.iter().map(|(a, _, _)| a.frames()).max().unwrap_or(0);
+    let widest = inputs.iter().map(|(a, _, _)| a.num_channels()).max().unwrap_or(1).max(1);
+    let channels = if inputs.iter().any(|(_, _, p)| *p != 0.0) { widest.max(2) } else { widest };
     let mut out = vec![vec![0.0f32; frames]; channels];
-    for (a, gain) in inputs {
-        if a.num_channels() == 0 || *gain == 0.0 {
+    for &(a, gain, pan) in inputs {
+        if a.num_channels() == 0 || gain == 0.0 {
             continue;
         }
+        let (pl, pr) = if pan != 0.0 { pan_gains(pan) } else { (1.0, 1.0) };
         for (ci, o) in out.iter_mut().enumerate() {
             let src = &a.channels[ci.min(a.num_channels() - 1)];
+            let g = gain * match ci {
+                0 => pl,
+                1 => pr,
+                _ => 1.0,
+            };
             for (d, s) in o.iter_mut().zip(src) {
-                *d += s * gain;
+                *d += s * g;
             }
         }
     }
@@ -607,11 +784,38 @@ mod tests {
     fn mixes_tracks() {
         let a = Audio { rate: 10, channels: vec![vec![0.5; 4]] };
         let b = Audio { rate: 10, channels: vec![vec![0.25; 6], vec![-0.25; 6]] };
-        let m = mix(&[(&a, 1.0), (&b, 2.0)], 10);
+        let m = mix_panned(&[(&a, 1.0, 0.0), (&b, 2.0, 0.0)], 10);
         assert_eq!(m.frames(), 6);
         assert_eq!(m.num_channels(), 2);
         assert_eq!(m.channels[0][0], 1.0);
         assert_eq!(m.channels[1][0], 0.0);
         assert_eq!(m.channels[1][5], -0.5);
+    }
+
+    #[test]
+    fn new_effects() {
+        let a = sine(1.0);
+        let n = a.frames();
+        assert_eq!(delay(&a, 100.0, 0.5, true).frames(), n);
+        assert_eq!(emphasize(&a, 6.0).frames(), n);
+        // A loud tone compressed 4:1 above -20 dB comes out quieter.
+        let loud = tone(44100, 1, 1.0, 440.0, 0.0, Wave::Sine);
+        let c = compress(&loud, -20.0, 4.0, 5.0, 100.0, 0.0);
+        assert!(c.peak(22050, 44100) < 0.5, "{}", c.peak(22050, 44100));
+        let f = fade(&a, 0.0, 1.0, FadeShape::Slow);
+        assert!(f.peak(0, n / 2) < f.peak(n / 2, n) * 0.5);
+        let fm = fm_synth(44100, 2, 0.5, 220.0, 2.0, 3.0, 10.0, 0.9, -6.0);
+        assert_eq!(fm.frames(), 22050);
+        assert!(fm.peak(0, fm.frames()) <= 0.51);
+        // The spectrum of a 1 kHz tone peaks at the 1 kHz bin.
+        let t = tone(8000, 1, 1.0, 1000.0, 0.0, Wave::Sine);
+        let spec = spectrum(&t, 1000, 1024);
+        let peak_bin = spec.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap().0;
+        assert_eq!(peak_bin, 128);
+        assert!((spec[128] - 0.0).abs() < 3.0, "{}", spec[128]);
+        let (l, r) = pan_gains(-1.0);
+        assert!(r.abs() < 1e-5 && (l - std::f32::consts::SQRT_2).abs() < 1e-5);
+        let m = mix_panned(&[(&silence(10, 1, 1.0), 1.0, 0.5)], 10);
+        assert_eq!(m.num_channels(), 2);
     }
 }

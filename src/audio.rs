@@ -359,9 +359,32 @@ pub struct Cue {
     pub name: String,
 }
 
-/// Append `cue ` and `LIST/adtl` label chunks to a finished WAV file.
-pub fn write_wav_cues(path: &Path, cues: &[Cue]) -> Result<(), String> {
-    if cues.is_empty() {
+/// A named stretch of the sound, saved in WAV files as a cue point with a length (`ltxt`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Region {
+    pub start: usize,
+    pub end: usize,
+    pub name: String,
+}
+
+/// Everything saved alongside the audio in a WAV file.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Markers {
+    pub cues: Vec<Cue>,
+    pub regions: Vec<Region>,
+    /// Loop points (start, end), saved in a `smpl` chunk.
+    pub loop_points: Option<(usize, usize)>,
+}
+
+impl Markers {
+    pub fn is_empty(&self) -> bool {
+        self.cues.is_empty() && self.regions.is_empty() && self.loop_points.is_none()
+    }
+}
+
+/// Append cue (`cue `), label/region (`LIST adtl`) and loop (`smpl`) chunks to a finished WAV file.
+pub fn write_wav_markers(path: &Path, m: &Markers, rate: u32) -> Result<(), String> {
+    if m.is_empty() {
         return Ok(());
     }
     let mut bytes = std::fs::read(path).map_err(|e| e.to_string())?;
@@ -369,29 +392,62 @@ pub fn write_wav_cues(path: &Path, cues: &[Cue]) -> Result<(), String> {
         return Err("not a WAV file".into());
     }
     let u32le = |v: usize| (v as u32).to_le_bytes();
-    let mut cue = Vec::new();
-    cue.extend(u32le(cues.len()));
-    for (i, c) in cues.iter().enumerate() {
-        cue.extend(u32le(i + 1)); // id
-        cue.extend(u32le(c.frame)); // position
-        cue.extend(b"data");
-        cue.extend(u32le(0)); // chunk start
-        cue.extend(u32le(0)); // block start
-        cue.extend(u32le(c.frame)); // sample offset
-    }
-    let mut adtl = b"adtl".to_vec();
-    for (i, c) in cues.iter().enumerate() {
-        let mut text = c.name.clone().into_bytes();
-        text.push(0);
-        adtl.extend(b"labl");
-        adtl.extend(u32le(4 + text.len()));
-        adtl.extend(u32le(i + 1));
-        adtl.extend(&text);
-        if text.len() % 2 == 1 {
-            adtl.push(0);
+    // Cue ids: cues first, then regions.
+    let points: Vec<(usize, &str, Option<usize>)> = m
+        .cues
+        .iter()
+        .map(|c| (c.frame, c.name.as_str(), None))
+        .chain(m.regions.iter().map(|r| (r.start, r.name.as_str(), Some(r.end - r.start))))
+        .collect();
+    let mut chunks: Vec<([u8; 4], Vec<u8>)> = Vec::new();
+    if !points.is_empty() {
+        let mut cue = Vec::new();
+        cue.extend(u32le(points.len()));
+        for (i, (frame, _, _)) in points.iter().enumerate() {
+            cue.extend(u32le(i + 1)); // id
+            cue.extend(u32le(*frame)); // position
+            cue.extend(b"data");
+            cue.extend(u32le(0)); // chunk start
+            cue.extend(u32le(0)); // block start
+            cue.extend(u32le(*frame)); // sample offset
         }
+        let mut adtl = b"adtl".to_vec();
+        let mut sub = |id: &[u8; 4], body: Vec<u8>| {
+            adtl.extend(id);
+            adtl.extend(u32le(body.len()));
+            adtl.extend(&body);
+            if body.len() % 2 == 1 {
+                adtl.push(0);
+            }
+        };
+        for (i, (_, name, len)) in points.iter().enumerate() {
+            let mut text = name.as_bytes().to_vec();
+            text.push(0);
+            let mut labl = u32le(i + 1).to_vec();
+            labl.extend(&text);
+            sub(b"labl", labl);
+            if let Some(len) = len {
+                let mut ltxt = u32le(i + 1).to_vec();
+                ltxt.extend(u32le(*len));
+                ltxt.extend(b"rgn ");
+                ltxt.extend([0u8; 8]); // country, language, dialect, code page
+                sub(b"ltxt", ltxt);
+            }
+        }
+        chunks.push((*b"cue ", cue));
+        chunks.push((*b"LIST", adtl));
     }
-    for (id, body) in [(b"cue ", cue), (b"LIST", adtl)] {
+    if let Some((s, e)) = m.loop_points {
+        let mut smpl = Vec::new();
+        for v in [0, 0, (1_000_000_000.0 / rate as f64) as usize, 60, 0, 0, 0, 1, 0] {
+            smpl.extend(u32le(v)); // manufacturer, product, period, unity note, ..., 1 loop
+        }
+        for v in [0, 0, s, e.saturating_sub(1), 0, 0] {
+            smpl.extend(u32le(v)); // id, forward loop, start, end (inclusive), fraction, play count
+        }
+        chunks.push((*b"smpl", smpl));
+    }
+    for (id, body) in chunks {
         bytes.extend(id);
         bytes.extend(u32le(body.len()));
         bytes.extend(&body);
@@ -404,15 +460,17 @@ pub fn write_wav_cues(path: &Path, cues: &[Cue]) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|e| e.to_string())
 }
 
-/// Read cue points (with labels when present) from a WAV file. Returns nothing for other files.
-pub fn read_wav_cues(path: &Path) -> Vec<Cue> {
-    let Ok(bytes) = std::fs::read(path) else { return Vec::new() };
+/// Read cue points, regions and loop points from a WAV file. Returns nothing for other files.
+pub fn read_wav_markers(path: &Path) -> Markers {
+    let Ok(bytes) = std::fs::read(path) else { return Markers::default() };
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
-        return Vec::new();
+        return Markers::default();
     }
     let rd = |b: &[u8], at: usize| b.get(at..at + 4).map_or(0, |s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]) as usize);
     let mut positions: Vec<(usize, usize)> = Vec::new();
     let mut labels: std::collections::HashMap<usize, String> = Default::default();
+    let mut lengths: std::collections::HashMap<usize, usize> = Default::default();
+    let mut m = Markers::default();
     let mut at = 12;
     while at + 8 <= bytes.len() {
         let id = &bytes[at..at + 4];
@@ -435,18 +493,89 @@ pub fn read_wav_cues(path: &Path) -> Vec<Cue> {
                     let text = &body[p + 12..(p + 8 + len).min(body.len())];
                     let name = String::from_utf8_lossy(text).trim_end_matches('\0').to_string();
                     labels.insert(rd(body, p + 8), name);
+                } else if sub == b"ltxt" && p + 16 <= body.len() {
+                    lengths.insert(rd(body, p + 8), rd(body, p + 12));
                 }
                 p += 8 + len + (len % 2);
+            }
+        } else if id == b"smpl" && rd(body, 28) > 0 && body.len() >= 60 {
+            let (s, e) = (rd(body, 44), rd(body, 48));
+            if e >= s {
+                m.loop_points = Some((s, e + 1));
             }
         }
         at += 8 + size + (size % 2);
     }
-    let mut cues: Vec<Cue> = positions
-        .into_iter()
-        .map(|(id, frame)| Cue { frame, name: labels.get(&id).cloned().unwrap_or_else(|| format!("Cue {id}")) })
-        .collect();
-    cues.sort_by_key(|c| c.frame);
-    cues
+    for (id, frame) in positions {
+        let name = labels.get(&id).cloned();
+        match lengths.get(&id) {
+            Some(&len) if len > 0 => m.regions.push(Region {
+                start: frame,
+                end: frame + len,
+                name: name.unwrap_or_else(|| format!("Region {id}")),
+            }),
+            _ => m.cues.push(Cue { frame, name: name.unwrap_or_else(|| format!("Cue {id}")) }),
+        }
+    }
+    m.cues.sort_by_key(|c| c.frame);
+    m.regions.sort_by_key(|r| r.start);
+    m
+}
+
+/// Write an AIFF file (16-bit, or 8/24-bit; float formats are written as 24-bit).
+pub fn save_aiff(audio: &Audio, path: &Path, fmt: WavFormat) -> Result<(), String> {
+    let bits: u16 = match fmt {
+        WavFormat::Pcm8 => 8,
+        WavFormat::Pcm16 => 16,
+        WavFormat::Pcm24 | WavFormat::Float32 => 24,
+    };
+    let bytes_per = (bits / 8) as usize;
+    let (n, ch) = (audio.frames(), audio.num_channels());
+    let data_len = n * ch * bytes_per;
+    let mut out = Vec::with_capacity(54 + data_len);
+    let be32 = |v: usize| (v as u32).to_be_bytes();
+    out.extend(b"FORM");
+    out.extend(be32(4 + 26 + 16 + data_len));
+    out.extend(b"AIFF");
+    out.extend(b"COMM");
+    out.extend(be32(18));
+    out.extend((ch as u16).to_be_bytes());
+    out.extend(be32(n));
+    out.extend(bits.to_be_bytes());
+    out.extend(extended80(audio.rate as f64));
+    out.extend(b"SSND");
+    out.extend(be32(8 + data_len));
+    out.extend(be32(0));
+    out.extend(be32(0));
+    let scale = ((1i64 << (bits - 1)) - 1) as f32;
+    for i in 0..n {
+        for c in &audio.channels {
+            let v = (c[i].clamp(-1.0, 1.0) * scale).round() as i32;
+            out.extend(&v.to_be_bytes()[4 - bytes_per..]);
+        }
+    }
+    std::fs::write(path, out).map_err(|e| e.to_string())
+}
+
+/// IEEE 754 80-bit extended float, as AIFF stores the sample rate.
+fn extended80(v: f64) -> [u8; 10] {
+    let mut out = [0u8; 10];
+    if v <= 0.0 {
+        return out;
+    }
+    let exp = v.log2().floor() as i32;
+    let mantissa = (v / 2f64.powi(exp) * (1u64 << 63) as f64) as u64;
+    out[0..2].copy_from_slice(&((exp + 16383) as u16).to_be_bytes());
+    out[2..10].copy_from_slice(&mantissa.to_be_bytes());
+    out
+}
+
+/// Save as WAV or AIFF depending on the file extension.
+pub fn save_any(audio: &Audio, path: &Path, fmt: WavFormat) -> Result<(), String> {
+    match path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() {
+        Some("aif") | Some("aiff") => save_aiff(audio, path, fmt),
+        _ => save_wav(audio, path, fmt),
+    }
 }
 
 /// Min/max summary of a channel in fixed-size blocks, for fast zoomed-out waveform drawing.
@@ -544,9 +673,13 @@ mod tests {
         let a = ramp(1000);
         let path = std::env::temp_dir().join("sound_edit_cues.wav");
         save_wav(&a, &path, WavFormat::Pcm16).unwrap();
-        let cues = vec![Cue { frame: 10, name: "Start".into() }, Cue { frame: 500, name: "Middle bit".into() }];
-        write_wav_cues(&path, &cues).unwrap();
-        assert_eq!(read_wav_cues(&path), cues);
+        let m = Markers {
+            cues: vec![Cue { frame: 10, name: "Start".into() }, Cue { frame: 500, name: "Middle bit".into() }],
+            regions: vec![Region { start: 100, end: 300, name: "Verse".into() }],
+            loop_points: Some((200, 800)),
+        };
+        write_wav_markers(&path, &m, 1000).unwrap();
+        assert_eq!(read_wav_markers(&path), m);
         // The audio still reads back correctly with the extra chunks.
         assert_eq!(load(&path).unwrap().frames(), 1000);
         std::fs::remove_file(path).ok();
@@ -561,5 +694,16 @@ mod tests {
         assert!((z as i64 - 12).abs() <= 3, "{z}");
         assert!(a.channels[0][z - 1].signum() != a.channels[0][z].signum());
         assert_eq!(Audio { rate: 1000, channels: vec![vec![0.5; 50]] }.nearest_zero_crossing(20, 10), None);
+    }
+
+    #[test]
+    fn aiff_roundtrip() {
+        let a = ramp(400);
+        let path = std::env::temp_dir().join("sound_edit_test.aiff");
+        save_any(&a, &path, WavFormat::Pcm16).unwrap();
+        let b = load(&path).unwrap();
+        assert_eq!((b.frames(), b.num_channels(), b.rate), (400, 2, 1000));
+        assert!((b.channels[1][200] - a.channels[1][200]).abs() < 1e-3);
+        std::fs::remove_file(path).ok();
     }
 }

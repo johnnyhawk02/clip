@@ -76,6 +76,24 @@ pub enum Action {
     SoloTrack,
     NextTrack,
     PrevTrack,
+    Delay,
+    Emphasize,
+    Compressor,
+    FadeDialog,
+    FmSynth,
+    SetLoop,
+    ClearLoop,
+    AddRegion,
+    ExportRegions,
+    RulerTime,
+    RulerSamples,
+    RulerTimecode,
+    ShowSpectrum,
+    BatchConvert,
+    MixDialog,
+    OffsetTrack,
+    TrackColor,
+    ShowRegions,
 }
 
 use Action::*;
@@ -88,7 +106,7 @@ pub const ALL: &[Action] = &[
     ZoomIn, ZoomOut, ZoomSel, ZoomFit, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
     ShowControls, ShowInfo, Convert, Equalizer, Envelope, Bender, Record, AddCue, NextCue, PrevCue,
     ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, SoloTrack, NextTrack,
-    PrevTrack,
+    PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions,
 ];
 
 pub enum Item {
@@ -111,9 +129,11 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Separator,
             Do(Export),
             Do(ExportSelection),
+            Do(ExportRegions),
             Sub("Export Format", &[Do(FormatPcm8), Do(FormatPcm16), Do(FormatPcm24), Do(FormatFloat32)]),
             Separator,
             Do(Split),
+            Do(BatchConvert),
         ],
     ),
     (
@@ -135,7 +155,10 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(Silence),
         ],
     ),
-    ("Insert", &[Do(InsertSilence), Do(InsertTone), Do(InsertNoise), Do(InsertDtmf), Separator, Do(AddCue)]),
+    (
+        "Insert",
+        &[Do(InsertSilence), Do(InsertTone), Do(InsertNoise), Do(InsertDtmf), Do(FmSynth), Separator, Do(AddCue), Do(AddRegion), Separator, Do(SetLoop), Do(ClearLoop)],
+    ),
     (
         "Effects",
         &[
@@ -144,14 +167,18 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Separator,
             Do(FadeIn),
             Do(FadeOut),
+            Do(FadeDialog),
             Do(Envelope),
             Separator,
             Do(Equalizer),
             Do(Reverse),
+            Do(Delay),
             Do(Echo),
             Do(Reverb),
             Do(Flanger),
             Do(Smooth),
+            Do(Emphasize),
+            Do(Compressor),
             Do(NoiseGate),
             Separator,
             Do(Pitch),
@@ -174,9 +201,13 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(MuteTrack),
             Do(SoloTrack),
             Separator,
+            Do(TrackColor),
+            Do(OffsetTrack),
+            Separator,
             Do(PrevTrack),
             Do(NextTrack),
             Separator,
+            Do(MixDialog),
             Do(MixDown),
         ],
     ),
@@ -192,6 +223,8 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(ZoomSel),
             Do(ZoomFit),
             Separator,
+            Sub("Ruler Units", &[Do(RulerTime), Do(RulerSamples), Do(RulerTimecode)]),
+            Separator,
             Do(ToolSelect),
             Do(ToolHand),
             Do(ToolZoom),
@@ -200,7 +233,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
     ),
 ];
 
-pub const WINDOW_MENU: &[Item] = &[Do(ShowTools), Do(ShowControls), Do(ShowInfo), Do(ShowCues)];
+pub const WINDOW_MENU: &[Item] = &[Do(ShowTools), Do(ShowControls), Do(ShowInfo), Do(ShowCues), Do(ShowRegions), Do(ShowSpectrum)];
 
 /// Tools palette layout, two buttons per row; `None` is a gap between groups.
 pub const PALETTE: &[Option<[Action; 2]>] = &[
@@ -234,7 +267,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | SoloTrack | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
+            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
     }
 
     pub fn label(self) -> &'static str {
@@ -312,6 +345,24 @@ impl Action {
             SoloTrack => "Solo Track",
             NextTrack => "Next Track",
             PrevTrack => "Previous Track",
+            Delay => "Delay…",
+            Emphasize => "Emphasize…",
+            Compressor => "Compressor…",
+            FadeDialog => "Fade…",
+            FmSynth => "FM Synthesis…",
+            SetLoop => "Set Loop to Selection",
+            ClearLoop => "Clear Loop",
+            AddRegion => "Region from Selection",
+            ExportRegions => "Export Regions…",
+            RulerTime => "Minutes:Seconds",
+            RulerSamples => "Samples",
+            RulerTimecode => "Timecode (30 fps)",
+            ShowSpectrum => "Spectrum",
+            BatchConvert => "Batch Convert…",
+            MixDialog => "Mix…",
+            OffsetTrack => "Offset Track…",
+            TrackColor => "Next Track Colour",
+            ShowRegions => "Regions",
         }
     }
 
@@ -349,6 +400,11 @@ impl Action {
             NewTrack => "CmdOrCtrl+Shift+T",
             ImportTrack => "CmdOrCtrl+Shift+O",
             NextTrack => "Alt+CmdOrCtrl+Down",
+            SetLoop => "CmdOrCtrl+Shift+L",
+            AddRegion => "CmdOrCtrl+Shift+R",
+            ShowSpectrum => "CmdOrCtrl+4",
+            ShowRegions => "CmdOrCtrl+5",
+            Compressor => "CmdOrCtrl+Shift+C",
             PrevTrack => "Alt+CmdOrCtrl+Up",
             Record => "CmdOrCtrl+R",
             AddCue => "CmdOrCtrl+M",
@@ -395,6 +451,9 @@ impl Action {
             NewTrack => "⇧⌘T",
             ImportTrack => "⇧⌘O",
             NextTrack => "⌥⌘↓",
+            SetLoop => "⇧⌘L",
+            AddRegion => "⇧⌘R",
+            Compressor => "⇧⌘C",
             PrevTrack => "⌥⌘↑",
             NextCue => "]",
             PrevCue => "[",
