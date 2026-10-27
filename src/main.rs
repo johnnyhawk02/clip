@@ -3,6 +3,7 @@
 mod actions;
 mod app;
 mod audio;
+mod effects;
 mod menu;
 mod player;
 

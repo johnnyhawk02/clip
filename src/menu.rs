@@ -7,16 +7,11 @@ use std::sync::mpsc::{Receiver, channel};
 use muda::accelerator::Accelerator;
 use muda::{AboutMetadata, CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 
-use crate::actions::{Action, Item, MENUS};
+use crate::actions::{Action, Item, MENUS, WINDOW_MENU};
 
 enum Entry {
     Plain(MenuItem),
     Check(CheckMenuItem),
-}
-
-/// Actions shown with a check mark rather than as plain commands.
-fn is_check(a: Action) -> bool {
-    matches!(a, Action::Loop | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32)
 }
 
 pub struct NativeMenu {
@@ -61,7 +56,9 @@ impl NativeMenu {
         }
 
         let window = Submenu::new("Window", true);
+        fill(&window, WINDOW_MENU, &mut entries);
         let _ = window.append_items(&[
+            &PredefinedMenuItem::separator(),
             &PredefinedMenuItem::minimize(None),
             &PredefinedMenuItem::fullscreen(None),
             &PredefinedMenuItem::separator(),
@@ -126,7 +123,7 @@ fn fill(sub: &Submenu, items: &[Item], entries: &mut HashMap<Action, Entry>) {
                 fill(&s, inner, entries);
                 let _ = sub.append(&s);
             }
-            Item::Do(a) if is_check(*a) => {
+            Item::Do(a) if a.is_check() => {
                 let m = CheckMenuItem::with_id(a.id(), a.label(), true, false, accel(*a));
                 let _ = sub.append(&m);
                 entries.insert(*a, Entry::Check(m));

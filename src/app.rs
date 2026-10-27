@@ -1,5 +1,7 @@
-//! The editor window: tool palette, waveform view with selection, status bar, menus and shortcuts.
+//! The editor window: classic-Mac styled document view with floating Tools, Controls and Info
+//! windows, effect dialogs, menus and shortcuts.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
@@ -10,6 +12,7 @@ use eframe::egui::{
 
 use crate::actions::{self, Action};
 use crate::audio::{self, Audio, Peaks, WavFormat};
+use crate::effects::{self, Wave};
 use crate::menu::NativeMenu;
 use crate::player::Player;
 
@@ -25,15 +28,155 @@ struct Snapshot {
     label: &'static str,
 }
 
-/// A small dialog asking for an effect's setting before applying it.
-#[derive(Clone, Copy, PartialEq)]
-enum ParamDialog {
+/// Pencil drawing only works this close in (frames per pixel), so each stroke is precise.
+const PENCIL_MAX_SPP: f64 = 64.0;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Tool {
+    Select,
+    Hand,
+    Zoom,
+    Pencil,
+}
+
+struct PencilStroke {
+    channel: usize,
+    last: Option<(usize, f32)>,
+}
+
+/// A dialog asking for an effect's or generator's settings before applying it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Dialog {
     Normalize,
-    Gain,
+    Amplify,
     Split,
+    Echo,
+    Reverb,
+    Flanger,
+    Smooth,
+    NoiseGate,
+    Pitch,
+    Tempo,
+    Speed,
+    InsertSilence,
+    InsertTone,
+    InsertNoise,
+    MixPaste,
+}
+
+struct Field {
+    key: &'static str,
+    label: &'static str,
+    min: f32,
+    max: f32,
+    default: f32,
+    speed: f32,
+    suffix: &'static str,
+    decimals: usize,
+}
+
+const fn field(key: &'static str, label: &'static str, min: f32, max: f32, default: f32, speed: f32, suffix: &'static str, decimals: usize) -> Field {
+    Field { key, label, min, max, default, speed, suffix, decimals }
+}
+
+impl Dialog {
+    const ALL: [Dialog; 15] = [
+        Dialog::Normalize, Dialog::Amplify, Dialog::Split, Dialog::Echo, Dialog::Reverb, Dialog::Flanger,
+        Dialog::Smooth, Dialog::NoiseGate, Dialog::Pitch, Dialog::Tempo, Dialog::Speed,
+        Dialog::InsertSilence, Dialog::InsertTone, Dialog::InsertNoise, Dialog::MixPaste,
+    ];
+
+    fn title(self) -> &'static str {
+        match self {
+            Dialog::Normalize => "Normalize",
+            Dialog::Amplify => "Amplify",
+            Dialog::Split => "Split into Sounds",
+            Dialog::Echo => "Echo",
+            Dialog::Reverb => "Reverb",
+            Dialog::Flanger => "Flanger",
+            Dialog::Smooth => "Smooth",
+            Dialog::NoiseGate => "Noise Gate",
+            Dialog::Pitch => "Change Pitch",
+            Dialog::Tempo => "Change Tempo",
+            Dialog::Speed => "Change Speed",
+            Dialog::InsertSilence => "Insert Silence",
+            Dialog::InsertTone => "Insert Tone",
+            Dialog::InsertNoise => "Insert Noise",
+            Dialog::MixPaste => "Mix Paste",
+        }
+    }
+
+    fn blurb(self, scope: &str) -> String {
+        match self {
+            Dialog::Normalize => format!("Scale {scope} so its loudest peak reaches this level."),
+            Dialog::Amplify => format!("Make {scope} louder or quieter."),
+            Dialog::Split => format!(
+                "Save every separate sound in {scope} as sound01.wav, sound02.wav… A sound starts at the \
+                 first non-zero sample and ends after this many zero samples in a row."
+            ),
+            Dialog::Echo => format!("Add repeating echoes to {scope}."),
+            Dialog::Reverb => format!("Add room reverb to {scope}."),
+            Dialog::Flanger => format!("Sweep a short delay across {scope} for a jet-plane effect."),
+            Dialog::Smooth => format!("Soften {scope} by removing high frequencies above the cutoff."),
+            Dialog::NoiseGate => format!(
+                "Silence everything in {scope} quieter than the threshold. Gated parts become exact \
+                 zeros, which also helps Split into Sounds."
+            ),
+            Dialog::Pitch => format!("Raise or lower the pitch of {scope} without changing its length."),
+            Dialog::Tempo => format!("Speed up or slow down {scope} without changing its pitch."),
+            Dialog::Speed => format!("Play {scope} faster or slower like a tape, changing pitch and length together."),
+            Dialog::InsertSilence | Dialog::InsertTone | Dialog::InsertNoise => {
+                "Inserted at the cursor, or replaces the selection.".to_string()
+            }
+            Dialog::MixPaste => "Mix the clipboard into the sound, starting at the cursor or selection start.".to_string(),
+        }
+    }
+
+    fn fields(self) -> &'static [Field] {
+        match self {
+            Dialog::Normalize => const { &[field("norm_db", "Peak level", -24.0, 0.0, -0.1, 0.1, " dB", 1)] },
+            Dialog::Amplify => const { &[field("amp_db", "Amount", -48.0, 24.0, 3.0, 0.1, " dB", 1)] },
+            Dialog::Split => const { &[field("gap", "Gap", 1.0, 100_000.0, 10.0, 1.0, " zero samples", 0)] },
+            Dialog::Echo => const { &[
+                field("echo_delay", "Delay", 10.0, 2000.0, 250.0, 2.0, " ms", 0),
+                field("echo_fb", "Repeats", 0.0, 95.0, 40.0, 0.5, " %", 0),
+                field("echo_mix", "Echo level", 0.0, 100.0, 50.0, 0.5, " %", 0),
+            ] },
+            Dialog::Reverb => const { &[
+                field("rev_size", "Room size", 0.0, 100.0, 50.0, 0.5, " %", 0),
+                field("rev_mix", "Reverb level", 0.0, 100.0, 30.0, 0.5, " %", 0),
+            ] },
+            Dialog::Flanger => const { &[
+                field("fl_depth", "Depth", 0.5, 10.0, 3.0, 0.05, " ms", 1),
+                field("fl_rate", "Rate", 0.05, 5.0, 0.4, 0.01, " Hz", 2),
+                field("fl_fb", "Feedback", -90.0, 90.0, 50.0, 0.5, " %", 0),
+                field("fl_mix", "Effect level", 0.0, 100.0, 50.0, 0.5, " %", 0),
+            ] },
+            Dialog::Smooth => const { &[field("smooth_hz", "Cutoff", 100.0, 20_000.0, 4000.0, 10.0, " Hz", 0)] },
+            Dialog::NoiseGate => const { &[
+                field("gate_db", "Threshold", -90.0, 0.0, -50.0, 0.2, " dB", 1),
+                field("gate_hold", "Hold", 0.0, 500.0, 20.0, 0.5, " ms", 0),
+            ] },
+            Dialog::Pitch => const { &[field("pitch_st", "Shift", -24.0, 24.0, 0.0, 0.05, " semitones", 1)] },
+            Dialog::Tempo => const { &[field("tempo_pct", "Tempo", 25.0, 400.0, 100.0, 0.5, " %", 0)] },
+            Dialog::Speed => const { &[field("speed_pct", "Speed", 25.0, 400.0, 100.0, 0.5, " %", 0)] },
+            Dialog::InsertSilence => const { &[field("sil_secs", "Length", 0.01, 600.0, 1.0, 0.01, " s", 2)] },
+            Dialog::InsertTone => const { &[
+                field("tone_hz", "Frequency", 20.0, 20_000.0, 440.0, 1.0, " Hz", 1),
+                field("tone_db", "Level", -60.0, 0.0, -6.0, 0.2, " dB", 1),
+                field("tone_secs", "Length", 0.01, 600.0, 1.0, 0.01, " s", 2),
+            ] },
+            Dialog::InsertNoise => const { &[
+                field("noise_db", "Level", -60.0, 0.0, -12.0, 0.2, " dB", 1),
+                field("noise_secs", "Length", 0.01, 600.0, 1.0, 0.01, " s", 2),
+            ] },
+            Dialog::MixPaste => const { &[field("mix_db", "Clipboard level", -48.0, 12.0, 0.0, 0.1, " dB", 1)] },
+        }
+    }
 }
 
 enum Pending {
+    New,
     Open(PathBuf),
     Close,
 }
@@ -61,9 +204,8 @@ pub struct App {
 
     clipboard: Option<Audio>,
     wav_format: WavFormat,
-    normalize_db: f32,
-    gain_db: f32,
-    split_gap: usize,
+    params: HashMap<&'static str, f32>,
+    tone_wave: Wave,
 
     status: String,
     loading: Option<(PathBuf, Receiver<Result<Audio, String>>)>,
@@ -71,12 +213,29 @@ pub struct App {
     allow_close: bool,
     automation: Option<Automation>,
     menu: NativeMenu,
-    param: Option<ParamDialog>,
+    dialog: Option<Dialog>,
+
+    tool: Tool,
+    pencil: Option<PencilStroke>,
+    zoom_band: Option<(usize, usize)>,
+    show_tools: bool,
+    show_controls: bool,
+    show_info: bool,
+    meter: Vec<f32>,
+    /// (audio pointer, selection) -> peak level, so Info doesn't rescan every frame.
+    info_peak: Option<((usize, Option<Sel>), f32)>,
+    /// The area behind the document window; floating windows are placed relative to it.
+    desk: Rect,
+    /// Frames drawn so far.
+    frame_count: u64,
+    /// Per floating window: the frame until which it is held at its starting position (set the
+    /// first time it opens, while egui is still working out its size).
+    place_until: HashMap<&'static str, u64>,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>) -> App {
-        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        classic_style(&cc.egui_ctx);
         let player = Player::new();
         let status = match &player.error {
             Some(e) => format!("Audio output unavailable: {e}"),
@@ -100,16 +259,26 @@ impl App {
             play_origin: 0,
             clipboard: None,
             wav_format: WavFormat::Pcm16,
-            normalize_db: -0.1,
-            gain_db: 3.0,
-            split_gap: 10,
+            params: Dialog::ALL.iter().flat_map(|d| d.fields()).map(|f| (f.key, f.default)).collect(),
+            tone_wave: Wave::Sine,
             status,
             loading: None,
             pending: None,
             allow_close: false,
             automation: Automation::from_env(),
             menu: NativeMenu::install(&cc.egui_ctx),
-            param: None,
+            dialog: None,
+            tool: Tool::Select,
+            pencil: None,
+            zoom_band: None,
+            show_tools: true,
+            show_controls: true,
+            show_info: false,
+            meter: Vec::new(),
+            info_peak: None,
+            desk: Rect::NOTHING,
+            frame_count: 0,
+            place_until: HashMap::new(),
         };
         if let Some(p) = initial {
             app.start_load(p, &cc.egui_ctx);
@@ -350,7 +519,7 @@ impl App {
     fn normalize(&mut self) {
         let Some(a) = self.audio.clone() else { return };
         let (s, e) = self.range_or_all();
-        match a.normalize(s, e, self.normalize_db) {
+        match a.normalize(s, e, self.param("norm_db")) {
             Some(n) => self.apply("Normalize", n, self.sel),
             None => self.status = "Nothing to normalize — range is silent".into(),
         }
@@ -359,7 +528,7 @@ impl App {
     fn gain(&mut self, db: f32) {
         let Some(a) = self.audio.clone() else { return };
         let (s, e) = self.range_or_all();
-        self.apply("Gain", a.gain(s, e, 10f32.powf(db / 20.0)), self.sel);
+        self.apply("Amplify", a.gain(s, e, 10f32.powf(db / 20.0)), self.sel);
     }
 
     fn silence(&mut self) {
@@ -370,7 +539,7 @@ impl App {
     fn reverse(&mut self) {
         let Some(a) = self.audio.clone() else { return };
         let (s, e) = self.range_or_all();
-        self.apply("Reverse", a.reverse(s, e), self.sel);
+        self.apply("Backwards", a.reverse(s, e), self.sel);
     }
 
     fn to_mono(&mut self) {
@@ -380,12 +549,114 @@ impl App {
         }
     }
 
+    fn param(&self, key: &str) -> f32 {
+        self.params.get(key).copied().unwrap_or(0.0)
+    }
+
+    fn split_gap(&self) -> usize {
+        self.param("gap").max(1.0) as usize
+    }
+
+    /// Run an effect on the selection (or whole sound) and splice the result back in.
+    /// Effects may change the length (tempo, speed); the selection follows.
+    fn process(&mut self, label: &'static str, f: impl FnOnce(&Audio) -> Audio) {
+        let Some(a) = self.audio.clone() else { return };
+        let (s, e) = self.range_or_all();
+        if e <= s {
+            return;
+        }
+        let out = f(&a.slice(s, e));
+        let len = out.frames();
+        let sel = self.sel.map(|_| (s, s + len));
+        self.apply(label, a.insert(s, e, &out), sel);
+    }
+
+    /// Insert a generated clip at the cursor, replacing the selection if there is one.
+    fn insert_clip(&mut self, label: &'static str, clip: Audio) {
+        let Some(a) = self.audio.clone() else { return };
+        let (at, end) = self.sel.unwrap_or((self.cursor, self.cursor));
+        let len = clip.frames();
+        self.cursor = at;
+        self.apply(label, a.insert(at, end, &clip), Some((at, at + len)));
+    }
+
+    fn mix_paste(&mut self) {
+        let (Some(a), Some(clip)) = (self.audio.clone(), self.clipboard.clone()) else { return };
+        let at = self.sel.map_or(self.cursor, |(s, _)| s);
+        let level = 10f32.powf(self.param("mix_db") / 20.0);
+        let len = clip.resampled(a.rate).frames();
+        self.apply("Mix Paste", effects::mix_into(&a, at, &clip, level), Some((at, at + len)));
+    }
+
+    fn apply_dialog(&mut self, d: Dialog) {
+        let p = |k: &str| self.param(k);
+        let Some(a) = self.audio.clone() else { return };
+        let (rate, nch) = (a.rate, a.num_channels());
+        match d {
+            Dialog::Normalize => self.normalize(),
+            Dialog::Amplify => self.gain(p("amp_db")),
+            Dialog::Split => self.split_dialog(),
+            Dialog::Echo => {
+                let (dl, fb, mx) = (p("echo_delay"), p("echo_fb") / 100.0, p("echo_mix") / 100.0);
+                self.process("Echo", |c| effects::echo(c, dl, fb, mx));
+            }
+            Dialog::Reverb => {
+                let (sz, mx) = (p("rev_size") / 100.0, p("rev_mix") / 100.0);
+                self.process("Reverb", |c| effects::reverb(c, sz, mx));
+            }
+            Dialog::Flanger => {
+                let (dp, rt, fb, mx) = (p("fl_depth"), p("fl_rate"), p("fl_fb") / 100.0, p("fl_mix") / 100.0);
+                self.process("Flanger", |c| effects::flanger(c, dp, rt, fb, mx));
+            }
+            Dialog::Smooth => {
+                let hz = p("smooth_hz");
+                self.process("Smooth", |c| effects::smooth(c, hz));
+            }
+            Dialog::NoiseGate => {
+                let (db, hold) = (p("gate_db"), p("gate_hold"));
+                self.process("Noise Gate", |c| effects::noise_gate(c, db, hold));
+            }
+            Dialog::Pitch => {
+                let st = p("pitch_st");
+                self.process("Change Pitch", |c| effects::pitch_shift(c, st));
+            }
+            Dialog::Tempo => {
+                let pct = p("tempo_pct");
+                self.process("Change Tempo", |c| effects::change_tempo(c, pct));
+            }
+            Dialog::Speed => {
+                let pct = p("speed_pct");
+                self.process("Change Speed", |c| effects::change_speed(c, pct));
+            }
+            Dialog::InsertSilence => self.insert_clip("Insert Silence", effects::silence(rate, nch, p("sil_secs"))),
+            Dialog::InsertTone => {
+                let clip = effects::tone(rate, nch, p("tone_secs"), p("tone_hz"), p("tone_db"), self.tone_wave);
+                self.insert_clip("Insert Tone", clip);
+            }
+            Dialog::InsertNoise => self.insert_clip("Insert Noise", effects::noise(rate, nch, p("noise_secs"), p("noise_db"))),
+            Dialog::MixPaste => self.mix_paste(),
+        }
+    }
+
+    fn new_sound(&mut self) {
+        self.player.stop();
+        self.undo.clear();
+        self.redo.clear();
+        self.sel = None;
+        self.cursor = 0;
+        self.dirty = false;
+        self.path = None;
+        self.set_audio(Arc::new(Audio { rate: 44100, channels: vec![Vec::new(); 2] }));
+        self.zoom_fit();
+        self.status = "New sound (44.1 kHz stereo). Use the Insert menu, Paste or Mix Paste to add audio.".into();
+    }
+
     /// Cut the recording (or the selection) into separate sounds and save each one as
     /// soundNN.wav in a folder the user picks.
     fn split_dialog(&mut self) {
         let Some(a) = self.audio.clone() else { return };
         let (s, e) = self.range_or_all();
-        let count = a.slice(s, e).find_sounds(self.split_gap).len();
+        let count = a.slice(s, e).find_sounds(self.split_gap()).len();
         if count == 0 {
             self.status = "No sounds found — the range is completely silent".into();
             return;
@@ -414,7 +685,7 @@ impl App {
         let Some(a) = self.audio.clone() else { return };
         let (s, e) = self.range_or_all();
         let src = a.slice(s, e);
-        let sounds = src.find_sounds(self.split_gap);
+        let sounds = src.find_sounds(self.split_gap());
         let names = split_names(sounds.len());
         for ((a0, a1), name) in sounds.iter().zip(&names) {
             if let Err(err) = audio::save_wav(&src.slice(*a0, *a1), &dir.join(name), self.wav_format) {
@@ -493,12 +764,16 @@ impl App {
     fn enabled(&self, a: Action) -> bool {
         let has = self.audio.is_some();
         let sel = has && self.sel.is_some();
+        let not_empty = self.frames() > 0;
         match a {
-            Action::Open | Action::Quit => true,
+            Action::New | Action::Open | Action::Quit => true,
             Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop => true,
+            Action::ShowTools | Action::ShowControls | Action::ShowInfo => true,
+            Action::ToolSelect | Action::ToolHand | Action::ToolZoom | Action::ToolPencil => true,
             Action::Undo => !self.undo.is_empty(),
             Action::Redo => !self.redo.is_empty(),
-            Action::Paste => has && self.clipboard.is_some(),
+            Action::Paste | Action::MixPaste => has && self.clipboard.is_some(),
+            Action::InsertSilence | Action::InsertTone | Action::InsertNoise | Action::SelectAll => has,
             Action::ToMono => self.audio.as_ref().is_some_and(|a| a.num_channels() > 1),
             Action::ExportSelection
             | Action::Cut
@@ -510,7 +785,7 @@ impl App {
             | Action::FadeIn
             | Action::FadeOut
             | Action::ZoomSel => sel,
-            _ => has,
+            _ => has && not_empty,
         }
     }
 
@@ -520,6 +795,13 @@ impl App {
             Action::FormatPcm16 => self.wav_format == WavFormat::Pcm16,
             Action::FormatPcm24 => self.wav_format == WavFormat::Pcm24,
             Action::FormatFloat32 => self.wav_format == WavFormat::Float32,
+            Action::ToolSelect => self.tool == Tool::Select,
+            Action::ToolHand => self.tool == Tool::Hand,
+            Action::ToolZoom => self.tool == Tool::Zoom,
+            Action::ToolPencil => self.tool == Tool::Pencil,
+            Action::ShowTools => self.show_tools,
+            Action::ShowControls => self.show_controls,
+            Action::ShowInfo => self.show_info,
             _ => false,
         }
     }
@@ -538,6 +820,13 @@ impl App {
         }
         let mid = self.view_start + self.view_len / 2.0;
         match a {
+            Action::New => {
+                if self.dirty {
+                    self.pending = Some(Pending::New);
+                } else {
+                    self.new_sound();
+                }
+            }
             Action::Open => self.open_dialog(ctx),
             Action::Export => self.export(false),
             Action::ExportSelection => self.export(true),
@@ -552,18 +841,30 @@ impl App {
                 self.copy(ctx);
             }
             Action::Paste => self.paste(),
+            Action::MixPaste => self.dialog = Some(Dialog::MixPaste),
             Action::Delete => self.delete(),
-            Action::SelectAll => self.sel = Some((0, self.frames())),
+            Action::SelectAll => self.sel = Some((0, self.frames())).filter(|(_, e)| *e > 0),
             Action::SelectNone => self.sel = None,
             Action::Trim => self.trim(),
             Action::Silence => self.silence(),
+            Action::InsertSilence => self.dialog = Some(Dialog::InsertSilence),
+            Action::InsertTone => self.dialog = Some(Dialog::InsertTone),
+            Action::InsertNoise => self.dialog = Some(Dialog::InsertNoise),
             Action::FadeIn => self.fade(true),
             Action::FadeOut => self.fade(false),
-            Action::Normalize => self.param = Some(ParamDialog::Normalize),
-            Action::Gain => self.param = Some(ParamDialog::Gain),
+            Action::Normalize => self.dialog = Some(Dialog::Normalize),
+            Action::Gain => self.dialog = Some(Dialog::Amplify),
             Action::Reverse => self.reverse(),
+            Action::Echo => self.dialog = Some(Dialog::Echo),
+            Action::Reverb => self.dialog = Some(Dialog::Reverb),
+            Action::Flanger => self.dialog = Some(Dialog::Flanger),
+            Action::Smooth => self.dialog = Some(Dialog::Smooth),
+            Action::NoiseGate => self.dialog = Some(Dialog::NoiseGate),
+            Action::Pitch => self.dialog = Some(Dialog::Pitch),
+            Action::Tempo => self.dialog = Some(Dialog::Tempo),
+            Action::Speed => self.dialog = Some(Dialog::Speed),
             Action::ToMono => self.to_mono(),
-            Action::Split => self.param = Some(ParamDialog::Split),
+            Action::Split => self.dialog = Some(Dialog::Split),
             Action::PlayPause => self.toggle_play(),
             Action::Stop => self.stop(),
             Action::Loop => {
@@ -586,6 +887,13 @@ impl App {
             Action::ZoomOut => self.zoom(2.0, mid),
             Action::ZoomSel => self.zoom_to_selection(),
             Action::ZoomFit => self.zoom_fit(),
+            Action::ToolSelect => self.tool = Tool::Select,
+            Action::ToolHand => self.tool = Tool::Hand,
+            Action::ToolZoom => self.tool = Tool::Zoom,
+            Action::ToolPencil => self.tool = Tool::Pencil,
+            Action::ShowTools => self.show_tools = !self.show_tools,
+            Action::ShowControls => self.show_controls = !self.show_controls,
+            Action::ShowInfo => self.show_info = !self.show_info,
         }
     }
 
@@ -606,8 +914,11 @@ impl App {
             (none, Key::Plus, Action::ZoomIn),
             (none, Key::Minus, Action::ZoomOut),
             (none, Key::F, Action::ZoomFit),
-            (none, Key::Z, Action::ZoomSel),
             (none, Key::L, Action::Loop),
+            (none, Key::S, Action::ToolSelect),
+            (none, Key::H, Action::ToolHand),
+            (none, Key::Z, Action::ToolZoom),
+            (none, Key::P, Action::ToolPencil),
         ];
         for &(m, k, a) in keys {
             if ctx.input_mut(|i| i.consume_key(m, k)) {
@@ -623,113 +934,292 @@ impl App {
         }
     }
 
-    /// The row of icon buttons under the menu bar.
-    fn palette(&mut self, ui: &mut egui::Ui) {
+    /// One square palette button for `a`, drawn icon or glyph.
+    fn palette_button(&mut self, ui: &mut egui::Ui, a: Action, size: Vec2) {
         let ctx = ui.ctx().clone();
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 3.0;
-            for slot in actions::PALETTE {
-                let Some(a) = *slot else {
-                    ui.add_space(6.0);
-                    ui.separator();
-                    ui.add_space(6.0);
-                    continue;
-                };
-                let playing = a == Action::PlayPause && self.player.is_playing();
-                let icon = if playing { "⏸" } else { a.icon() };
-                let mut tip = if playing { "Pause".to_string() } else { self.menu_label(a).trim_end_matches('…').to_string() };
-                if let Some(k) = a.shortcut() {
-                    tip += &format!("  ({k})");
+        let playing = a == Action::PlayPause && self.player.is_playing();
+        let mut tip = if playing { "Pause".to_string() } else { self.menu_label(a).trim_end_matches('…').to_string() };
+        if let Some(k) = a.shortcut() {
+            tip += &format!("  ({k})");
+        }
+        if !a.help().is_empty() {
+            tip += &format!("\n{}", a.help());
+        }
+        let selected = self.checked(a);
+        let enabled = self.enabled(a);
+        let resp = ui.add_enabled(enabled, Button::new("").min_size(size).selected(selected));
+        let color = if selected {
+            Color32::WHITE
+        } else if enabled {
+            Color32::BLACK
+        } else {
+            Color32::from_gray(150)
+        };
+        paint_icon(ui.painter(), resp.rect, a, color, playing);
+        if resp.on_hover_text(tip).on_disabled_hover_text(a.label()).clicked() {
+            self.run(a, &ctx);
+        }
+    }
+
+    /// Starting position for a floating window, applied for the first few frames (once the
+    /// window size is known) and then left to the user.
+    fn place(&mut self, name: &'static str, pos: Pos2) -> egui::Window<'static> {
+        let w = egui::Window::new(name);
+        let until = *self.place_until.entry(name).or_insert(self.frame_count + 3);
+        // Unconstrained while placing: on the first frames an auto-sized window doesn't know its
+        // size yet, and constraining would push it up the screen.
+        if self.frame_count < until && self.desk.is_positive() {
+            w.constrain(false).current_pos(pos)
+        } else {
+            w.constrain_to(self.desk).default_pos(pos)
+        }
+    }
+
+    /// Floating Tools palette: editing tools on top, common commands below.
+    fn tools_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_tools;
+        self.place("Tools", self.desk.min + Vec2::new(12.0, 12.0))
+            .open(&mut open)
+            .auto_sized()
+            .fade_in(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                egui::Grid::new("palette").spacing(Vec2::new(2.0, 2.0)).show(ui, |ui| {
+                    for row in actions::PALETTE {
+                        match row {
+                            Some(pair) => {
+                                for a in pair {
+                                    self.palette_button(ui, *a, Vec2::new(30.0, 28.0));
+                                }
+                            }
+                            None => {
+                                ui.add_space(2.0);
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+        self.show_tools = open;
+    }
+
+    /// Floating tape-deck style Controls: transport, counter and level meters.
+    fn controls_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_controls;
+        // Level meters follow the playhead and fall back smoothly.
+        let n_ch = self.audio.as_ref().map_or(2, |a| a.num_channels().max(1));
+        self.meter.resize(n_ch, 0.0);
+        let playing = self.player.is_playing();
+        let pos = self.player.position();
+        for (c, m) in self.meter.iter_mut().enumerate() {
+            let now = match (&self.audio, playing) {
+                (Some(a), true) if pos < a.frames() => {
+                    let end = (pos + 2048).min(a.frames());
+                    a.channels[c][pos..end].iter().fold(0.0f32, |p, s| p.max(s.abs()))
                 }
-                if !a.help().is_empty() {
-                    tip += &format!("\n{}", a.help());
+                _ => 0.0,
+            };
+            *m = now.max(*m * 0.85);
+        }
+        if self.meter.iter().any(|m| *m > 0.001) {
+            ctx.request_repaint();
+        }
+
+        self.place("Controls", Pos2::new(self.desk.left() + 112.0, self.desk.bottom() - 138.0))
+            .open(&mut open)
+            .auto_sized()
+            .fade_in(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(3.0, 4.0);
+                egui::Grid::new("transport").spacing(Vec2::new(3.0, 0.0)).show(ui, |ui| {
+                    for a in [Action::GoStart, Action::PlayPause, Action::Stop, Action::Loop, Action::GoEnd] {
+                        self.palette_button(ui, a, Vec2::new(38.0, 26.0));
+                    }
+                });
+                let rate = self.audio.as_ref().map_or(44100, |a| a.rate) as f64;
+                let at = if playing { pos } else { self.cursor };
+                let (counter_rect, _) = ui.allocate_exact_size(Vec2::new(202.0, 30.0), Sense::hover());
+                let p = ui.painter();
+                p.rect_filled(counter_rect, 0.0, Color32::from_rgb(20, 30, 20));
+                p.rect_stroke(counter_rect, 0.0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Inside);
+                p.text(
+                    counter_rect.left_center() + Vec2::new(8.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    fmt_time(at as f64 / rate),
+                    FontId::monospace(20.0),
+                    Color32::from_rgb(120, 255, 120),
+                );
+                if let Some((s, e)) = self.sel {
+                    p.text(
+                        counter_rect.right_center() - Vec2::new(8.0, 0.0),
+                        Align2::RIGHT_CENTER,
+                        format!("sel {}", fmt_time((e - s) as f64 / rate)),
+                        FontId::monospace(11.0),
+                        Color32::from_rgb(90, 200, 90),
+                    );
                 }
-                let drawn = has_drawn_icon(a);
-                let btn = Button::new(egui::RichText::new(if drawn { "" } else { icon }).size(17.0))
-                    .min_size(Vec2::new(34.0, 30.0))
-                    .selected(self.checked(a));
-                let enabled = self.enabled(a);
-                let resp = ui.add_enabled(enabled, btn);
-                if drawn {
-                    let color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
-                    paint_icon(ui.painter(), resp.rect, a, color);
+                // Segmented level meters, one per channel.
+                for (c, level) in self.meter.clone().iter().enumerate() {
+                    let (r, _) = ui.allocate_exact_size(Vec2::new(counter_rect.width(), 9.0), Sense::hover());
+                    let p = ui.painter();
+                    let segs = 32;
+                    let db = 20.0 * level.max(1e-6).log10();
+                    let lit = (((db + 48.0) / 48.0).clamp(0.0, 1.0) * segs as f32).round() as usize;
+                    let w = (r.width() - 12.0) / segs as f32;
+                    p.text(r.left_center(), Align2::LEFT_CENTER, if c == 0 { "L" } else { "R" }, FontId::monospace(9.0), Color32::BLACK);
+                    for i in 0..segs {
+                        let x = r.left() + 12.0 + i as f32 * w;
+                        let seg = Rect::from_min_size(Pos2::new(x, r.top()), Vec2::new(w - 1.0, r.height()));
+                        let on = i < lit;
+                        let col = match (on, i >= segs - 4) {
+                            (true, true) => Color32::from_rgb(220, 0, 0),
+                            (true, false) => Color32::BLACK,
+                            (false, _) => Color32::from_gray(200),
+                        };
+                        p.rect_filled(seg, 0.0, col);
+                    }
                 }
-                if resp.on_hover_text(tip).on_disabled_hover_text(a.label()).clicked() {
-                    self.run(a, &ctx);
+            });
+        self.show_controls = open;
+    }
+
+    /// Floating Info window with details about the sound and the selection.
+    fn info_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_info;
+        let peak = self.audio.as_ref().map(|a| {
+            let key = (Arc::as_ptr(a) as usize, self.sel);
+            match self.info_peak {
+                Some((k, v)) if k == key => v,
+                _ => {
+                    let (s, e) = self.sel.unwrap_or((0, a.frames()));
+                    let v = a.peak(s, e);
+                    self.info_peak = Some((key, v));
+                    v
                 }
             }
         });
+        self.place("Info", Pos2::new(self.desk.left() + 350.0, self.desk.bottom() - 138.0))
+            .open(&mut open)
+            .auto_sized()
+            .fade_in(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                let Some(a) = &self.audio else {
+                    ui.label("No sound open.");
+                    return;
+                };
+                let r = a.rate as f64;
+                egui::Grid::new("info").num_columns(2).spacing(Vec2::new(12.0, 2.0)).show(ui, |ui| {
+                    ui.label("Sound");
+                    ui.label(self.path.as_deref().map(file_name).unwrap_or_else(|| "Untitled".into()));
+                    ui.end_row();
+                    ui.label("Format");
+                    ui.label(format!(
+                        "{} Hz, {}",
+                        a.rate,
+                        match a.num_channels() {
+                            1 => "mono".to_string(),
+                            2 => "stereo".to_string(),
+                            n => format!("{n} channels"),
+                        }
+                    ));
+                    ui.end_row();
+                    ui.label("Length");
+                    ui.label(format!("{}  ({} samples)", fmt_time(a.duration_secs()), a.frames()));
+                    ui.end_row();
+                    match self.sel {
+                        Some((s, e)) => {
+                            ui.label("Selection");
+                            ui.label(format!("{} – {}", fmt_time(s as f64 / r), fmt_time(e as f64 / r)));
+                            ui.end_row();
+                            ui.label("Sel. length");
+                            ui.label(format!("{}  ({} samples)", fmt_time((e - s) as f64 / r), e - s));
+                            ui.end_row();
+                        }
+                        None => {
+                            ui.label("Cursor");
+                            ui.label(fmt_time(self.cursor as f64 / r));
+                            ui.end_row();
+                        }
+                    }
+                    if let Some(p) = peak {
+                        ui.label("Peak");
+                        ui.label(if p > 0.0 { format!("{:.1} dB", 20.0 * p.log10()) } else { "silent".into() });
+                        ui.end_row();
+                    }
+                    ui.label("Export as");
+                    ui.label(self.wav_format.label());
+                    ui.end_row();
+                });
+            });
+        self.show_info = open;
     }
 
-    fn param_dialog(&mut self, ctx: &egui::Context) {
-        let Some(kind) = self.param else { return };
-        let scope = if self.sel.is_some() { "the selection" } else { "the whole file" };
+    fn dialog_window(&mut self, ctx: &egui::Context) {
+        let Some(kind) = self.dialog else { return };
+        let scope = if self.sel.is_some() { "the selection" } else { "the whole sound" };
         let mut apply = false;
         let mut cancel = false;
-        let resp = egui::Modal::new(egui::Id::unique("param")).show(ctx, |ui| {
-            ui.set_width(340.0);
-            match kind {
-                ParamDialog::Normalize => {
-                    ui.heading("Normalize");
-                    ui.label(format!("Scale {scope} so its loudest peak reaches:"));
-                    ui.add(egui::DragValue::new(&mut self.normalize_db).range(-24.0..=0.0).speed(0.1).suffix(" dB"));
+        let resp = egui::Modal::new(egui::Id::unique("dialog")).show(ctx, |ui| {
+            ui.set_width(360.0);
+            ui.heading(kind.title());
+            ui.label(kind.blurb(scope));
+            ui.add_space(6.0);
+            egui::Grid::new("fields").num_columns(2).spacing(Vec2::new(10.0, 6.0)).show(ui, |ui| {
+                for f in kind.fields() {
+                    ui.label(f.label);
+                    let v = self.params.entry(f.key).or_insert(f.default);
+                    ui.add(
+                        egui::DragValue::new(v)
+                            .range(f.min..=f.max)
+                            .speed(f.speed)
+                            .suffix(f.suffix)
+                            .fixed_decimals(f.decimals),
+                    );
+                    ui.end_row();
                 }
-                ParamDialog::Gain => {
-                    ui.heading("Gain");
-                    ui.label(format!("Make {scope} louder or quieter by:"));
-                    ui.add(egui::DragValue::new(&mut self.gain_db).range(-48.0..=24.0).speed(0.1).suffix(" dB"));
+                if kind == Dialog::InsertTone {
+                    ui.label("Waveform");
+                    egui::ComboBox::from_id_salt("wave").selected_text(self.tone_wave.label()).show_ui(ui, |ui| {
+                        for w in Wave::ALL {
+                            ui.selectable_value(&mut self.tone_wave, w, w.label());
+                        }
+                    });
+                    ui.end_row();
                 }
-                ParamDialog::Split => {
-                    ui.heading("Split into sounds");
-                    ui.label(format!(
-                        "Save every separate sound in {scope} as sound01.wav, sound02.wav… \
-                         ({}). A sound starts at the first non-zero sample and ends after this many zero samples in a row:",
-                        self.wav_format.label()
-                    ));
-                    ui.add(egui::DragValue::new(&mut self.split_gap).range(1..=100_000).suffix(" zeros"));
-                    if let Some(a) = &self.audio {
-                        let (s, e) = self.sel.unwrap_or((0, a.frames()));
-                        let n = a.slice(s, e).find_sounds(self.split_gap).len();
-                        ui.label(format!("{n} sound{} found.", if n == 1 { "" } else { "s" }));
-                    }
+            });
+            if kind == Dialog::Split {
+                if let Some(a) = &self.audio {
+                    let (s, e) = self.sel.unwrap_or((0, a.frames()));
+                    let n = a.slice(s, e).find_sounds(self.split_gap()).len();
+                    ui.label(format!("{n} sound{} found. Saved as {}.", if n == 1 { "" } else { "s" }, self.wav_format.label()));
                 }
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let ok = if kind == ParamDialog::Split { "Choose Folder…" } else { "Apply" };
+                let ok = if kind == Dialog::Split { "Choose Folder…" } else { "OK" };
                 apply = ui.button(ok).clicked();
                 cancel = ui.button("Cancel").clicked();
             });
         });
         apply |= ctx.input(|i| i.key_pressed(Key::Enter));
         if cancel || resp.should_close() {
-            self.param = None;
+            self.dialog = None;
         } else if apply {
-            self.param = None;
-            match kind {
-                ParamDialog::Normalize => self.normalize(),
-                ParamDialog::Gain => self.gain(self.gain_db),
-                ParamDialog::Split => self.split_dialog(),
-            }
+            self.dialog = None;
+            self.apply_dialog(kind);
         }
     }
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
+        ui.horizontal_centered(|ui| {
             if let Some(a) = &self.audio {
-                let name = self.path.as_deref().map(file_name).unwrap_or_default();
-                let dirty = if self.dirty { " •" } else { "" };
-                ui.strong(format!("{name}{dirty}"));
+                let r = a.rate as f64;
                 ui.label(format!("{} Hz · {} ch · {}", a.rate, a.num_channels(), fmt_time(a.duration_secs())));
                 ui.separator();
-                let r = a.rate as f64;
                 match self.sel {
-                    Some((s, e)) => ui.label(format!(
-                        "Selection {} – {} ({})",
-                        fmt_time(s as f64 / r),
-                        fmt_time(e as f64 / r),
-                        fmt_time((e - s) as f64 / r)
-                    )),
+                    Some((s, e)) => ui.label(format!("Sel {} – {} ({})", fmt_time(s as f64 / r), fmt_time(e as f64 / r), fmt_time((e - s) as f64 / r))),
                     None => ui.label(format!("Cursor {}", fmt_time(self.cursor as f64 / r))),
                 };
                 ui.separator();
@@ -742,24 +1232,26 @@ impl App {
     }
 
     fn waveform(&mut self, ui: &mut egui::Ui) {
-        let Some(audio) = self.audio.clone() else {
-            let rect = ui.available_rect_before_wrap();
+        let full = ui.available_rect_before_wrap();
+        let Some(n) = self.audio.as_ref().map(|a| a.frames()) else {
+            ui.painter().rect_filled(full, 0.0, Color32::WHITE);
             ui.painter().text(
-                rect.center(),
+                full.center(),
                 Align2::CENTER_CENTER,
-                if self.loading.is_some() { "Loading…" } else { "Drop an audio file here\n(WAV, MP3, FLAC, OGG, M4A, AIFF…)" },
-                FontId::proportional(22.0),
-                Color32::GRAY,
+                if self.loading.is_some() { "Loading…" } else { "Drop a sound here, or choose File ▸ Open\n(WAV, MP3, FLAC, OGG, M4A, AIFF…)" },
+                FontId::proportional(16.0),
+                Color32::from_gray(120),
             );
             return;
         };
-        let n = audio.frames();
-        let rate = audio.rate as f64;
+        let rate = self.audio.as_ref().unwrap().rate as f64;
+        let n_ch = self.audio.as_ref().unwrap().num_channels().max(1);
 
-        let full = ui.available_rect_before_wrap();
-        let ruler = Rect::from_min_size(full.min, Vec2::new(full.width(), 20.0));
-        let scroll = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - 14.0), full.max);
-        let wave = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.right(), scroll.top() - 2.0));
+        let ruler = Rect::from_min_size(full.min, Vec2::new(full.width(), 18.0));
+        let scroll = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - 15.0), full.max);
+        let wave = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.right(), scroll.top()));
+        let lane_h = wave.height() / n_ch as f32;
+        let spp = self.view_len / wave.width() as f64; // frames per pixel
 
         // --- interaction on the waveform ---
         let resp = ui.allocate_rect(Rect::from_min_max(ruler.min, wave.max), Sense::click_and_drag());
@@ -783,80 +1275,157 @@ impl App {
             }
         }
 
-        let shift = ui.input(|i| i.modifiers.shift);
-        if resp.drag_started() {
-            // Anchor at where the button went down, not where the drag was recognised
-            // (egui only reports a drag after the pointer has moved a few pixels).
-            let origin = ui.input(|i| i.pointer.press_origin());
-            if let Some(p) = origin.or(resp.interact_pointer_pos()) {
-                let f = x_to_frame(p.x, self.view_start, self.view_len);
-                self.drag_anchor = Some(match (shift, self.sel) {
-                    // Shift-drag extends the existing selection from its far end.
-                    (true, Some((s, e))) => if f.abs_diff(s) < f.abs_diff(e) { e } else { s },
-                    (true, None) => self.cursor,
-                    _ => f,
-                });
-            }
-        }
-        if resp.dragged() {
-            if let (Some(anchor), Some(p)) = (self.drag_anchor, resp.interact_pointer_pos()) {
-                // Auto-scroll when dragging past the edges.
-                if p.x < wave.left() {
-                    self.view_start -= self.view_len * 0.02;
-                    self.clamp_view();
-                } else if p.x > wave.right() {
-                    self.view_start += self.view_len * 0.02;
-                    self.clamp_view();
+        let (shift, alt) = ui.input(|i| (i.modifiers.shift, i.modifiers.alt));
+        // Where the button went down: egui only reports a drag after the pointer has moved a
+        // few pixels, and anchoring there would shift the start of the drag.
+        let press = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos());
+        match self.tool {
+            Tool::Select => {
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
                 }
-                let f = x_to_frame(p.x.clamp(wave.left(), wave.right()), self.view_start, self.view_len);
-                let (s, e) = (anchor.min(f), anchor.max(f));
-                let min_frames = (self.view_len / wave.width() as f64 * 2.0) as usize;
-                if e - s > min_frames {
-                    self.sel = Some((s, e));
-                    self.cursor = s;
-                    if !self.player.is_playing() {
-                        self.play_origin = s;
+                if resp.drag_started() {
+                    if let Some(p) = press {
+                        let f = x_to_frame(p.x, self.view_start, self.view_len);
+                        self.drag_anchor = Some(match (shift, self.sel) {
+                            // Shift-drag extends the existing selection from its far end.
+                            (true, Some((s, e))) => if f.abs_diff(s) < f.abs_diff(e) { e } else { s },
+                            (true, None) => self.cursor,
+                            _ => f,
+                        });
                     }
                 }
-            }
-        }
-        if resp.drag_stopped() {
-            self.drag_anchor = None;
-            if self.player.is_playing() {
-                if let Some((s, e)) = self.sel {
-                    self.player.play(s, e, self.looping);
-                    self.play_origin = s;
-                }
-            }
-        }
-        if resp.clicked() {
-            if let Some(p) = resp.interact_pointer_pos() {
-                let f = x_to_frame(p.x, self.view_start, self.view_len);
-                if shift {
-                    let (a, b) = match self.sel {
-                        Some((s, e)) => if f.abs_diff(s) < f.abs_diff(e) { (f, e) } else { (s, f) },
-                        None => (self.cursor, f),
-                    };
-                    if a.max(b) > a.min(b) {
-                        self.sel = Some((a.min(b), a.max(b)));
+                if resp.dragged() {
+                    if let (Some(anchor), Some(p)) = (self.drag_anchor, resp.interact_pointer_pos()) {
+                        // Auto-scroll when dragging past the edges.
+                        if p.x < wave.left() {
+                            self.view_start -= self.view_len * 0.02;
+                            self.clamp_view();
+                        } else if p.x > wave.right() {
+                            self.view_start += self.view_len * 0.02;
+                            self.clamp_view();
+                        }
+                        let f = x_to_frame(p.x.clamp(wave.left(), wave.right()), self.view_start, self.view_len);
+                        let (s, e) = (anchor.min(f), anchor.max(f));
+                        if e > s {
+                            self.sel = Some((s, e));
+                            self.cursor = s;
+                            if !self.player.is_playing() {
+                                self.play_origin = s;
+                            }
+                        }
                     }
-                } else {
-                    self.sel = None;
-                    self.cursor = f;
-                    self.play_origin = f;
+                }
+                if resp.drag_stopped() {
+                    self.drag_anchor = None;
                     if self.player.is_playing() {
-                        self.player.play(f, n, false);
+                        if let Some((s, e)) = self.sel {
+                            self.player.play(s, e, self.looping);
+                            self.play_origin = s;
+                        }
+                    }
+                }
+                if resp.clicked() {
+                    if let Some(p) = resp.interact_pointer_pos() {
+                        let f = x_to_frame(p.x, self.view_start, self.view_len);
+                        if shift {
+                            let (a, b) = match self.sel {
+                                Some((s, e)) => if f.abs_diff(s) < f.abs_diff(e) { (f, e) } else { (s, f) },
+                                None => (self.cursor, f),
+                            };
+                            if a.max(b) > a.min(b) {
+                                self.sel = Some((a.min(b), a.max(b)));
+                            }
+                        } else {
+                            self.sel = None;
+                            self.cursor = f;
+                            self.play_origin = f;
+                            if self.player.is_playing() {
+                                self.player.play(f, n, false);
+                            }
+                        }
+                    }
+                }
+                if resp.double_clicked() && n > 0 {
+                    self.sel = Some((0, n));
+                }
+            }
+            Tool::Hand => {
+                if resp.hovered() || resp.dragged() {
+                    ui.ctx().set_cursor_icon(if resp.dragged() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
+                }
+                if resp.dragged() {
+                    self.view_start -= resp.drag_delta().x as f64 / wave.width() as f64 * self.view_len;
+                    self.clamp_view();
+                }
+            }
+            Tool::Zoom => {
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(if alt { egui::CursorIcon::ZoomOut } else { egui::CursorIcon::ZoomIn });
+                }
+                if resp.drag_started() {
+                    self.drag_anchor = press.map(|p| x_to_frame(p.x, self.view_start, self.view_len));
+                }
+                if resp.dragged() {
+                    if let (Some(a), Some(p)) = (self.drag_anchor, resp.interact_pointer_pos()) {
+                        let f = x_to_frame(p.x.clamp(wave.left(), wave.right()), self.view_start, self.view_len);
+                        self.zoom_band = Some((a.min(f), a.max(f)));
+                    }
+                }
+                if resp.drag_stopped() {
+                    if let Some((s, e)) = self.zoom_band.take() {
+                        if e > s + 8 {
+                            self.view_start = s as f64;
+                            self.view_len = (e - s) as f64;
+                            self.clamp_view();
+                        }
+                    }
+                    self.drag_anchor = None;
+                }
+                if resp.clicked() {
+                    if let Some(p) = resp.interact_pointer_pos() {
+                        let f = self.view_start + ((p.x - wave.left()) / wave.width()) as f64 * self.view_len;
+                        self.zoom(if alt { 2.0 } else { 0.5 }, f);
                     }
                 }
             }
-        }
-        if resp.double_clicked() {
-            self.sel = Some((0, n));
+            Tool::Pencil => {
+                if resp.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+                }
+                let value_at = |y: f32, ch: usize| {
+                    let mid = wave.top() + ch as f32 * lane_h + lane_h / 2.0;
+                    ((mid - y) / (lane_h / 2.0 * 0.92)).clamp(-1.0, 1.0)
+                };
+                if (resp.drag_started() || resp.clicked()) && self.pencil.is_none() {
+                    if spp > PENCIL_MAX_SPP || n == 0 {
+                        self.status = "Zoom in closer to draw with the pencil".into();
+                    } else if let Some(p) = press {
+                        let channel = (((p.y - wave.top()) / lane_h) as usize).min(n_ch - 1);
+                        self.push_undo("Pencil");
+                        self.pencil = Some(PencilStroke { channel, last: None });
+                        let f = x_to_frame(p.x, self.view_start, self.view_len).min(n - 1);
+                        self.pencil_to(f, value_at(p.y, channel));
+                    }
+                }
+                if resp.dragged() {
+                    if let (Some(ch), Some(p)) = (self.pencil.as_ref().map(|s| s.channel), resp.interact_pointer_pos()) {
+                        let f = x_to_frame(p.x.clamp(wave.left(), wave.right()), self.view_start, self.view_len).min(n - 1);
+                        self.pencil_to(f, value_at(p.y, ch));
+                    }
+                }
+                if (resp.drag_stopped() || resp.clicked()) && self.pencil.take().is_some() {
+                    let a = self.audio.clone().unwrap();
+                    self.set_audio(a);
+                    self.dirty = true;
+                    self.status = "Pencil — ⌘Z to undo".into();
+                }
+            }
         }
 
         // --- scrollbar ---
         let sresp = ui.allocate_rect(scroll, Sense::click_and_drag());
-        let thumb_w = (self.view_len / n.max(1) as f64 * scroll.width() as f64).max(12.0) as f32;
+        let thumb_w = (self.view_len / n.max(1) as f64 * scroll.width() as f64).max(16.0).min(scroll.width() as f64) as f32;
         let track = scroll.width() - thumb_w;
         let max_start = (n as f64 - self.view_len).max(0.0);
         let thumb_x = if max_start > 0.0 { (self.view_start / max_start) as f32 * track } else { 0.0 };
@@ -880,7 +1449,7 @@ impl App {
         let play_pos = self.player.position();
         if playing {
             ui.ctx().request_repaint();
-            if self.drag_anchor.is_none() && !self.scrollbar_drag {
+            if self.drag_anchor.is_none() && !self.scrollbar_drag && self.tool != Tool::Hand {
                 let p = play_pos as f64;
                 if p > self.view_start + self.view_len || p < self.view_start {
                     self.view_start = p - self.view_len * 0.05;
@@ -889,62 +1458,67 @@ impl App {
             }
         }
 
-        // --- painting ---
+        // --- painting: black waveform on white, selection shown inverted ---
+        let audio = self.audio.clone().unwrap();
         let painter = ui.painter_at(full);
         let vs = self.view_start;
         let vl = self.view_len;
         let frame_to_x = |f: f64| wave.left() + ((f - vs) / vl) as f32 * wave.width();
+        let black = Color32::BLACK;
 
-        painter.rect_filled(wave, 0.0, Color32::from_gray(18));
-        painter.rect_filled(ruler, 0.0, Color32::from_gray(30));
-        painter.rect_filled(scroll, 3.0, Color32::from_gray(35));
-        painter.rect_filled(thumb, 3.0, if self.scrollbar_drag { Color32::from_gray(140) } else { Color32::from_gray(95) });
+        painter.rect_filled(wave, 0.0, Color32::WHITE);
+        painter.rect_filled(ruler, 0.0, Color32::from_gray(214));
+        painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0, black));
+        if let Some((s, e)) = self.sel {
+            let (x0, x1) = (frame_to_x(s as f64).max(wave.left()), frame_to_x(e as f64).min(wave.right()));
+            if x1 > x0 {
+                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, ruler.top()), Pos2::new(x1, ruler.bottom() - 1.0)), 0.0, Color32::from_gray(170));
+            }
+        }
 
-        // Time ruler with "nice" tick spacing (~90 px apart).
+        // Time ruler with "nice" tick spacing (~90 px apart) and minor ticks.
         let secs_per_px = vl / rate / wave.width() as f64;
         let nice = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0];
         let step = *nice.iter().find(|&&s| s / secs_per_px >= 90.0).unwrap_or(&1200.0);
-        let t0 = (vs / rate / step).floor() * step;
-        let mut t = t0;
+        let minor = step / 5.0;
+        let mut t = (vs / rate / minor).floor() * minor;
+        let mut k = (t / minor).round() as i64;
         while t <= (vs + vl) / rate {
             let x = frame_to_x(t * rate);
             if x >= wave.left() {
-                painter.line_segment([Pos2::new(x, ruler.bottom() - 6.0), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, Color32::GRAY));
-                painter.line_segment([Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, Color32::from_gray(28)));
-                painter.text(Pos2::new(x + 3.0, ruler.top() + 2.0), Align2::LEFT_TOP, fmt_tick(t, step), FontId::monospace(11.0), Color32::LIGHT_GRAY);
+                let major = k % 5 == 0;
+                let h = if major { 7.0 } else { 3.0 };
+                painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, black));
+                if major {
+                    painter.line_segment([Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, Color32::from_gray(232)));
+                    painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, fmt_tick(t, step), FontId::proportional(11.0), black);
+                }
             }
-            t += step;
+            k += 1;
+            t = k as f64 * minor;
         }
 
-        // Selection background.
-        if let Some((s, e)) = self.sel {
-            let x0 = frame_to_x(s as f64).max(wave.left());
-            let x1 = frame_to_x(e as f64).min(wave.right());
+        // Selection: inverted (black) background.
+        let sel_px = self.sel.map(|(s, e)| (frame_to_x(s as f64).max(wave.left()), frame_to_x(e as f64).min(wave.right())));
+        if let Some((x0, x1)) = sel_px {
             if x1 > x0 {
-                let r = Rect::from_min_max(Pos2::new(x0, ruler.top()), Pos2::new(x1, wave.bottom()));
-                painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(70, 130, 220, 70));
+                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, wave.top()), Pos2::new(x1, wave.bottom())), 0.0, black);
             }
         }
 
         // Waveforms, one lane per channel.
         let peaks = self.peaks.as_ref().unwrap();
-        let n_ch = audio.num_channels();
-        let lane_h = wave.height() / n_ch as f32;
-        let spp = vl / wave.width() as f64; // frames per pixel
-        let wave_col = Color32::from_rgb(90, 200, 170);
-        let sel_col = Color32::from_rgb(170, 230, 255);
         for (ci, ch) in audio.channels.iter().enumerate() {
             let top = wave.top() + ci as f32 * lane_h;
             let mid = top + lane_h / 2.0;
             let amp = lane_h / 2.0 * 0.92;
-            painter.line_segment([Pos2::new(wave.left(), mid), Pos2::new(wave.right(), mid)], Stroke::new(1.0, Color32::from_gray(50)));
+            let in_sel = |f: usize| matches!(self.sel, Some((s, e)) if f >= s && f < e);
+            let color_at = |f: usize| if in_sel(f) { Color32::WHITE } else { black };
+            // Centre line, drawn per segment so it inverts inside the selection.
+            painter.line_segment([Pos2::new(wave.left(), mid), Pos2::new(wave.right(), mid)], Stroke::new(1.0, Color32::from_gray(170)));
             if ci > 0 {
-                painter.line_segment([Pos2::new(wave.left(), top), Pos2::new(wave.right(), top)], Stroke::new(1.0, Color32::from_gray(60)));
+                painter.line_segment([Pos2::new(wave.left(), top), Pos2::new(wave.right(), top)], Stroke::new(1.0, black));
             }
-            let color_at = |f: usize| match self.sel {
-                Some((s, e)) if f >= s && f < e => sel_col,
-                _ => wave_col,
-            };
             if spp <= 1.5 {
                 // Zoomed in: connect individual samples.
                 let first = vs.floor().max(0.0) as usize;
@@ -956,7 +1530,7 @@ impl App {
                         painter.line_segment([q, p], Stroke::new(1.0, color_at(i)));
                     }
                     if spp < 0.12 {
-                        painter.circle_filled(p, 2.0, color_at(i));
+                        painter.rect_filled(Rect::from_center_size(p, Vec2::splat(3.0)), 0.0, color_at(i));
                     }
                     prev = Some(p);
                 }
@@ -984,44 +1558,73 @@ impl App {
             }
         }
 
-        // Selection edges.
-        if let Some((s, e)) = self.sel {
-            for f in [s, e] {
-                let x = frame_to_x(f as f64);
-                if x >= wave.left() && x <= wave.right() {
-                    painter.line_segment([Pos2::new(x, ruler.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, Color32::from_rgb(110, 170, 255)));
-                }
+        // Zoom tool rubber band.
+        if let Some((s, e)) = self.zoom_band {
+            let r = Rect::from_min_max(Pos2::new(frame_to_x(s as f64), wave.top() + 1.0), Pos2::new(frame_to_x(e as f64), wave.bottom() - 1.0));
+            for (a, b) in [(r.left_top(), r.right_top()), (r.right_top(), r.right_bottom()), (r.right_bottom(), r.left_bottom()), (r.left_bottom(), r.left_top())] {
+                painter.add(egui::Shape::dashed_line(&[a, b], Stroke::new(1.0, Color32::from_gray(80)), 3.0, 3.0));
             }
         }
 
-        // Edit cursor and playhead.
+        // Insertion point (blinks like a text caret) and playhead.
         let cx = frame_to_x(self.cursor as f64);
+        let blink = (ui.input(|i| i.time) * 2.0) as i64 % 2 == 0;
         if self.sel.is_none() && cx >= wave.left() && cx <= wave.right() {
-            painter.line_segment([Pos2::new(cx, ruler.top()), Pos2::new(cx, wave.bottom())], Stroke::new(1.0, Color32::WHITE));
+            if blink || playing {
+                painter.line_segment([Pos2::new(cx, wave.top()), Pos2::new(cx, wave.bottom())], Stroke::new(1.0, black));
+            }
+            painter.add(egui::Shape::convex_polygon(
+                vec![Pos2::new(cx - 4.0, ruler.bottom() - 6.0), Pos2::new(cx + 4.0, ruler.bottom() - 6.0), Pos2::new(cx, ruler.bottom())],
+                black,
+                Stroke::NONE,
+            ));
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
         }
         if playing {
             let px = frame_to_x(play_pos as f64);
             if px >= wave.left() && px <= wave.right() {
-                painter.line_segment([Pos2::new(px, ruler.top()), Pos2::new(px, wave.bottom())], Stroke::new(2.0, Color32::from_rgb(255, 140, 60)));
+                painter.line_segment([Pos2::new(px, ruler.top()), Pos2::new(px, wave.bottom())], Stroke::new(1.5, Color32::from_rgb(220, 0, 0)));
             }
+        }
+
+        // Scroll bar: platinum track with a lavender thumb.
+        painter.rect_filled(scroll, 0.0, Color32::from_gray(200));
+        painter.line_segment([scroll.left_top(), scroll.right_top()], Stroke::new(1.0, black));
+        let thumb_col = if self.scrollbar_drag { Color32::from_rgb(150, 150, 220) } else { Color32::from_rgb(204, 204, 255) };
+        painter.rect_filled(thumb.shrink2(Vec2::new(0.0, 1.0)), 0.0, thumb_col);
+        painter.rect_stroke(thumb.shrink2(Vec2::new(0.0, 1.0)), 0.0, Stroke::new(1.0, black), egui::StrokeKind::Inside);
+        for dx in [-3.0f32, 0.0, 3.0] {
+            let x = thumb.center().x + dx;
+            painter.line_segment([Pos2::new(x, thumb.top() + 4.0), Pos2::new(x, thumb.bottom() - 4.0)], Stroke::new(1.0, Color32::from_rgb(90, 90, 160)));
         }
 
         // Hover time readout.
         if let Some(p) = resp.hover_pos() {
             let f = x_to_frame(p.x, vs, vl);
-            painter.text(
-                Pos2::new(wave.right() - 6.0, wave.top() + 4.0),
-                Align2::RIGHT_TOP,
-                fmt_time(f as f64 / rate),
-                FontId::monospace(12.0),
-                Color32::LIGHT_GRAY,
-            );
+            painter.text(Pos2::new(wave.right() - 6.0, ruler.top() + 1.0), Align2::RIGHT_TOP, fmt_time(f as f64 / rate), FontId::monospace(11.0), black);
+        }
+    }
+
+    /// Draw a pencil line from the previous point to (`f`, `v`) in the stroke's channel.
+    fn pencil_to(&mut self, f: usize, v: f32) {
+        let Some(stroke) = self.pencil.as_mut() else { return };
+        let (lf, lv) = stroke.last.unwrap_or((f, v));
+        stroke.last = Some((f, v));
+        let channel = stroke.channel;
+        let Some(arc) = self.audio.as_mut() else { return };
+        // Copies the audio once at the start of a stroke (the undo step keeps the original).
+        let ch = &mut Arc::make_mut(arc).channels[channel];
+        let ((f0, v0), (f1, v1)) = if lf <= f { ((lf, lv), (f, v)) } else { ((f, v), (lf, lv)) };
+        for i in f0..=f1.min(ch.len().saturating_sub(1)) {
+            let t = if f1 > f0 { (i - f0) as f32 / (f1 - f0) as f32 } else { 0.0 };
+            ch[i] = v0 + (v1 - v0) * t;
         }
     }
 
     fn confirm_dialog(&mut self, ctx: &egui::Context) {
         let Some(pending) = &self.pending else { return };
         let what = match pending {
+            Pending::New => "start a new sound",
             Pending::Open(_) => "open another file",
             Pending::Close => "quit",
         };
@@ -1058,6 +1661,7 @@ impl App {
 
     fn resolve_pending(&mut self, ctx: &egui::Context) {
         match self.pending.take() {
+            Some(Pending::New) => self.new_sound(),
             Some(Pending::Open(p)) => {
                 self.dirty = false;
                 self.start_load(p, ctx);
@@ -1088,51 +1692,141 @@ impl eframe::App for App {
             self.pending = Some(Pending::Close);
         }
 
-        // Window title.
-        let title = match &self.path {
-            Some(p) => format!("{}{} — Sound Edit", file_name(p), if self.dirty { " (edited)" } else { "" }),
-            None => "Sound Edit".to_string(),
-        };
+        let name = self.path.as_deref().map(file_name).unwrap_or_else(|| "Untitled".into());
+        let title = if self.audio.is_some() { format!("{name}{} — Sound Edit", if self.dirty { " (edited)" } else { "" }) } else { "Sound Edit".into() };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
+        let modal_open = self.pending.is_some() || self.dialog.is_some();
         for a in self.menu.poll() {
-            if self.pending.is_none() && self.param.is_none() {
+            if !modal_open {
                 self.run(a, &ctx);
             } else if a == Action::Quit {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
-        if self.pending.is_none() && self.param.is_none() {
+        if !modal_open {
             self.handle_shortcuts(&ctx);
         }
         self.menu.sync(|a| self.enabled(a), |a| self.checked(a), |a| self.menu_label(a));
 
-        egui::Panel::top("palette").show(ui, |ui| {
-            ui.add_space(4.0);
-            self.palette(ui);
-            ui.add_space(4.0);
+        // The "desktop", with the sound shown in a classic document window.
+        egui::CentralPanel::no_frame().show(ui, |ui| {
+            let screen = ui.max_rect();
+            ui.painter().rect_filled(screen, 0.0, DESKTOP);
+            self.desk = screen;
+            let left = if self.show_tools { 112.0 } else { 12.0 };
+            let bottom = if self.show_controls || self.show_info { 150.0 } else { 12.0 };
+            let doc = Rect::from_min_max(screen.min + Vec2::new(left, 12.0), screen.max - Vec2::new(12.0, bottom));
+            if doc.width() < 100.0 || doc.height() < 80.0 {
+                return;
+            }
+            let p = ui.painter();
+            p.rect_filled(doc.translate(Vec2::new(2.0, 2.0)), 0.0, Color32::from_black_alpha(110));
+            p.rect_filled(doc, 0.0, Color32::from_gray(221));
+            let title_bar = Rect::from_min_size(doc.min, Vec2::new(doc.width(), 20.0));
+            paint_title_bar(p, title_bar, &format!("{name}{}", if self.dirty { " •" } else { "" }));
+            let status = Rect::from_min_max(Pos2::new(doc.left(), doc.bottom() - 20.0), doc.max);
+            let body = Rect::from_min_max(Pos2::new(doc.left() + 1.0, title_bar.bottom()), Pos2::new(doc.right() - 1.0, status.top()));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| self.waveform(ui));
+            ui.painter().line_segment([status.left_top(), status.right_top()], Stroke::new(1.0, Color32::BLACK));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(status.shrink2(Vec2::new(6.0, 1.0))), |ui| self.status_bar(ui));
+            ui.painter().rect_stroke(doc, 0.0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Outside);
         });
-        egui::Panel::bottom("status").show(ui, |ui| {
-            ui.add_space(2.0);
-            self.status_bar(ui);
-            ui.add_space(2.0);
-        });
-        egui::CentralPanel::default_margins().show(ui, |ui| {
-            self.waveform(ui);
-        });
+
+        if self.show_tools {
+            self.tools_window(&ctx);
+        }
+        if self.show_controls {
+            self.controls_window(&ctx);
+        }
+        if self.show_info {
+            self.info_window(&ctx);
+        }
 
         // Highlight when a file is dragged over the window.
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             let screen = ctx.content_rect();
             let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("drop")));
-            painter.rect_filled(screen, 0.0, Color32::from_black_alpha(160));
+            painter.rect_filled(screen, 0.0, Color32::from_black_alpha(140));
             painter.text(screen.center(), Align2::CENTER_CENTER, "Drop to open", FontId::proportional(28.0), Color32::WHITE);
         }
 
-        self.param_dialog(&ctx);
+        self.dialog_window(&ctx);
         self.confirm_dialog(&ctx);
         self.run_automation(&ctx);
+        self.frame_count += 1;
     }
+}
+
+const DESKTOP: Color32 = Color32::from_rgb(160, 160, 184);
+
+/// Classic Mac title bar: pinstripes with the title on a plain patch in the middle.
+fn paint_title_bar(p: &egui::Painter, r: Rect, title: &str) {
+    p.rect_filled(r, 0.0, Color32::from_gray(221));
+    let mut y = r.top() + 4.0;
+    while y < r.bottom() - 3.0 {
+        p.line_segment([Pos2::new(r.left() + 4.0, y), Pos2::new(r.right() - 4.0, y)], Stroke::new(1.0, Color32::from_gray(120)));
+        p.line_segment([Pos2::new(r.left() + 4.0, y + 1.0), Pos2::new(r.right() - 4.0, y + 1.0)], Stroke::new(1.0, Color32::WHITE));
+        y += 2.0;
+    }
+    let galley = p.layout_no_wrap(title.to_string(), FontId::proportional(13.0), Color32::BLACK);
+    let patch = Rect::from_center_size(r.center(), galley.size() + Vec2::new(16.0, 0.0)).intersect(r);
+    p.rect_filled(Rect::from_x_y_ranges(patch.x_range(), r.y_range()), 0.0, Color32::from_gray(221));
+    p.galley(patch.center() - galley.size() / 2.0, galley, Color32::BLACK);
+    p.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, Color32::BLACK));
+}
+
+/// Platinum-era Mac look: grey surfaces, square corners, 1 px black outlines, inverted
+/// highlights, and Geneva/Monaco when the system has them.
+fn classic_style(ctx: &egui::Context) {
+    use egui::{CornerRadius, Shadow};
+    ctx.set_theme(egui::Theme::Light);
+    let black = Color32::BLACK;
+    let mut v = egui::Visuals::light();
+    let platinum = Color32::from_gray(221);
+    v.panel_fill = platinum;
+    v.window_fill = platinum;
+    v.window_stroke = Stroke::new(1.0, black);
+    v.window_corner_radius = CornerRadius::ZERO;
+    v.menu_corner_radius = CornerRadius::ZERO;
+    let shadow = Shadow { offset: [2, 2], blur: 0, spread: 0, color: Color32::from_black_alpha(110) };
+    v.window_shadow = shadow;
+    v.popup_shadow = shadow;
+    v.extreme_bg_color = Color32::WHITE;
+    v.override_text_color = Some(black);
+    v.selection.bg_fill = black;
+    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+    v.window_highlight_topmost = false;
+    for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+        w.corner_radius = CornerRadius::ZERO;
+        w.expansion = 0.0;
+        w.fg_stroke = Stroke::new(1.0, black);
+    }
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_gray(150));
+    v.widgets.inactive.bg_fill = Color32::from_gray(238);
+    v.widgets.inactive.weak_bg_fill = Color32::from_gray(238);
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0, black);
+    v.widgets.hovered.bg_fill = Color32::from_gray(250);
+    v.widgets.hovered.weak_bg_fill = Color32::from_gray(250);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, black);
+    v.widgets.active.bg_fill = Color32::from_gray(120);
+    v.widgets.active.weak_bg_fill = Color32::from_gray(120);
+    v.widgets.active.bg_stroke = Stroke::new(1.0, black);
+    v.widgets.active.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+    v.widgets.open = v.widgets.hovered;
+    ctx.set_visuals_of(egui::Theme::Light, v);
+
+    let mut fonts = egui::FontDefinitions::default();
+    for (name, path, family) in [
+        ("Geneva", "/System/Library/Fonts/Geneva.ttf", egui::FontFamily::Proportional),
+        ("Monaco", "/System/Library/Fonts/Monaco.ttf", egui::FontFamily::Monospace),
+    ] {
+        if let Ok(bytes) = std::fs::read(path) {
+            fonts.font_data.insert(name.into(), Arc::new(egui::FontData::from_owned(bytes)));
+            fonts.families.entry(family).or_default().insert(0, name.into());
+        }
+    }
+    ctx.set_fonts(fonts);
 }
 
 /// Scripted self-test, driven by environment variables (used to verify the app headlessly):
@@ -1198,6 +1892,18 @@ impl App {
                     "reverse" => self.reverse(),
                     "split" => self.split_to(Path::new(arg)),
                     "dumpmenu" => auto.dump_menu = true,
+                    "apply" => {
+                        if let Some(d) = self.dialog.take() {
+                            self.apply_dialog(d);
+                        }
+                    }
+                    "set" => {
+                        if let Some((k, v)) = arg.split_once('=') {
+                            if let Some(slot) = self.params.iter_mut().find(|(key, _)| **key == k) {
+                                *slot.1 = v.parse().unwrap_or(*slot.1);
+                            }
+                        }
+                    }
                     "run" => match Action::from_id(arg) {
                         Some(act) => self.run(act, ctx),
                         None => eprintln!("unknown action id {arg}"),
@@ -1223,7 +1929,7 @@ impl App {
         if auto.dump_menu && auto.frames_after_load == 10 {
             crate::menu::dump_main_menu();
         }
-        if auto.frames_after_load >= 30 && !auto.requested {
+        if auto.frames_after_load >= 30 && ctx.input(|i| i.time) > 2.0 && !auto.requested {
             auto.requested = true;
             match auto.snapshot.clone() {
                 Some(path) => {
@@ -1256,16 +1962,19 @@ fn save_png(img: &egui::ColorImage, path: &Path) -> Result<(), String> {
     w.write_image_data(&bytes).map_err(|e| e.to_string())
 }
 
-fn has_drawn_icon(a: Action) -> bool {
-    matches!(a, Action::Trim | Action::Copy | Action::Normalize | Action::ZoomSel | Action::ZoomFit | Action::Split)
-}
-
-/// Vector icons for palette tools that have no suitable glyph in the bundled fonts.
-fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color32) {
+/// Monochrome vector icons for the Tools and Controls palettes.
+fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color32, playing: bool) {
     let c = rect.center();
-    let st = Stroke::new(1.6, color);
+    let st = Stroke::new(1.5, color);
+    let pt = |x: f32, y: f32| c + Vec2::new(x, y);
     let line = |x0: f32, y0: f32, x1: f32, y1: f32| {
-        p.line_segment([c + Vec2::new(x0, y0), c + Vec2::new(x1, y1)], st);
+        p.line_segment([pt(x0, y0), pt(x1, y1)], st);
+    };
+    let thick = |x0: f32, y0: f32, x1: f32, y1: f32, w: f32| {
+        p.line_segment([pt(x0, y0), pt(x1, y1)], Stroke::new(w, color));
+    };
+    let fill = |pts: &[(f32, f32)]| {
+        p.add(egui::Shape::convex_polygon(pts.iter().map(|&(x, y)| pt(x, y)).collect(), color, Stroke::NONE));
     };
     // Square brackets at ±x, 16 px tall.
     let brackets = |x: f32| {
@@ -1282,38 +1991,89 @@ fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color32) {
         line(x1, 0.0, x1 - 3.0, -3.0);
         line(x1, 0.0, x1 - 3.0, 3.0);
     };
+    let bars = |bars: &[(f32, f32)]| {
+        for &(x, h) in bars {
+            line(x, -h, x, h);
+        }
+    };
     match a {
-        Action::Trim => {
-            brackets(8.0);
-            for (x, h) in [(-3.0, 3.0), (0.0, 6.0), (3.0, 4.0)] {
-                line(x, -h, x, h);
+        Action::ToolSelect => {
+            line(0.0, -8.0, 0.0, 8.0);
+            line(-3.0, -8.0, 3.0, -8.0);
+            line(-3.0, 8.0, 3.0, 8.0);
+        }
+        Action::ToolHand => {
+            let palm = Rect::from_min_max(pt(-5.0, -1.0), pt(5.0, 8.0));
+            p.rect_stroke(palm, 3.0, st, egui::StrokeKind::Middle);
+            for (x, top) in [(-3.5f32, -6.0f32), (-1.0, -8.0), (1.5, -8.0), (4.0, -6.0)] {
+                line(x, top, x, -1.0);
             }
-            for x in [-12.0f32, 12.0] {
-                line(x, -1.0, x, 1.0);
-            }
+            line(-5.0, 4.0, -8.0, 0.0);
+        }
+        Action::ToolZoom => {
+            p.circle_stroke(pt(-2.0, -2.0), 5.5, st);
+            thick(2.0, 2.0, 7.5, 7.5, 3.0);
+        }
+        Action::ToolPencil => {
+            thick(-3.5, 3.5, 6.0, -6.0, 4.5);
+            fill(&[(-8.0, 8.0), (-6.5, 2.5), (-2.5, 6.5)]);
+        }
+        Action::Cut => {
+            p.circle_stroke(pt(-4.0, 5.0), 2.6, st);
+            p.circle_stroke(pt(4.0, 5.0), 2.6, st);
+            line(-2.5, 3.0, 4.0, -8.0);
+            line(2.5, 3.0, -4.0, -8.0);
         }
         Action::Copy => {
-            let r1 = Rect::from_center_size(c + Vec2::new(-2.5, -2.5), Vec2::new(10.0, 12.0));
+            let r1 = Rect::from_center_size(pt(-2.5, -2.5), Vec2::new(10.0, 12.0));
             let r2 = r1.translate(Vec2::new(5.0, 5.0));
-            p.rect_stroke(r1, 1.5, st, egui::StrokeKind::Middle);
-            p.rect_filled(r2, 1.5, p.ctx().global_style().visuals.widgets.inactive.weak_bg_fill);
-            p.rect_stroke(r2, 1.5, st, egui::StrokeKind::Middle);
+            p.rect_stroke(r1, 0.0, st, egui::StrokeKind::Middle);
+            p.rect_filled(r2, 0.0, Color32::from_gray(238));
+            p.rect_stroke(r2, 0.0, st, egui::StrokeKind::Middle);
         }
+        Action::Paste => {
+            p.rect_stroke(Rect::from_min_max(pt(-6.0, -6.0), pt(6.0, 8.0)), 0.0, st, egui::StrokeKind::Middle);
+            p.rect_filled(Rect::from_min_max(pt(-3.0, -8.5), pt(3.0, -4.5)), 0.0, color);
+            line(-3.0, 0.0, 3.0, 0.0);
+            line(-3.0, 3.5, 3.0, 3.5);
+        }
+        Action::Delete => {
+            line(-7.0, -5.0, 7.0, -5.0);
+            line(-2.0, -7.5, 2.0, -7.5);
+            line(-5.5, -5.0, -4.0, 8.0);
+            line(5.5, -5.0, 4.0, 8.0);
+            line(-4.0, 8.0, 4.0, 8.0);
+            line(-1.5, -2.0, -1.0, 5.5);
+            line(1.5, -2.0, 1.0, 5.5);
+        }
+        Action::Trim => {
+            brackets(8.0);
+            bars(&[(-3.0, 3.0), (0.0, 6.0), (3.0, 4.0)]);
+            line(-12.0, 0.0, -10.0, 0.0);
+            line(10.0, 0.0, 12.0, 0.0);
+        }
+        Action::Silence => {
+            brackets(8.0);
+            line(-6.0, 0.0, 6.0, 0.0);
+        }
+        Action::FadeIn => fill(&[(-8.0, 7.0), (8.0, 7.0), (8.0, -7.0)]),
+        Action::FadeOut => fill(&[(-8.0, 7.0), (-8.0, -7.0), (8.0, 7.0)]),
         Action::Normalize => {
             line(-9.0, -8.0, 9.0, -8.0);
             line(-9.0, 8.0, 9.0, 8.0);
-            for (x, h) in [(-6.0, 3.0), (-2.0, 6.0), (2.0, 4.0), (6.0, 2.0)] {
-                line(x, -h, x, h);
-            }
+            bars(&[(-6.0, 3.0), (-2.0, 6.0), (2.0, 4.0), (6.0, 2.0)]);
         }
-        Action::ZoomSel => {
-            brackets(10.0);
-            arrow_h(-6.0, 6.0);
+        Action::Gain => {
+            bars(&[(-7.0, 1.5), (-3.5, 3.5), (0.0, 5.5), (3.5, 7.0), (7.0, 8.5)]);
         }
-        Action::ZoomFit => {
-            line(-10.0, -7.0, -10.0, 7.0);
-            line(10.0, -7.0, 10.0, 7.0);
-            arrow_h(-8.0, 8.0);
+        Action::Reverse => {
+            bars(&[(-1.0, 2.0), (2.0, 4.0), (5.0, 6.0), (8.0, 8.0)]);
+            line(-8.0, 0.0, -3.0, 0.0);
+            line(-8.0, 0.0, -5.0, -3.0);
+            line(-8.0, 0.0, -5.0, 3.0);
+        }
+        Action::Echo => {
+            bars(&[(-8.0, 8.0), (-3.0, 5.0), (2.0, 3.0), (6.5, 1.5)]);
         }
         Action::Split => {
             for x in [-5.0f32, 5.0] {
@@ -1321,9 +2081,48 @@ fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color32) {
                     line(x, y, x, y + 2.5);
                 }
             }
-            for (x, h) in [(-10.0, 5.0), (-8.0, 3.0), (-1.0, 6.0), (1.0, 4.0), (8.0, 4.0), (10.0, 6.0)] {
-                line(x, -h, x, h);
-            }
+            bars(&[(-10.0, 5.0), (-8.0, 3.0), (-1.0, 6.0), (1.0, 4.0), (8.0, 4.0), (10.0, 6.0)]);
+        }
+        Action::ZoomFit => {
+            line(-10.0, -7.0, -10.0, 7.0);
+            line(10.0, -7.0, 10.0, 7.0);
+            arrow_h(-8.0, 8.0);
+        }
+        Action::ZoomSel => {
+            brackets(10.0);
+            arrow_h(-6.0, 6.0);
+        }
+        Action::GoStart => {
+            thick(-6.0, -6.0, -6.0, 6.0, 2.5);
+            fill(&[(-4.5, 0.0), (5.5, -6.0), (5.5, 6.0)]);
+        }
+        Action::GoEnd => {
+            thick(6.0, -6.0, 6.0, 6.0, 2.5);
+            fill(&[(4.5, 0.0), (-5.5, -6.0), (-5.5, 6.0)]);
+        }
+        Action::PlayPause if playing => {
+            p.rect_filled(Rect::from_min_max(pt(-5.0, -6.0), pt(-1.5, 6.0)), 0.0, color);
+            p.rect_filled(Rect::from_min_max(pt(1.5, -6.0), pt(5.0, 6.0)), 0.0, color);
+        }
+        Action::PlayPause => fill(&[(-5.0, -7.0), (7.0, 0.0), (-5.0, 7.0)]),
+        Action::Stop => {
+            p.rect_filled(Rect::from_center_size(c, Vec2::splat(11.0)), 0.0, color);
+        }
+        Action::Loop => {
+            let pts: Vec<Pos2> = (0..=24)
+                .map(|i| {
+                    let t = 0.4 + i as f32 / 24.0 * 5.2;
+                    pt(7.0 * t.cos(), 5.5 * t.sin())
+                })
+                .collect();
+            p.add(egui::Shape::line(pts, st));
+            let t = 0.4f32;
+            let tip = pt(7.0 * t.cos(), 5.5 * t.sin());
+            p.add(egui::Shape::convex_polygon(
+                vec![tip + Vec2::new(-3.5, -1.0), tip + Vec2::new(2.5, -2.5), tip + Vec2::new(0.5, 3.0)],
+                color,
+                Stroke::NONE,
+            ));
         }
         _ => {}
     }

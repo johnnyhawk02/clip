@@ -1,8 +1,9 @@
 //! Every command the editor can perform, with the names, icons and shortcuts shown in
-//! the menus and tool palette. The menus and palette are both built from this list.
+//! the menus and the Tools palette. Both are built from the tables in this file.
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Action {
+    New,
     Open,
     Export,
     ExportSelection,
@@ -15,16 +16,28 @@ pub enum Action {
     Cut,
     Copy,
     Paste,
+    MixPaste,
     Delete,
     SelectAll,
     SelectNone,
     Trim,
     Silence,
+    InsertSilence,
+    InsertTone,
+    InsertNoise,
     FadeIn,
     FadeOut,
     Normalize,
     Gain,
     Reverse,
+    Echo,
+    Reverb,
+    Flanger,
+    Smooth,
+    NoiseGate,
+    Pitch,
+    Tempo,
+    Speed,
     ToMono,
     Split,
     PlayPause,
@@ -36,14 +49,24 @@ pub enum Action {
     ZoomOut,
     ZoomSel,
     ZoomFit,
+    ToolSelect,
+    ToolHand,
+    ToolZoom,
+    ToolPencil,
+    ShowTools,
+    ShowControls,
+    ShowInfo,
 }
 
 use Action::*;
 
 pub const ALL: &[Action] = &[
-    Open, Export, ExportSelection, FormatPcm16, FormatPcm24, FormatFloat32, Quit, Undo, Redo, Cut,
-    Copy, Paste, Delete, SelectAll, SelectNone, Trim, Silence, FadeIn, FadeOut, Normalize, Gain,
-    Reverse, ToMono, Split, PlayPause, Stop, Loop, GoStart, GoEnd, ZoomIn, ZoomOut, ZoomSel, ZoomFit,
+    New, Open, Export, ExportSelection, FormatPcm16, FormatPcm24, FormatFloat32, Quit, Undo, Redo,
+    Cut, Copy, Paste, MixPaste, Delete, SelectAll, SelectNone, Trim, Silence, InsertSilence,
+    InsertTone, InsertNoise, FadeIn, FadeOut, Normalize, Gain, Reverse, Echo, Reverb, Flanger,
+    Smooth, NoiseGate, Pitch, Tempo, Speed, ToMono, Split, PlayPause, Stop, Loop, GoStart, GoEnd,
+    ZoomIn, ZoomOut, ZoomSel, ZoomFit, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
+    ShowControls, ShowInfo,
 ];
 
 pub enum Item {
@@ -55,11 +78,13 @@ pub enum Item {
 
 use Item::{Do, Separator, Sub};
 
-/// Menu bar layout (the macOS app menu with About/Hide/Quit is added separately).
+/// Menu bar layout. The macOS app menu (About/Hide/Quit) is added separately, and
+/// `WINDOW_MENU` goes at the top of the system Window menu.
 pub const MENUS: &[(&str, &[Item])] = &[
     (
         "File",
         &[
+            Do(New),
             Do(Open),
             Separator,
             Do(Export),
@@ -78,6 +103,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(Cut),
             Do(Copy),
             Do(Paste),
+            Do(MixPaste),
             Do(Delete),
             Separator,
             Do(SelectAll),
@@ -87,45 +113,63 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(Silence),
         ],
     ),
+    ("Insert", &[Do(InsertSilence), Do(InsertTone), Do(InsertNoise)]),
     (
         "Effects",
-        &[Do(FadeIn), Do(FadeOut), Separator, Do(Normalize), Do(Gain), Separator, Do(Reverse), Do(ToMono)],
+        &[
+            Do(Gain),
+            Do(Normalize),
+            Separator,
+            Do(FadeIn),
+            Do(FadeOut),
+            Separator,
+            Do(Reverse),
+            Do(Echo),
+            Do(Reverb),
+            Do(Flanger),
+            Do(Smooth),
+            Do(NoiseGate),
+            Separator,
+            Do(Pitch),
+            Do(Tempo),
+            Do(Speed),
+            Separator,
+            Do(ToMono),
+        ],
     ),
-    ("Play", &[Do(PlayPause), Do(Stop), Do(Loop), Separator, Do(GoStart), Do(GoEnd)]),
-    ("View", &[Do(ZoomIn), Do(ZoomOut), Do(ZoomSel), Do(ZoomFit)]),
+    ("Control", &[Do(PlayPause), Do(Stop), Do(Loop), Separator, Do(GoStart), Do(GoEnd)]),
+    (
+        "View",
+        &[
+            Do(ZoomIn),
+            Do(ZoomOut),
+            Do(ZoomSel),
+            Do(ZoomFit),
+            Separator,
+            Do(ToolSelect),
+            Do(ToolHand),
+            Do(ToolZoom),
+            Do(ToolPencil),
+        ],
+    ),
 ];
 
-/// Tool palette layout; `None` is a gap between groups.
-pub const PALETTE: &[Option<Action>] = &[
-    Some(Open),
-    Some(Export),
+pub const WINDOW_MENU: &[Item] = &[Do(ShowTools), Do(ShowControls), Do(ShowInfo)];
+
+/// Tools palette layout, two buttons per row; `None` is a gap between groups.
+pub const PALETTE: &[Option<[Action; 2]>] = &[
+    Some([ToolSelect, ToolHand]),
+    Some([ToolZoom, ToolPencil]),
     None,
-    Some(Undo),
-    Some(Redo),
+    Some([Cut, Copy]),
+    Some([Paste, Delete]),
+    Some([Trim, Silence]),
     None,
-    Some(PlayPause),
-    Some(Stop),
-    Some(Loop),
+    Some([FadeIn, FadeOut]),
+    Some([Normalize, Gain]),
+    Some([Reverse, Echo]),
     None,
-    Some(Trim),
-    Some(Delete),
-    Some(Silence),
-    None,
-    Some(Cut),
-    Some(Copy),
-    Some(Paste),
-    None,
-    Some(FadeIn),
-    Some(FadeOut),
-    Some(Normalize),
-    Some(Gain),
-    None,
-    Some(Split),
-    None,
-    Some(ZoomIn),
-    Some(ZoomOut),
-    Some(ZoomSel),
-    Some(ZoomFit),
+    Some([Split, ZoomFit]),
 ];
 
 impl Action {
@@ -137,8 +181,19 @@ impl Action {
         ALL.iter().copied().find(|a| a.id() == id)
     }
 
+    pub fn is_tool(self) -> bool {
+        matches!(self, ToolSelect | ToolHand | ToolZoom | ToolPencil)
+    }
+
+    /// Shown with a check mark in menus rather than as a plain command.
+    pub fn is_check(self) -> bool {
+        self.is_tool()
+            || matches!(self, Loop | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
+            New => "New",
             Open => "Open…",
             Export => "Export WAV…",
             ExportSelection => "Export Selection…",
@@ -151,61 +206,53 @@ impl Action {
             Cut => "Cut",
             Copy => "Copy",
             Paste => "Paste",
-            Delete => "Delete Selection",
+            MixPaste => "Mix Paste…",
+            Delete => "Clear",
             SelectAll => "Select All",
             SelectNone => "Select None",
-            Trim => "Trim to Selection",
-            Silence => "Silence",
+            Trim => "Trim",
+            Silence => "Silence Selection",
+            InsertSilence => "Silence…",
+            InsertTone => "Tone…",
+            InsertNoise => "Noise…",
             FadeIn => "Fade In",
             FadeOut => "Fade Out",
             Normalize => "Normalize…",
-            Gain => "Gain…",
-            Reverse => "Reverse",
+            Gain => "Amplify…",
+            Reverse => "Backwards",
+            Echo => "Echo…",
+            Reverb => "Reverb…",
+            Flanger => "Flanger…",
+            Smooth => "Smooth…",
+            NoiseGate => "Noise Gate…",
+            Pitch => "Change Pitch…",
+            Tempo => "Change Tempo…",
+            Speed => "Change Speed…",
             ToMono => "Convert to Mono",
             Split => "Split into Sounds…",
             PlayPause => "Play / Pause",
             Stop => "Stop",
             Loop => "Loop Selection",
-            GoStart => "Go to Start",
+            GoStart => "Rewind to Start",
             GoEnd => "Go to End",
             ZoomIn => "Zoom In",
             ZoomOut => "Zoom Out",
             ZoomSel => "Zoom to Selection",
-            ZoomFit => "Zoom to Fit",
-        }
-    }
-
-    pub fn icon(self) -> &'static str {
-        match self {
-            Open => "📂",
-            Export | ExportSelection => "💾",
-            Undo => "↶",
-            Redo => "↷",
-            PlayPause => "▶",
-            Stop => "⏹",
-            Loop => "🔁",
-            Trim => "⛶",
-            Delete => "🗑",
-            Silence => "🔇",
-            Cut => "✂",
-            Copy => "🗐",
-            Paste => "📋",
-            FadeIn => "◢",
-            FadeOut => "◣",
-            Normalize => "⬍",
-            Gain => "🔊",
-            Split => "✂…",
-            ZoomIn => "🔍+",
-            ZoomOut => "🔍−",
-            ZoomSel => "⬌",
-            ZoomFit => "⛶",
-            _ => "",
+            ZoomFit => "Show Entire Sound",
+            ToolSelect => "Selection Tool",
+            ToolHand => "Hand Tool",
+            ToolZoom => "Zoom Tool",
+            ToolPencil => "Pencil Tool",
+            ShowTools => "Tools",
+            ShowControls => "Controls",
+            ShowInfo => "Info",
         }
     }
 
     /// Native menu accelerator (only ⌘ combinations, so typing in number fields keeps working).
     pub fn accelerator(self) -> Option<&'static str> {
         Some(match self {
+            New => "CmdOrCtrl+N",
             Open => "CmdOrCtrl+O",
             Export => "CmdOrCtrl+S",
             ExportSelection => "CmdOrCtrl+Shift+S",
@@ -215,17 +262,23 @@ impl Action {
             Cut => "CmdOrCtrl+X",
             Copy => "CmdOrCtrl+C",
             Paste => "CmdOrCtrl+V",
+            MixPaste => "CmdOrCtrl+Alt+V",
             SelectAll => "CmdOrCtrl+A",
             SelectNone => "CmdOrCtrl+D",
             Trim => "CmdOrCtrl+T",
+            InsertSilence => "CmdOrCtrl+Shift+I",
             Normalize => "CmdOrCtrl+Shift+N",
             Gain => "CmdOrCtrl+Shift+G",
+            Reverse => "CmdOrCtrl+Shift+B",
             Split => "CmdOrCtrl+Shift+K",
             Loop => "CmdOrCtrl+L",
             ZoomIn => "CmdOrCtrl+Equal",
             ZoomOut => "CmdOrCtrl+Minus",
             ZoomSel => "CmdOrCtrl+E",
             ZoomFit => "CmdOrCtrl+0",
+            ShowTools => "CmdOrCtrl+1",
+            ShowControls => "CmdOrCtrl+2",
+            ShowInfo => "CmdOrCtrl+I",
             _ => return None,
         })
     }
@@ -233,31 +286,37 @@ impl Action {
     /// Shortcut text for tooltips, including the plain-key ones handled in the window.
     pub fn shortcut(self) -> Option<&'static str> {
         Some(match self {
+            New => "⌘N",
             Open => "⌘O",
             Export => "⌘S",
             ExportSelection => "⇧⌘S",
-            Quit => "⌘Q",
             Undo => "⌘Z",
             Redo => "⇧⌘Z",
             Cut => "⌘X",
             Copy => "⌘C",
             Paste => "⌘V",
+            MixPaste => "⌥⌘V",
             Delete => "⌫",
             SelectAll => "⌘A",
             SelectNone => "⌘D / Esc",
             Trim => "⌘T",
             Normalize => "⇧⌘N",
             Gain => "⇧⌘G",
+            Reverse => "⇧⌘B",
             Split => "⇧⌘K",
             PlayPause => "Space",
             Stop => "Esc",
             Loop => "⌘L",
             GoStart => "Home",
             GoEnd => "End",
-            ZoomIn => "⌘= or =",
-            ZoomOut => "⌘- or -",
-            ZoomSel => "⌘E or Z",
-            ZoomFit => "⌘0 or F",
+            ZoomIn => "⌘=",
+            ZoomOut => "⌘-",
+            ZoomSel => "⌘E",
+            ZoomFit => "⌘0",
+            ToolSelect => "S",
+            ToolHand => "H",
+            ToolZoom => "Z",
+            ToolPencil => "P",
             _ => return None,
         })
     }
@@ -265,14 +324,18 @@ impl Action {
     /// One-line description for the palette tooltip.
     pub fn help(self) -> &'static str {
         match self {
+            ToolSelect => "Drag to select. Shift-click extends.",
+            ToolHand => "Drag to scroll through the sound",
+            ToolZoom => "Click to zoom in, ⌥-click to zoom out, drag to zoom to a range",
+            ToolPencil => "Draw the waveform by hand (zoom in close first)",
             Trim => "Keep only the selection",
             Delete => "Remove the selection",
             Silence => "Replace the selection with silence",
             Paste => "Insert at the cursor, or replace the selection",
             FadeIn | FadeOut => "Across the selection",
-            Normalize | Gain | Reverse => "Applies to the selection, or the whole file if nothing is selected",
+            Normalize | Gain | Reverse | Echo => "Applies to the selection, or the whole sound if nothing is selected",
             Split => "Save each separate sound as sound01.wav, sound02.wav…",
-            PlayPause => "Plays the selection if there is one",
+            ZoomFit => "Show the whole sound",
             _ => "",
         }
     }
