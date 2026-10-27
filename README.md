@@ -16,7 +16,7 @@ Try the files in `samples/`.
 
 The look is modelled on classic Mac sound editors: a platinum desktop, the sound in a document
 window (black waveform on white, selection shown inverted), and floating **Tools**, **Controls**
-and **Info** windows (Window menu, ⌘1 / ⌘2 / ⌘I). Every command is in the menu bar:
+, **Info** and **Cues** windows (Window menu, ⌘1 / ⌘2 / ⌘I / ⌘3). Every command is in the menu bar:
 **File, Edit, Insert, Effects, Control, View, Window**.
 
 **Tools** (palette, or press the key):
@@ -44,13 +44,29 @@ meters. **Info** shows the format, length, selection and peak level.
 | Export | ⌘S whole sound, ⇧⌘S selection. Bit depth is under File ▸ Export Format. |
 | Split into sounds | ⇧⌘K — see below |
 
+**Recording:** Control ▸ Record… (⌘R), or the red button in Controls, opens the Record window.
+Press Record, then Stop: the take goes in at the insertion point (or replaces the selection), or
+becomes a new sound if nothing is open. It records from the Mac's current input (System Settings ▸
+Sound ▸ Input); macOS asks for microphone permission the first time.
+
+**Cue points:** Insert ▸ Cue Point (⌘M) marks the insertion point. Cues show as blue flags in the
+ruler: drag a flag to move it, click it to jump there, and use [ and ] to step between cues. The
+Cues window lists them so you can rename, jump to or remove them. Cues move with your edits and are
+saved in exported WAV files (and read back when you open one).
+
 **Insert menu:** Silence, Tone (sine/square/triangle/sawtooth, frequency, level, length) and
 Noise, at the insertion point or replacing the selection.
 
 **Effects menu** (selection, or the whole sound if nothing is selected): Amplify, Normalize,
 Fade In/Out, Backwards, Echo, Reverb, Flanger, Smooth (low-pass), Noise Gate, Change Pitch (keeps
 the length), Change Tempo (keeps the pitch), Change Speed (tape-style) and Convert to Mono. Each
-opens a small dialog for its settings.
+opens a small dialog for its settings. Also:
+
+- **Envelope…** — draw a volume curve across the selection (0–200%), with Swell and Duck presets.
+- **Bender…** — draw a pitch curve (±12 semitones); like a tape, bending up also speeds it up.
+- **Equalizer…** — five-band graphic EQ (100 Hz, 400 Hz, 1.2 kHz, 3.5 kHz, 9 kHz, ±12 dB).
+- **Convert Format…** — change the whole sound's sample rate (8–96 kHz), mono/stereo, or reduce
+  it to 8/12/16-bit; 8 or 16 bits also sets the export format (8-bit WAV export is available).
 
 **Split into Sounds…** cuts a recording of separate clicks/hits into one file per sound and saves
 them as `sound01.wav`, `sound02.wav`… in a folder you pick. A sound starts at the first non-zero
@@ -71,12 +87,13 @@ cargo bundle --release         # .app (and .dmg) in target/release/bundle/
 cargo test --release
 ```
 
-After bundling, `cp -R "target/release/bundle/osx/Sound Edit.app" /Applications/` and
-`codesign --force --deep -s - "/Applications/Sound Edit.app"` to install.
+To install, run `scripts/install.sh`: it bundles the app, adds the microphone permission text
+macOS needs for recording, signs it ad hoc and copies it to /Applications.
 
 ## Code
 
 - `src/audio.rs` — decoding, WAV export, the edit operations, waveform peak cache
+- `src/recorder.rs` — recording from the default input
 - `src/player.rs` — playback through the default output device (resamples to the device rate)
 - `src/actions.rs` — every command with its label, icon and shortcut; the menu and palette layouts
 - `src/menu.rs` — the native macOS menu bar (muda)

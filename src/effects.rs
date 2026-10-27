@@ -313,6 +313,169 @@ pub fn mix_into(base: &Audio, at: usize, clip: &Audio, level: f32) -> Audio {
     out
 }
 
+/// Change the sample rate (with a low-pass first when going down, to avoid aliasing).
+pub fn convert_rate(clip: &Audio, rate: u32) -> Audio {
+    if rate == clip.rate {
+        return clip.clone();
+    }
+    let src = if rate < clip.rate { smooth(clip, rate as f32 * 0.45) } else { clip.clone() };
+    src.resampled(rate)
+}
+
+/// Mix down to mono, or duplicate mono to stereo.
+pub fn convert_channels(clip: &Audio, channels: usize) -> Audio {
+    match (clip.num_channels(), channels) {
+        (n, c) if n == c => clip.clone(),
+        (_, 1) => clip.to_mono(),
+        (1, c) => Audio { rate: clip.rate, channels: vec![clip.channels[0].clone(); c] },
+        (_, c) => {
+            let m = clip.to_mono();
+            Audio { rate: clip.rate, channels: vec![m.channels[0].clone(); c] }
+        }
+    }
+}
+
+/// Reduce to `bits` of resolution (to hear what an 8-bit or 12-bit version sounds like).
+pub fn quantize(clip: &Audio, bits: u32) -> Audio {
+    let steps = (1u64 << (bits.clamp(2, 24) - 1)) as f32 - 1.0;
+    map_channels(clip, |c| c.iter().map(|s| (s.clamp(-1.0, 1.0) * steps).round() / steps).collect())
+}
+
+/// RBJ biquad, used by the equalizer.
+#[derive(Clone, Copy)]
+struct Biquad {
+    b: [f32; 3],
+    a: [f32; 2],
+}
+
+impl Biquad {
+    fn new(kind: u8, sr: f32, freq: f32, gain_db: f32, q: f32) -> Biquad {
+        let a = 10f32.powf(gain_db / 40.0);
+        let w = 2.0 * PI * freq / sr;
+        let (sn, cs) = (w.sin(), w.cos());
+        let alpha = sn / (2.0 * q);
+        let (b0, b1, b2, a0, a1, a2) = match kind {
+            // low shelf
+            0 => {
+                let k = 2.0 * a.sqrt() * alpha;
+                (
+                    a * ((a + 1.0) - (a - 1.0) * cs + k),
+                    2.0 * a * ((a - 1.0) - (a + 1.0) * cs),
+                    a * ((a + 1.0) - (a - 1.0) * cs - k),
+                    (a + 1.0) + (a - 1.0) * cs + k,
+                    -2.0 * ((a - 1.0) + (a + 1.0) * cs),
+                    (a + 1.0) + (a - 1.0) * cs - k,
+                )
+            }
+            // high shelf
+            2 => {
+                let k = 2.0 * a.sqrt() * alpha;
+                (
+                    a * ((a + 1.0) + (a - 1.0) * cs + k),
+                    -2.0 * a * ((a - 1.0) + (a + 1.0) * cs),
+                    a * ((a + 1.0) + (a - 1.0) * cs - k),
+                    (a + 1.0) - (a - 1.0) * cs + k,
+                    2.0 * ((a - 1.0) - (a + 1.0) * cs),
+                    (a + 1.0) - (a - 1.0) * cs - k,
+                )
+            }
+            // peaking
+            _ => (1.0 + alpha * a, -2.0 * cs, 1.0 - alpha * a, 1.0 + alpha / a, -2.0 * cs, 1.0 - alpha / a),
+        };
+        Biquad { b: [b0 / a0, b1 / a0, b2 / a0], a: [a1 / a0, a2 / a0] }
+    }
+
+    fn run(&self, x: &[f32]) -> Vec<f32> {
+        let (mut x1, mut x2, mut y1, mut y2) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        x.iter()
+            .map(|&x0| {
+                let y0 = self.b[0] * x0 + self.b[1] * x1 + self.b[2] * x2 - self.a[0] * y1 - self.a[1] * y2;
+                x2 = x1;
+                x1 = x0;
+                y2 = y1;
+                y1 = y0;
+                y0
+            })
+            .collect()
+    }
+}
+
+/// Band centres for the equalizer: low shelf, three peaks, high shelf.
+pub const EQ_BANDS: [f32; 5] = [100.0, 400.0, 1200.0, 3500.0, 9000.0];
+
+/// Five-band equalizer; `gains_db` lines up with `EQ_BANDS`.
+pub fn equalize(clip: &Audio, gains_db: [f32; 5]) -> Audio {
+    let sr = clip.rate as f32;
+    let filters: Vec<Biquad> = EQ_BANDS
+        .iter()
+        .zip(gains_db)
+        .enumerate()
+        .filter(|(_, (_, g))| g.abs() > 0.01)
+        .map(|(i, (&f, g))| {
+            let kind = match i {
+                0 => 0,
+                4 => 2,
+                _ => 1,
+            };
+            Biquad::new(kind, sr, f.min(sr * 0.45), g, if kind == 1 { 1.0 } else { 0.707 })
+        })
+        .collect();
+    map_channels(clip, |c| filters.iter().fold(c.to_vec(), |acc, f| f.run(&acc)))
+}
+
+/// Linear interpolation through curve points (t in 0..1, sorted by t).
+pub fn curve_at(points: &[(f32, f32)], t: f32) -> f32 {
+    match points {
+        [] => 0.0,
+        [only] => only.1,
+        _ => {
+            if t <= points[0].0 {
+                return points[0].1;
+            }
+            for w in points.windows(2) {
+                let ((t0, v0), (t1, v1)) = (w[0], w[1]);
+                if t <= t1 {
+                    let k = if t1 > t0 { (t - t0) / (t1 - t0) } else { 0.0 };
+                    return v0 + (v1 - v0) * k;
+                }
+            }
+            points[points.len() - 1].1
+        }
+    }
+}
+
+/// Volume envelope: `points` are (position 0..1, gain) pairs.
+pub fn envelope(clip: &Audio, points: &[(f32, f32)]) -> Audio {
+    let n = clip.frames().max(1) as f32;
+    map_channels(clip, |c| c.iter().enumerate().map(|(i, s)| s * curve_at(points, i as f32 / n)).collect())
+}
+
+/// Bender: tape-style pitch bend following a curve of (position 0..1, semitones). Bending up
+/// plays faster, so the result gets shorter (and longer when bending down).
+pub fn bender(clip: &Audio, points: &[(f32, f32)]) -> Audio {
+    let n = clip.frames();
+    if n < 2 {
+        return clip.clone();
+    }
+    let mut positions = Vec::with_capacity(n);
+    let mut p = 0.0f64;
+    while p < (n - 1) as f64 {
+        positions.push(p);
+        let st = curve_at(points, (p / n as f64) as f32) as f64;
+        p += 2f64.powf(st / 12.0);
+    }
+    map_channels(clip, |c| {
+        positions
+            .iter()
+            .map(|&p| {
+                let i = p as usize;
+                let t = (p - i as f64) as f32;
+                c[i] * (1.0 - t) + c[(i + 1).min(n - 1)] * t
+            })
+            .collect()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,5 +517,25 @@ mod tests {
         assert_eq!(g.channels[0][100], 0.5);
         assert_eq!(g.channels[0][500], 0.0);
         assert_eq!(g.find_sounds(10), vec![(100, 101)]);
+    }
+
+    #[test]
+    fn conversions_eq_and_curves() {
+        let a = sine(1.0);
+        assert_eq!(convert_rate(&a, 22050).frames(), 22050);
+        assert_eq!(convert_channels(&a, 1).num_channels(), 1);
+        let q = quantize(&a, 8);
+        assert!(q.channels[0].iter().all(|s| ((s * 127.0).round() - s * 127.0).abs() < 1e-3));
+        // Flat EQ leaves the sound alone; a boost raises the level of a 100 Hz tone.
+        let flat = equalize(&a, [0.0; 5]);
+        assert_eq!(flat.channels, a.channels);
+        let low = tone(44100, 1, 1.0, 100.0, -12.0, Wave::Sine);
+        let boosted = equalize(&low, [9.0, 0.0, 0.0, 0.0, 0.0]);
+        assert!(boosted.peak(4410, 44100) > low.peak(4410, 44100) * 1.5);
+        assert_eq!(curve_at(&[(0.0, 0.0), (1.0, 2.0)], 0.25), 0.5);
+        let env = envelope(&a, &[(0.0, 0.0), (1.0, 0.0)]);
+        assert_eq!(env.peak(0, env.frames()), 0.0);
+        let up = bender(&a, &[(0.0, 12.0), (1.0, 12.0)]).frames();
+        assert!((up as i64 - a.frames() as i64 / 2).abs() < 10, "{up}");
     }
 }

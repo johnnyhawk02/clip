@@ -11,10 +11,11 @@ use eframe::egui::{
 };
 
 use crate::actions::{self, Action};
-use crate::audio::{self, Audio, Peaks, WavFormat};
+use crate::audio::{self, Audio, Cue, Peaks, WavFormat};
 use crate::effects::{self, Wave};
 use crate::menu::NativeMenu;
 use crate::player::Player;
+use crate::recorder::Recorder;
 
 type Sel = (usize, usize);
 
@@ -23,6 +24,7 @@ const UNDO_BUDGET_BYTES: usize = 2 << 30;
 
 struct Snapshot {
     audio: Arc<Audio>,
+    cues: Vec<Cue>,
     sel: Option<Sel>,
     cursor: usize,
     label: &'static str,
@@ -62,6 +64,8 @@ enum Dialog {
     InsertTone,
     InsertNoise,
     MixPaste,
+    Convert,
+    Equalizer,
 }
 
 struct Field {
@@ -73,17 +77,52 @@ struct Field {
     speed: f32,
     suffix: &'static str,
     decimals: usize,
+    /// When set, the field is a pop-up menu of (label, value) instead of a number.
+    choices: &'static [(&'static str, f32)],
 }
 
 const fn field(key: &'static str, label: &'static str, min: f32, max: f32, default: f32, speed: f32, suffix: &'static str, decimals: usize) -> Field {
-    Field { key, label, min, max, default, speed, suffix, decimals }
+    Field { key, label, min, max, default, speed, suffix, decimals, choices: &[] }
+}
+
+const fn choice(key: &'static str, label: &'static str, default: f32, choices: &'static [(&'static str, f32)]) -> Field {
+    Field { key, label, min: 0.0, max: 0.0, default, speed: 0.0, suffix: "", decimals: 0, choices }
+}
+
+/// A curve the user draws over the selection: volume (Envelope) or pitch (Bender).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CurveKind {
+    Envelope,
+    Bender,
+}
+
+impl CurveKind {
+    fn range(self) -> (f32, f32) {
+        match self {
+            CurveKind::Envelope => (0.0, 2.0),
+            CurveKind::Bender => (-12.0, 12.0),
+        }
+    }
+
+    fn flat(self) -> Vec<(f32, f32)> {
+        let v = if self == CurveKind::Envelope { 1.0 } else { 0.0 };
+        vec![(0.0, v), (1.0, v)]
+    }
+
+    fn format(self, v: f32) -> String {
+        match self {
+            CurveKind::Envelope => format!("{:.0}%", v * 100.0),
+            CurveKind::Bender => format!("{v:+.1} st"),
+        }
+    }
 }
 
 impl Dialog {
-    const ALL: [Dialog; 15] = [
+    const ALL: [Dialog; 17] = [
         Dialog::Normalize, Dialog::Amplify, Dialog::Split, Dialog::Echo, Dialog::Reverb, Dialog::Flanger,
         Dialog::Smooth, Dialog::NoiseGate, Dialog::Pitch, Dialog::Tempo, Dialog::Speed,
         Dialog::InsertSilence, Dialog::InsertTone, Dialog::InsertNoise, Dialog::MixPaste,
+        Dialog::Convert, Dialog::Equalizer,
     ];
 
     fn title(self) -> &'static str {
@@ -103,6 +142,8 @@ impl Dialog {
             Dialog::InsertTone => "Insert Tone",
             Dialog::InsertNoise => "Insert Noise",
             Dialog::MixPaste => "Mix Paste",
+            Dialog::Convert => "Convert Format",
+            Dialog::Equalizer => "Equalizer",
         }
     }
 
@@ -129,6 +170,10 @@ impl Dialog {
                 "Inserted at the cursor, or replaces the selection.".to_string()
             }
             Dialog::MixPaste => "Mix the clipboard into the sound, starting at the cursor or selection start.".to_string(),
+            Dialog::Convert => "Change the whole sound's sample rate, channels or resolution. Choosing 8 or 16 bits \
+                                also sets the export format."
+                .to_string(),
+            Dialog::Equalizer => format!("Boost or cut frequency bands in {scope}."),
         }
     }
 
@@ -171,6 +216,26 @@ impl Dialog {
                 field("noise_secs", "Length", 0.01, 600.0, 1.0, 0.01, " s", 2),
             ] },
             Dialog::MixPaste => const { &[field("mix_db", "Clipboard level", -48.0, 12.0, 0.0, 0.1, " dB", 1)] },
+            Dialog::Convert => const {
+                &[
+                    choice("conv_rate", "Sample rate", 0.0, &[
+                        ("Keep", 0.0), ("8 kHz", 8000.0), ("11.025 kHz", 11025.0), ("16 kHz", 16000.0),
+                        ("22.05 kHz", 22050.0), ("32 kHz", 32000.0), ("44.1 kHz", 44100.0), ("48 kHz", 48000.0),
+                        ("96 kHz", 96000.0),
+                    ]),
+                    choice("conv_ch", "Channels", 0.0, &[("Keep", 0.0), ("Mono", 1.0), ("Stereo", 2.0)]),
+                    choice("conv_bits", "Resolution", 0.0, &[("Keep", 0.0), ("8-bit", 8.0), ("12-bit", 12.0), ("16-bit", 16.0)]),
+                ]
+            },
+            Dialog::Equalizer => const {
+                &[
+                    field("eq0", "100 Hz", -12.0, 12.0, 0.0, 0.1, " dB", 1),
+                    field("eq1", "400 Hz", -12.0, 12.0, 0.0, 0.1, " dB", 1),
+                    field("eq2", "1.2 kHz", -12.0, 12.0, 0.0, 0.1, " dB", 1),
+                    field("eq3", "3.5 kHz", -12.0, 12.0, 0.0, 0.1, " dB", 1),
+                    field("eq4", "9 kHz", -12.0, 12.0, 0.0, 0.1, " dB", 1),
+                ]
+            },
         }
     }
 }
@@ -226,6 +291,16 @@ pub struct App {
     info_peak: Option<((usize, Option<Sel>), f32)>,
     /// The area behind the document window; floating windows are placed relative to it.
     desk: Rect,
+    cues: Vec<Cue>,
+    cue_drag: Option<usize>,
+    show_cues: bool,
+    recorder: Option<Recorder>,
+    show_record: bool,
+    rec_meter: f32,
+    curve: Option<CurveKind>,
+    env_points: Vec<(f32, f32)>,
+    bend_points: Vec<(f32, f32)>,
+    curve_drag: Option<usize>,
     /// Frames drawn so far.
     frame_count: u64,
     /// Per floating window: the frame until which it is held at its starting position (set the
@@ -277,6 +352,16 @@ impl App {
             meter: Vec::new(),
             info_peak: None,
             desk: Rect::NOTHING,
+            cues: Vec::new(),
+            cue_drag: None,
+            show_cues: false,
+            recorder: None,
+            show_record: false,
+            rec_meter: 0.0,
+            curve: None,
+            env_points: CurveKind::Envelope.flat(),
+            bend_points: CurveKind::Bender.flat(),
+            curve_drag: None,
             frame_count: 0,
             place_until: HashMap::new(),
         };
@@ -341,6 +426,7 @@ impl App {
                 self.sel = None;
                 self.cursor = 0;
                 self.dirty = false;
+                self.cues = audio::read_wav_cues(&path);
                 self.path = Some(path);
                 self.set_audio(Arc::new(a));
                 self.zoom_fit();
@@ -387,7 +473,17 @@ impl App {
         if out.extension().is_none() {
             out.set_extension("wav");
         }
-        match audio::save_wav(&a, &out, self.wav_format) {
+        let (lo, hi) = match (selection_only, self.sel) {
+            (true, Some(r)) => r,
+            _ => (0, usize::MAX),
+        };
+        let cues: Vec<Cue> = self
+            .cues
+            .iter()
+            .filter(|c| c.frame >= lo && c.frame < hi)
+            .map(|c| Cue { frame: c.frame - lo, name: c.name.clone() })
+            .collect();
+        match audio::save_wav(&a, &out, self.wav_format).and_then(|_| audio::write_wav_cues(&out, &cues)) {
             Ok(()) => {
                 self.status = format!(
                     "Exported {} ({}, {})",
@@ -416,7 +512,7 @@ impl App {
 
     fn push_undo(&mut self, label: &'static str) {
         let Some(a) = self.audio.clone() else { return };
-        self.undo.push(Snapshot { audio: a, sel: self.sel, cursor: self.cursor, label });
+        self.undo.push(Snapshot { audio: a, cues: self.cues.clone(), sel: self.sel, cursor: self.cursor, label });
         self.redo.clear();
         // Drop oldest steps beyond the memory budget (always keep at least one).
         let mut total: usize = self.undo.iter().map(|s| s.audio.bytes()).sum();
@@ -426,7 +522,16 @@ impl App {
     }
 
     fn apply(&mut self, label: &'static str, new: Audio, sel: Option<Sel>) {
+        self.apply_edit(label, new, sel, &[]);
+    }
+
+    /// Like `apply`, for edits that change the length: each (at, removed, inserted) moves the
+    /// cue points to follow the audio.
+    fn apply_edit(&mut self, label: &'static str, new: Audio, sel: Option<Sel>, shifts: &[(usize, usize, usize)]) {
         self.push_undo(label);
+        for &(at, removed, inserted) in shifts {
+            self.shift_cues(at, removed, inserted);
+        }
         self.sel = sel;
         let was_playing = self.player.is_playing();
         self.set_audio(Arc::new(new));
@@ -437,10 +542,32 @@ impl App {
         self.status = format!("{label} — ⌘Z to undo");
     }
 
+    /// `removed` frames at `at` were replaced by `inserted` frames. Cues inside the replaced
+    /// part scale into the new part (or go, if nothing replaced it); later cues move along.
+    fn shift_cues(&mut self, at: usize, removed: usize, inserted: usize) {
+        if removed == inserted {
+            return;
+        }
+        self.cues.retain_mut(|c| {
+            if c.frame < at {
+                true
+            } else if c.frame < at + removed {
+                if inserted == 0 {
+                    return false;
+                }
+                c.frame = at + ((c.frame - at) as f64 * inserted as f64 / removed as f64) as usize;
+                true
+            } else {
+                c.frame = c.frame + inserted - removed;
+                true
+            }
+        });
+    }
+
     fn undo(&mut self) {
         let Some(snap) = self.undo.pop() else { return };
         let cur = self.audio.clone().unwrap();
-        self.redo.push(Snapshot { audio: cur, sel: self.sel, cursor: self.cursor, label: snap.label });
+        self.redo.push(Snapshot { audio: cur, cues: std::mem::replace(&mut self.cues, snap.cues), sel: self.sel, cursor: self.cursor, label: snap.label });
         self.sel = snap.sel;
         self.cursor = snap.cursor;
         self.set_audio(snap.audio);
@@ -451,7 +578,7 @@ impl App {
     fn redo(&mut self) {
         let Some(snap) = self.redo.pop() else { return };
         let cur = self.audio.clone().unwrap();
-        self.undo.push(Snapshot { audio: cur, sel: self.sel, cursor: self.cursor, label: snap.label });
+        self.undo.push(Snapshot { audio: cur, cues: std::mem::replace(&mut self.cues, snap.cues), sel: self.sel, cursor: self.cursor, label: snap.label });
         self.sel = snap.sel;
         self.cursor = snap.cursor;
         self.set_audio(snap.audio);
@@ -462,7 +589,8 @@ impl App {
     fn trim(&mut self) {
         let (Some(a), Some((s, e))) = (self.audio.clone(), self.sel) else { return };
         self.cursor = 0;
-        self.apply("Trim to selection", a.crop(s, e), None);
+        let n = a.frames();
+        self.apply_edit("Trim to selection", a.crop(s, e), None, &[(e, n - e, 0), (0, s, 0)]);
         self.zoom_fit();
     }
 
@@ -473,7 +601,7 @@ impl App {
             return;
         }
         self.cursor = s;
-        self.apply("Delete selection", a.delete(s, e), None);
+        self.apply_edit("Delete selection", a.delete(s, e), None, &[(s, e - s, 0)]);
     }
 
     fn copy(&mut self, ctx: &egui::Context) -> bool {
@@ -491,9 +619,9 @@ impl App {
             let (Some(a), Some((s, e))) = (self.audio.clone(), self.sel) else { return };
             self.cursor = s;
             if e - s >= a.frames() {
-                self.apply("Cut", a.empty_like(), None);
+                self.apply_edit("Cut", a.empty_like(), None, &[(s, e - s, 0)]);
             } else {
-                self.apply("Cut", a.delete(s, e), None);
+                self.apply_edit("Cut", a.delete(s, e), None, &[(s, e - s, 0)]);
             }
         }
     }
@@ -504,7 +632,7 @@ impl App {
         let new = a.insert(at, end, &clip);
         let pasted_len = new.frames() + (end - at) - a.frames();
         self.cursor = at;
-        self.apply("Paste", new, Some((at, at + pasted_len)));
+        self.apply_edit("Paste", new, Some((at, at + pasted_len)), &[(at, end - at, pasted_len)]);
     }
 
     fn fade(&mut self, fade_in: bool) {
@@ -568,16 +696,17 @@ impl App {
         let out = f(&a.slice(s, e));
         let len = out.frames();
         let sel = self.sel.map(|_| (s, s + len));
-        self.apply(label, a.insert(s, e, &out), sel);
+        self.apply_edit(label, a.insert(s, e, &out), sel, &[(s, e - s, len)]);
     }
 
     /// Insert a generated clip at the cursor, replacing the selection if there is one.
     fn insert_clip(&mut self, label: &'static str, clip: Audio) {
         let Some(a) = self.audio.clone() else { return };
         let (at, end) = self.sel.unwrap_or((self.cursor, self.cursor));
-        let len = clip.frames();
+        let new = a.insert(at, end, &clip);
+        let len = new.frames() + (end - at) - a.frames();
         self.cursor = at;
-        self.apply(label, a.insert(at, end, &clip), Some((at, at + len)));
+        self.apply_edit(label, new, Some((at, at + len)), &[(at, end - at, len)]);
     }
 
     fn mix_paste(&mut self) {
@@ -635,6 +764,126 @@ impl App {
             }
             Dialog::InsertNoise => self.insert_clip("Insert Noise", effects::noise(rate, nch, p("noise_secs"), p("noise_db"))),
             Dialog::MixPaste => self.mix_paste(),
+            Dialog::Equalizer => {
+                let g = [p("eq0"), p("eq1"), p("eq2"), p("eq3"), p("eq4")];
+                self.process("Equalizer", |c| effects::equalize(c, g));
+            }
+            Dialog::Convert => self.convert_format(p("conv_rate") as u32, p("conv_ch") as usize, p("conv_bits") as u32),
+        }
+    }
+
+    /// Convert the whole sound's format (0 = keep that property).
+    fn convert_format(&mut self, rate: u32, channels: usize, bits: u32) {
+        let Some(a) = self.audio.clone() else { return };
+        let mut out = (*a).clone();
+        if channels > 0 {
+            out = effects::convert_channels(&out, channels);
+        }
+        if rate > 0 && rate != out.rate {
+            out = effects::convert_rate(&out, rate);
+        }
+        if bits > 0 {
+            out = effects::quantize(&out, bits);
+            match bits {
+                8 => self.wav_format = WavFormat::Pcm8,
+                16 => self.wav_format = WavFormat::Pcm16,
+                _ => {}
+            }
+        }
+        // Positions are in frames, so cues, cursor, selection and view follow the new rate.
+        let k = out.rate as f64 / a.rate as f64;
+        let scale = |f: usize| (f as f64 * k) as usize;
+        let (cursor, view_start, view_len) = (self.cursor, self.view_start, self.view_len);
+        let sel = self.sel.map(|(s, e)| (scale(s), scale(e)));
+        self.apply("Convert Format", out, sel);
+        for c in &mut self.cues {
+            c.frame = scale(c.frame);
+        }
+        self.cursor = scale(cursor);
+        self.view_start = view_start * k;
+        self.view_len = view_len * k;
+        self.clamp_view();
+        let a = self.audio.as_ref().unwrap();
+        self.status = format!("Converted to {} Hz, {} ch — ⌘Z to undo", a.rate, a.num_channels());
+    }
+
+    fn apply_curve(&mut self, kind: CurveKind) {
+        match kind {
+            CurveKind::Envelope => {
+                let pts = self.env_points.clone();
+                self.process("Envelope", |c| effects::envelope(c, &pts));
+            }
+            CurveKind::Bender => {
+                let pts = self.bend_points.clone();
+                self.process("Bender", |c| effects::bender(c, &pts));
+            }
+        }
+    }
+
+    fn add_cue(&mut self) {
+        let at = self.sel.map_or(self.cursor, |(s, _)| s);
+        if self.cues.iter().any(|c| c.frame == at) {
+            return;
+        }
+        let n = (1..).find(|i| !self.cues.iter().any(|c| c.name == format!("Cue {i}"))).unwrap();
+        self.push_undo("Cue Point");
+        self.cues.push(Cue { frame: at, name: format!("Cue {n}") });
+        self.cues.sort_by_key(|c| c.frame);
+        self.dirty = true;
+        self.status = format!("Added Cue {n} — name it in Window ▸ Cues");
+    }
+
+    fn jump_cue(&mut self, forward: bool) {
+        let from = self.sel.map_or(self.cursor, |(s, _)| s);
+        let target = if forward {
+            self.cues.iter().map(|c| c.frame).find(|&f| f > from)
+        } else {
+            self.cues.iter().rev().map(|c| c.frame).find(|&f| f < from)
+        };
+        if let Some(f) = target {
+            self.go_to(f);
+        }
+    }
+
+    /// Move the insertion point to `f` and scroll it into view.
+    fn go_to(&mut self, f: usize) {
+        self.sel = None;
+        self.cursor = f;
+        self.play_origin = f;
+        if (f as f64) < self.view_start || (f as f64) > self.view_start + self.view_len {
+            self.view_start = f as f64 - self.view_len * 0.1;
+            self.clamp_view();
+        }
+    }
+
+    fn start_recording(&mut self) {
+        self.player.stop();
+        match Recorder::start() {
+            Ok(r) => {
+                self.status = format!("Recording at {} Hz, {} ch…", r.rate, r.channels);
+                self.recorder = Some(r);
+            }
+            Err(e) => self.status = format!("Can't record: {e}"),
+        }
+    }
+
+    fn stop_recording(&mut self) {
+        let Some(r) = self.recorder.take() else { return };
+        let clip = r.finish();
+        if clip.frames() == 0 {
+            self.status = "Nothing was recorded".into();
+            return;
+        }
+        let secs = clip.duration_secs();
+        if self.audio.is_none() {
+            self.new_sound();
+            self.set_audio(Arc::new(clip));
+            self.zoom_fit();
+            self.dirty = true;
+            self.status = format!("Recorded {} into a new sound", fmt_time(secs));
+        } else {
+            self.insert_clip("Record", clip);
+            self.status = format!("Recorded {} — ⌘Z to undo", fmt_time(secs));
         }
     }
 
@@ -646,6 +895,7 @@ impl App {
         self.cursor = 0;
         self.dirty = false;
         self.path = None;
+        self.cues.clear();
         self.set_audio(Arc::new(Audio { rate: 44100, channels: vec![Vec::new(); 2] }));
         self.zoom_fit();
         self.status = "New sound (44.1 kHz stereo). Use the Insert menu, Paste or Mix Paste to add audio.".into();
@@ -767,7 +1017,10 @@ impl App {
         let not_empty = self.frames() > 0;
         match a {
             Action::New | Action::Open | Action::Quit => true,
-            Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop => true,
+            Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop => true,
+            Action::ShowCues | Action::Record => true,
+            Action::AddCue => has,
+            Action::NextCue | Action::PrevCue => has && !self.cues.is_empty(),
             Action::ShowTools | Action::ShowControls | Action::ShowInfo => true,
             Action::ToolSelect | Action::ToolHand | Action::ToolZoom | Action::ToolPencil => true,
             Action::Undo => !self.undo.is_empty(),
@@ -792,6 +1045,7 @@ impl App {
     fn checked(&self, a: Action) -> bool {
         match a {
             Action::Loop => self.looping,
+            Action::FormatPcm8 => self.wav_format == WavFormat::Pcm8,
             Action::FormatPcm16 => self.wav_format == WavFormat::Pcm16,
             Action::FormatPcm24 => self.wav_format == WavFormat::Pcm24,
             Action::FormatFloat32 => self.wav_format == WavFormat::Float32,
@@ -802,6 +1056,8 @@ impl App {
             Action::ShowTools => self.show_tools,
             Action::ShowControls => self.show_controls,
             Action::ShowInfo => self.show_info,
+            Action::ShowCues => self.show_cues,
+            Action::Record => self.recorder.is_some(),
             _ => false,
         }
     }
@@ -830,6 +1086,7 @@ impl App {
             Action::Open => self.open_dialog(ctx),
             Action::Export => self.export(false),
             Action::ExportSelection => self.export(true),
+            Action::FormatPcm8 => self.wav_format = WavFormat::Pcm8,
             Action::FormatPcm16 => self.wav_format = WavFormat::Pcm16,
             Action::FormatPcm24 => self.wav_format = WavFormat::Pcm24,
             Action::FormatFloat32 => self.wav_format = WavFormat::Float32,
@@ -894,6 +1151,21 @@ impl App {
             Action::ShowTools => self.show_tools = !self.show_tools,
             Action::ShowControls => self.show_controls = !self.show_controls,
             Action::ShowInfo => self.show_info = !self.show_info,
+            Action::ShowCues => self.show_cues = !self.show_cues,
+            Action::Convert => self.dialog = Some(Dialog::Convert),
+            Action::Equalizer => self.dialog = Some(Dialog::Equalizer),
+            Action::Envelope => self.curve = Some(CurveKind::Envelope),
+            Action::Bender => self.curve = Some(CurveKind::Bender),
+            Action::Record => {
+                if self.recorder.is_some() {
+                    self.stop_recording();
+                } else {
+                    self.show_record = true;
+                }
+            }
+            Action::AddCue => self.add_cue(),
+            Action::NextCue => self.jump_cue(true),
+            Action::PrevCue => self.jump_cue(false),
         }
     }
 
@@ -919,6 +1191,8 @@ impl App {
             (none, Key::H, Action::ToolHand),
             (none, Key::Z, Action::ToolZoom),
             (none, Key::P, Action::ToolPencil),
+            (none, Key::OpenBracket, Action::PrevCue),
+            (none, Key::CloseBracket, Action::NextCue),
         ];
         for &(m, k, a) in keys {
             if ctx.input_mut(|i| i.consume_key(m, k)) {
@@ -1033,8 +1307,8 @@ impl App {
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(3.0, 4.0);
                 egui::Grid::new("transport").spacing(Vec2::new(3.0, 0.0)).show(ui, |ui| {
-                    for a in [Action::GoStart, Action::PlayPause, Action::Stop, Action::Loop, Action::GoEnd] {
-                        self.palette_button(ui, a, Vec2::new(38.0, 26.0));
+                    for a in [Action::GoStart, Action::PlayPause, Action::Stop, Action::Record, Action::Loop, Action::GoEnd] {
+                        self.palette_button(ui, a, Vec2::new(32.0, 26.0));
                     }
                 });
                 let rate = self.audio.as_ref().map_or(44100, |a| a.rate) as f64;
@@ -1156,6 +1430,270 @@ impl App {
         self.show_info = open;
     }
 
+    /// Envelope / Bender: draw a curve over the selection, then apply it.
+    fn curve_window(&mut self, ctx: &egui::Context) {
+        let Some(kind) = self.curve else { return };
+        let Some(a) = self.audio.clone() else {
+            self.curve = None;
+            return;
+        };
+        let (s, e) = self.range_or_all();
+        let scope = if self.sel.is_some() { "the selection" } else { "the whole sound" };
+        let (lo, hi) = kind.range();
+        let mut apply = false;
+        let mut cancel = false;
+        let resp = egui::Modal::new(egui::Id::unique("curve")).show(ctx, |ui| {
+            ui.set_width(480.0);
+            match kind {
+                CurveKind::Envelope => {
+                    ui.heading("Envelope");
+                    ui.label(format!("Draw how the volume of {scope} changes over time (0–200%)."));
+                }
+                CurveKind::Bender => {
+                    ui.heading("Bender");
+                    ui.label(format!(
+                        "Draw a pitch curve across {scope} (±12 semitones). Like a tape, bending up also \
+                         speeds it up and bending down slows it down."
+                    ));
+                }
+            }
+            ui.label("Click to add a point, drag to move it, double-click a point to remove it.");
+            ui.add_space(4.0);
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(480.0, 170.0), Sense::click_and_drag());
+            let p = ui.painter_at(rect.expand(4.0));
+            p.rect_filled(rect, 0.0, Color32::WHITE);
+            // The selection's waveform, faintly, so the curve can be lined up with the sound.
+            let w = rect.width() as usize;
+            let len = (e - s).max(1);
+            for px in 0..w {
+                let f0 = s + px * len / w;
+                let f1 = (s + (px + 1) * len / w).max(f0 + 1).min(e.max(f0 + 1)).min(a.frames());
+                if f0 >= f1 {
+                    continue;
+                }
+                let peak = a.channels.iter().map(|c| c[f0..f1].iter().fold(0.0f32, |m, v| m.max(v.abs()))).fold(0.0, f32::max);
+                let h = peak.min(1.0) * rect.height() * 0.48;
+                let x = rect.left() + px as f32 + 0.5;
+                p.line_segment([Pos2::new(x, rect.center().y - h), Pos2::new(x, rect.center().y + h)], Stroke::new(1.0, Color32::from_gray(215)));
+            }
+            let to_screen = |(t, v): (f32, f32)| Pos2::new(rect.left() + t * rect.width(), rect.bottom() - (v - lo) / (hi - lo) * rect.height());
+            let from_screen = |q: Pos2| {
+                (((q.x - rect.left()) / rect.width()).clamp(0.0, 1.0), (lo + (rect.bottom() - q.y) / rect.height() * (hi - lo)).clamp(lo, hi))
+            };
+            // Reference lines.
+            let refs: &[f32] = if kind == CurveKind::Envelope { &[0.0, 1.0, 2.0] } else { &[-12.0, 0.0, 12.0] };
+            for &v in refs {
+                let y = to_screen((0.0, v)).y;
+                p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.0, Color32::from_gray(if v == refs[1] { 150 } else { 225 })));
+                p.text(Pos2::new(rect.left() + 3.0, y), if v == hi { Align2::LEFT_TOP } else { Align2::LEFT_BOTTOM }, kind.format(v), FontId::proportional(10.0), Color32::from_gray(110));
+            }
+            let points = match kind {
+                CurveKind::Envelope => &mut self.env_points,
+                CurveKind::Bender => &mut self.bend_points,
+            };
+            let near = |q: Pos2, pts: &[(f32, f32)]| pts.iter().position(|&pt| to_screen(pt).distance(q) < 7.0);
+            if resp.drag_started() {
+                let origin = ui.input(|i| i.pointer.press_origin());
+                self.curve_drag = origin.and_then(|q| near(q, points)).or_else(|| {
+                    // Dragging from empty space adds a point and moves it.
+                    let (t, v) = from_screen(origin?);
+                    let i = points.iter().position(|&(pt, _)| pt > t)?;
+                    points.insert(i, (t, v));
+                    Some(i)
+                });
+            }
+            if let (Some(i), Some(q)) = (self.curve_drag, resp.interact_pointer_pos()) {
+                if resp.dragged() && i < points.len() {
+                    let (t, v) = from_screen(q);
+                    let last = points.len() - 1;
+                    // End points stay at the ends; inner points stay between their neighbours.
+                    let t = if i == 0 {
+                        0.0
+                    } else if i == last {
+                        1.0
+                    } else {
+                        t.clamp(points[i - 1].0 + 0.001, points[i + 1].0 - 0.001)
+                    };
+                    points[i] = (t, v);
+                }
+            }
+            if resp.drag_stopped() {
+                self.curve_drag = None;
+            }
+            if resp.double_clicked() {
+                if let Some(i) = resp.interact_pointer_pos().and_then(|q| near(q, points)) {
+                    if i != 0 && i != points.len() - 1 {
+                        points.remove(i);
+                    }
+                }
+            } else if resp.clicked() {
+                if let Some(q) = resp.interact_pointer_pos() {
+                    if near(q, points).is_none() {
+                        let (t, v) = from_screen(q);
+                        if let Some(i) = points.iter().position(|&(pt, _)| pt > t) {
+                            points.insert(i, (t, v));
+                        }
+                    }
+                }
+            }
+            let line: Vec<Pos2> = points.iter().map(|&pt| to_screen(pt)).collect();
+            p.add(egui::Shape::line(line.clone(), Stroke::new(1.5, Color32::BLACK)));
+            for q in line {
+                p.rect_filled(Rect::from_center_size(q, Vec2::splat(7.0)), 0.0, Color32::BLACK);
+            }
+            if let Some(q) = resp.hover_pos() {
+                p.text(rect.right_top() + Vec2::new(-4.0, 3.0), Align2::RIGHT_TOP, kind.format(from_screen(q).1), FontId::monospace(10.0), Color32::from_gray(90));
+            }
+            p.rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Outside);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                apply = ui.button("OK").clicked();
+                cancel = ui.button("Cancel").clicked();
+                ui.add_space(20.0);
+                if ui.button("Reset").clicked() {
+                    *points = kind.flat();
+                }
+                if kind == CurveKind::Envelope {
+                    if ui.button("Swell").clicked() {
+                        *points = vec![(0.0, 0.0), (0.5, 1.0), (1.0, 0.0)];
+                    }
+                    if ui.button("Duck").clicked() {
+                        *points = vec![(0.0, 1.0), (0.2, 0.3), (0.8, 0.3), (1.0, 1.0)];
+                    }
+                } else {
+                    if ui.button("Dive").clicked() {
+                        *points = vec![(0.0, 0.0), (1.0, -12.0)];
+                    }
+                    if ui.button("Wobble").clicked() {
+                        *points = (0..=8).map(|i| (i as f32 / 8.0, if i % 2 == 0 { 0.0 } else { 2.0 })).collect();
+                    }
+                }
+            });
+        });
+        apply |= ctx.input(|i| i.key_pressed(Key::Enter));
+        if cancel || resp.should_close() {
+            self.curve = None;
+        } else if apply {
+            self.curve = None;
+            self.apply_curve(kind);
+        }
+    }
+
+    /// Floating list of cue points: rename, jump to, delete.
+    fn cues_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_cues;
+        let rate = self.audio.as_ref().map_or(44100, |a| a.rate) as f64;
+        let mut go: Option<usize> = None;
+        let mut remove: Option<usize> = None;
+        let mut add = false;
+        let mut renamed = false;
+        self.place("Cues", Pos2::new(self.desk.right() - 330.0, self.desk.bottom() - 138.0))
+            .open(&mut open)
+            .auto_sized()
+            .fade_in(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                if self.cues.is_empty() {
+                    ui.label("No cue points yet.");
+                    ui.label("Insert ▸ Cue Point (⌘M) adds one at the cursor.");
+                }
+                egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
+                    egui::Grid::new("cues").num_columns(4).spacing(Vec2::new(6.0, 3.0)).show(ui, |ui| {
+                        for (i, c) in self.cues.iter_mut().enumerate() {
+                            if ui.add_sized([120.0, 20.0], egui::TextEdit::singleline(&mut c.name)).changed() {
+                                renamed = true;
+                            }
+                            ui.label(egui::RichText::new(fmt_time(c.frame as f64 / rate)).monospace());
+                            if ui.small_button("Go").clicked() {
+                                go = Some(c.frame);
+                            }
+                            if ui.small_button("×").on_hover_text("Remove this cue").clicked() {
+                                remove = Some(i);
+                            }
+                            ui.end_row();
+                        }
+                    });
+                });
+                ui.add_space(2.0);
+                add = ui.add_enabled(self.audio.is_some(), Button::new("Add at Cursor")).clicked();
+            });
+        self.show_cues = open;
+        if renamed {
+            self.dirty = true;
+        }
+        if let Some(f) = go {
+            self.go_to(f);
+        }
+        if let Some(i) = remove {
+            self.push_undo("Remove Cue");
+            self.cues.remove(i);
+            self.dirty = true;
+        }
+        if add {
+            self.add_cue();
+        }
+    }
+
+    /// Record window: record from the default input, then insert at the cursor.
+    fn record_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_record;
+        let recording = self.recorder.is_some();
+        if let Some(r) = &self.recorder {
+            self.rec_meter = r.take_peak().max(self.rec_meter * 0.85);
+            ctx.request_repaint();
+        } else {
+            self.rec_meter *= 0.85;
+        }
+        let mut toggle = false;
+        self.place("Record", Pos2::new(self.desk.center().x - 130.0, self.desk.center().y - 80.0))
+            .open(&mut open)
+            .auto_sized()
+            .fade_in(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.set_width(250.0);
+                ui.horizontal(|ui| {
+                    let label = if recording { "■ Stop" } else { "● Record" };
+                    let btn = Button::new(egui::RichText::new(label).size(16.0).color(if recording { Color32::BLACK } else { Color32::from_rgb(200, 0, 0) }))
+                        .min_size(Vec2::new(110.0, 32.0));
+                    toggle = ui.add(btn).clicked();
+                    let secs = self.recorder.as_ref().map_or(0.0, |r| r.seconds());
+                    ui.label(egui::RichText::new(fmt_time(secs)).monospace().size(18.0));
+                });
+                let (r, _) = ui.allocate_exact_size(Vec2::new(250.0, 10.0), Sense::hover());
+                let p = ui.painter();
+                let segs = 34;
+                let db = 20.0 * self.rec_meter.max(1e-6).log10();
+                let lit = (((db + 48.0) / 48.0).clamp(0.0, 1.0) * segs as f32).round() as usize;
+                let w = r.width() / segs as f32;
+                for i in 0..segs {
+                    let seg = Rect::from_min_size(Pos2::new(r.left() + i as f32 * w, r.top()), Vec2::new(w - 1.0, r.height()));
+                    let col = match (i < lit, i >= segs - 4) {
+                        (true, true) => Color32::from_rgb(220, 0, 0),
+                        (true, false) => Color32::BLACK,
+                        _ => Color32::from_gray(200),
+                    };
+                    p.rect_filled(seg, 0.0, col);
+                }
+                ui.label(if self.audio.is_some() {
+                    "Records from the Mac's current input. The recording goes in at the cursor, or replaces the selection."
+                } else {
+                    "Records from the Mac's current input into a new sound."
+                });
+            });
+        if toggle {
+            if recording {
+                self.stop_recording();
+            } else {
+                self.start_recording();
+            }
+        }
+        if !open && self.recorder.is_some() {
+            self.stop_recording();
+        }
+        self.show_record = open;
+    }
+
     fn dialog_window(&mut self, ctx: &egui::Context) {
         let Some(kind) = self.dialog else { return };
         let scope = if self.sel.is_some() { "the selection" } else { "the whole sound" };
@@ -1167,9 +1705,19 @@ impl App {
             ui.label(kind.blurb(scope));
             ui.add_space(6.0);
             egui::Grid::new("fields").num_columns(2).spacing(Vec2::new(10.0, 6.0)).show(ui, |ui| {
-                for f in kind.fields() {
+                for f in kind.fields().iter().filter(|_| kind != Dialog::Equalizer) {
                     ui.label(f.label);
                     let v = self.params.entry(f.key).or_insert(f.default);
+                    if !f.choices.is_empty() {
+                        let current = f.choices.iter().find(|c| c.1 == *v).map_or("?", |c| c.0);
+                        egui::ComboBox::from_id_salt(f.key).selected_text(current).show_ui(ui, |ui| {
+                            for &(label, value) in f.choices {
+                                ui.selectable_value(v, value, label);
+                            }
+                        });
+                        ui.end_row();
+                        continue;
+                    }
                     ui.add(
                         egui::DragValue::new(v)
                             .range(f.min..=f.max)
@@ -1189,6 +1737,25 @@ impl App {
                     ui.end_row();
                 }
             });
+            if kind == Dialog::Equalizer {
+                // Graphic-EQ style: a vertical slider per band.
+                ui.horizontal(|ui| {
+                    for f in kind.fields() {
+                        ui.vertical(|ui| {
+                            ui.set_width(56.0);
+                            let v = self.params.entry(f.key).or_insert(f.default);
+                            ui.add(egui::Slider::new(v, f.min..=f.max).vertical().show_value(false));
+                            ui.label(egui::RichText::new(format!("{:+.1}", *v)).monospace().size(10.0));
+                            ui.label(egui::RichText::new(f.label).size(11.0));
+                        });
+                    }
+                });
+                if ui.small_button("Flat").clicked() {
+                    for f in kind.fields() {
+                        self.params.insert(f.key, 0.0);
+                    }
+                }
+            }
             if kind == Dialog::Split {
                 if let Some(a) = &self.audio {
                     let (s, e) = self.sel.unwrap_or((0, a.frames()));
@@ -1281,9 +1848,40 @@ impl App {
         let press = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos());
         match self.tool {
             Tool::Select => {
-                if resp.hovered() {
+                // Cue flags in the ruler can be dragged along, or clicked to jump there.
+                let flag_at = |q: Pos2, cues: &[Cue], vs: f64, vl: f64| {
+                    (q.y <= ruler.bottom()).then(|| {
+                        cues.iter().position(|c| (wave.left() + ((c.frame as f64 - vs) / vl) as f32 * wave.width() - q.x).abs() < 6.0)
+                    })?
+                };
+                let hover_flag = resp.hover_pos().and_then(|q| flag_at(q, &self.cues, self.view_start, self.view_len));
+                if hover_flag.is_some() || self.cue_drag.is_some() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                } else if resp.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
                 }
+                if resp.drag_started() {
+                    if let Some(i) = press.and_then(|q| flag_at(q, &self.cues, self.view_start, self.view_len)) {
+                        self.push_undo("Move Cue");
+                        self.cue_drag = Some(i);
+                    }
+                }
+                if let Some(i) = self.cue_drag {
+                    if let Some(q) = resp.interact_pointer_pos() {
+                        if let Some(c) = self.cues.get_mut(i) {
+                            c.frame = x_to_frame(q.x.clamp(wave.left(), wave.right()), self.view_start, self.view_len);
+                        }
+                    }
+                    if resp.drag_stopped() {
+                        self.cue_drag = None;
+                        self.cues.sort_by_key(|c| c.frame);
+                        self.dirty = true;
+                    }
+                } else if resp.clicked() && resp.interact_pointer_pos().and_then(|q| flag_at(q, &self.cues, self.view_start, self.view_len)).is_some() {
+                    let i = resp.interact_pointer_pos().and_then(|q| flag_at(q, &self.cues, self.view_start, self.view_len)).unwrap();
+                    let f = self.cues[i].frame;
+                    self.go_to(f);
+                } else {
                 if resp.drag_started() {
                     if let Some(p) = press {
                         let f = x_to_frame(p.x, self.view_start, self.view_len);
@@ -1348,6 +1946,7 @@ impl App {
                 }
                 if resp.double_clicked() && n > 0 {
                     self.sel = Some((0, n));
+                }
                 }
             }
             Tool::Hand => {
@@ -1566,6 +2165,27 @@ impl App {
             }
         }
 
+        // Cue points: a dotted line through the sound and a labelled flag in the ruler.
+        for c in &self.cues {
+            let x = frame_to_x(c.frame as f64);
+            if x < wave.left() - 1.0 || x > wave.right() + 1.0 {
+                continue;
+            }
+            let in_sel = matches!(self.sel, Some((s, e)) if c.frame >= s && c.frame < e);
+            let col = if in_sel { Color32::from_rgb(255, 210, 0) } else { Color32::from_rgb(0, 90, 200) };
+            painter.add(egui::Shape::dashed_line(&[Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, col), 4.0, 3.0));
+            painter.add(egui::Shape::convex_polygon(
+                vec![Pos2::new(x, ruler.top() + 2.0), Pos2::new(x + 7.0, ruler.top() + 6.0), Pos2::new(x, ruler.top() + 10.0)],
+                Color32::from_rgb(0, 90, 200),
+                Stroke::NONE,
+            ));
+            painter.line_segment([Pos2::new(x, ruler.top() + 2.0), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, Color32::from_rgb(0, 90, 200)));
+            let label = painter.layout_no_wrap(c.name.clone(), FontId::proportional(10.0), Color32::from_rgb(0, 60, 160));
+            let bg = Rect::from_min_size(Pos2::new(x + 8.0, ruler.top() + 1.0), label.size() + Vec2::new(4.0, 0.0));
+            painter.rect_filled(bg, 0.0, Color32::from_gray(230));
+            painter.galley(bg.min + Vec2::new(2.0, 0.0), label, Color32::from_rgb(0, 60, 160));
+        }
+
         // Insertion point (blinks like a text caret) and playhead.
         let cx = frame_to_x(self.cursor as f64);
         let blink = (ui.input(|i| i.time) * 2.0) as i64 % 2 == 0;
@@ -1696,7 +2316,7 @@ impl eframe::App for App {
         let title = if self.audio.is_some() { format!("{name}{} — Sound Edit", if self.dirty { " (edited)" } else { "" }) } else { "Sound Edit".into() };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        let modal_open = self.pending.is_some() || self.dialog.is_some();
+        let modal_open = self.pending.is_some() || self.dialog.is_some() || self.curve.is_some();
         for a in self.menu.poll() {
             if !modal_open {
                 self.run(a, &ctx);
@@ -1739,6 +2359,13 @@ impl eframe::App for App {
         if self.show_controls {
             self.controls_window(&ctx);
         }
+        if self.show_cues {
+            self.cues_window(&ctx);
+        }
+        if self.show_record || self.recorder.is_some() {
+            self.show_record = true;
+            self.record_window(&ctx);
+        }
         if self.show_info {
             self.info_window(&ctx);
         }
@@ -1752,6 +2379,7 @@ impl eframe::App for App {
         }
 
         self.dialog_window(&ctx);
+        self.curve_window(&ctx);
         self.confirm_dialog(&ctx);
         self.run_automation(&ctx);
         self.frame_count += 1;
@@ -1895,6 +2523,9 @@ impl App {
                     "apply" => {
                         if let Some(d) = self.dialog.take() {
                             self.apply_dialog(d);
+                        }
+                        if let Some(k) = self.curve.take() {
+                            self.apply_curve(k);
                         }
                     }
                     "set" => {
@@ -2107,6 +2738,10 @@ fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color32, playing:
         Action::PlayPause => fill(&[(-5.0, -7.0), (7.0, 0.0), (-5.0, 7.0)]),
         Action::Stop => {
             p.rect_filled(Rect::from_center_size(c, Vec2::splat(11.0)), 0.0, color);
+        }
+        Action::Record => {
+            let red = if color == Color32::WHITE { Color32::WHITE } else if color == Color32::BLACK { Color32::from_rgb(210, 0, 0) } else { color };
+            p.circle_filled(c, 6.5, red);
         }
         Action::Loop => {
             let pts: Vec<Pos2> = (0..=24)

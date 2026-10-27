@@ -6,6 +6,7 @@ mod audio;
 mod effects;
 mod menu;
 mod player;
+mod recorder;
 
 fn main() -> eframe::Result {
     // Optional: open a file passed on the command line.

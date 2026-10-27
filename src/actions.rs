@@ -7,6 +7,7 @@ pub enum Action {
     Open,
     Export,
     ExportSelection,
+    FormatPcm8,
     FormatPcm16,
     FormatPcm24,
     FormatFloat32,
@@ -56,17 +57,27 @@ pub enum Action {
     ShowTools,
     ShowControls,
     ShowInfo,
+    Convert,
+    Equalizer,
+    Envelope,
+    Bender,
+    Record,
+    AddCue,
+    NextCue,
+    PrevCue,
+    ShowCues,
 }
 
 use Action::*;
 
 pub const ALL: &[Action] = &[
-    New, Open, Export, ExportSelection, FormatPcm16, FormatPcm24, FormatFloat32, Quit, Undo, Redo,
+    New, Open, Export, ExportSelection, FormatPcm8, FormatPcm16, FormatPcm24, FormatFloat32, Quit, Undo, Redo,
     Cut, Copy, Paste, MixPaste, Delete, SelectAll, SelectNone, Trim, Silence, InsertSilence,
     InsertTone, InsertNoise, FadeIn, FadeOut, Normalize, Gain, Reverse, Echo, Reverb, Flanger,
     Smooth, NoiseGate, Pitch, Tempo, Speed, ToMono, Split, PlayPause, Stop, Loop, GoStart, GoEnd,
     ZoomIn, ZoomOut, ZoomSel, ZoomFit, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
-    ShowControls, ShowInfo,
+    ShowControls, ShowInfo, Convert, Equalizer, Envelope, Bender, Record, AddCue, NextCue, PrevCue,
+    ShowCues,
 ];
 
 pub enum Item {
@@ -89,7 +100,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Separator,
             Do(Export),
             Do(ExportSelection),
-            Sub("Export Format", &[Do(FormatPcm16), Do(FormatPcm24), Do(FormatFloat32)]),
+            Sub("Export Format", &[Do(FormatPcm8), Do(FormatPcm16), Do(FormatPcm24), Do(FormatFloat32)]),
             Separator,
             Do(Split),
         ],
@@ -113,7 +124,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(Silence),
         ],
     ),
-    ("Insert", &[Do(InsertSilence), Do(InsertTone), Do(InsertNoise)]),
+    ("Insert", &[Do(InsertSilence), Do(InsertTone), Do(InsertNoise), Separator, Do(AddCue)]),
     (
         "Effects",
         &[
@@ -122,7 +133,9 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Separator,
             Do(FadeIn),
             Do(FadeOut),
+            Do(Envelope),
             Separator,
+            Do(Equalizer),
             Do(Reverse),
             Do(Echo),
             Do(Reverb),
@@ -133,11 +146,16 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(Pitch),
             Do(Tempo),
             Do(Speed),
+            Do(Bender),
             Separator,
+            Do(Convert),
             Do(ToMono),
         ],
     ),
-    ("Control", &[Do(PlayPause), Do(Stop), Do(Loop), Separator, Do(GoStart), Do(GoEnd)]),
+    (
+        "Control",
+        &[Do(PlayPause), Do(Stop), Do(Loop), Separator, Do(Record), Separator, Do(GoStart), Do(GoEnd), Do(PrevCue), Do(NextCue)],
+    ),
     (
         "View",
         &[
@@ -154,7 +172,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
     ),
 ];
 
-pub const WINDOW_MENU: &[Item] = &[Do(ShowTools), Do(ShowControls), Do(ShowInfo)];
+pub const WINDOW_MENU: &[Item] = &[Do(ShowTools), Do(ShowControls), Do(ShowInfo), Do(ShowCues)];
 
 /// Tools palette layout, two buttons per row; `None` is a gap between groups.
 pub const PALETTE: &[Option<[Action; 2]>] = &[
@@ -188,7 +206,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo)
+            || matches!(self, Loop | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
     }
 
     pub fn label(self) -> &'static str {
@@ -197,6 +215,7 @@ impl Action {
             Open => "Open…",
             Export => "Export WAV…",
             ExportSelection => "Export Selection…",
+            FormatPcm8 => "8-bit PCM",
             FormatPcm16 => "16-bit PCM",
             FormatPcm24 => "24-bit PCM",
             FormatFloat32 => "32-bit Float",
@@ -246,6 +265,15 @@ impl Action {
             ShowTools => "Tools",
             ShowControls => "Controls",
             ShowInfo => "Info",
+            Convert => "Convert Format…",
+            Equalizer => "Equalizer…",
+            Envelope => "Envelope…",
+            Bender => "Bender…",
+            Record => "Record…",
+            AddCue => "Cue Point",
+            NextCue => "Next Cue Point",
+            PrevCue => "Previous Cue Point",
+            ShowCues => "Cues",
         }
     }
 
@@ -279,6 +307,9 @@ impl Action {
             ShowTools => "CmdOrCtrl+1",
             ShowControls => "CmdOrCtrl+2",
             ShowInfo => "CmdOrCtrl+I",
+            ShowCues => "CmdOrCtrl+3",
+            Record => "CmdOrCtrl+R",
+            AddCue => "CmdOrCtrl+M",
             _ => return None,
         })
     }
@@ -317,6 +348,10 @@ impl Action {
             ToolHand => "H",
             ToolZoom => "Z",
             ToolPencil => "P",
+            Record => "⌘R",
+            AddCue => "⌘M",
+            NextCue => "]",
+            PrevCue => "[",
             _ => return None,
         })
     }
