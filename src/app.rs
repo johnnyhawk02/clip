@@ -2177,7 +2177,7 @@ impl App {
             }
         }
 
-        // Scroll bar: platinum track with a lavender thumb.
+        // Scroll bar: light track with a grey thumb.
         painter.rect_filled(scroll, 0.0, PANEL);
         painter.line_segment([scroll.left_top(), scroll.right_top()], Stroke::new(1.0, LINE));
         let thumb_col = if self.scrollbar_drag { Color32::from_gray(120) } else { Color32::from_gray(185) };
