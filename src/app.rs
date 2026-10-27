@@ -785,7 +785,10 @@ impl App {
 
         let shift = ui.input(|i| i.modifiers.shift);
         if resp.drag_started() {
-            if let Some(p) = resp.interact_pointer_pos() {
+            // Anchor at where the button went down, not where the drag was recognised
+            // (egui only reports a drag after the pointer has moved a few pixels).
+            let origin = ui.input(|i| i.pointer.press_origin());
+            if let Some(p) = origin.or(resp.interact_pointer_pos()) {
                 let f = x_to_frame(p.x, self.view_start, self.view_len);
                 self.drag_anchor = Some(match (shift, self.sel) {
                     // Shift-drag extends the existing selection from its far end.
