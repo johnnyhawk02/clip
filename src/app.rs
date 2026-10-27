@@ -1,5 +1,5 @@
-//! The editor window: classic-Mac styled document view with floating Tools, Controls and Info
-//! windows, effect dialogs, menus and shortcuts.
+//! The editor window: tools, waveform view, transport bar and Info/Cues panel, effect dialogs,
+//! menus and shortcuts.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -320,7 +320,7 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>) -> App {
-        classic_style(&cc.egui_ctx);
+        clean_style(&cc.egui_ctx);
         let player = Player::new();
         let status = match &player.error {
             Some(e) => format!("Audio output unavailable: {e}"),
@@ -849,7 +849,7 @@ impl App {
         self.cues.push(Cue { frame: at, name: format!("Cue {n}") });
         self.cues.sort_by_key(|c| c.frame);
         self.dirty = true;
-        self.status = format!("Added Cue {n} — name it in Window ▸ Cues");
+        self.status = format!("Added Cue {n} — rename it in the Cues panel (⌘3)");
     }
 
     fn jump_cue(&mut self, forward: bool) {
@@ -1245,9 +1245,9 @@ impl App {
         let color = if selected {
             Color32::WHITE
         } else if enabled {
-            Color32::BLACK
+            INK
         } else {
-            Color32::from_gray(150)
+            Color32::from_gray(185)
         };
         paint_icon(ui.painter(), resp.rect, a, color, playing);
         if resp.on_hover_text(tip).on_disabled_hover_text(a.label()).clicked() {
@@ -1269,38 +1269,28 @@ impl App {
         }
     }
 
-    /// Floating Tools palette: editing tools on top, common commands below.
-    fn tools_window(&mut self, ctx: &egui::Context) {
-        let mut open = self.show_tools;
-        self.place("Tools", self.desk.min + Vec2::new(12.0, 12.0))
-            .open(&mut open)
-            .auto_sized()
-            .fade_in(false)
-            .collapsible(false)
-            .show(ctx, |ui| {
-                egui::Grid::new("palette").spacing(Vec2::new(2.0, 2.0)).show(ui, |ui| {
-                    for row in actions::PALETTE {
-                        match row {
-                            Some(pair) => {
-                                for a in pair {
-                                    self.palette_button(ui, *a, Vec2::new(30.0, 28.0));
-                                }
-                            }
-                            None => {
-                                ui.add_space(2.0);
-                            }
+    /// Tools column on the left: editing tools on top, common commands below.
+    fn tools_panel(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        egui::Grid::new("palette").spacing(Vec2::new(4.0, 4.0)).show(ui, |ui| {
+            for row in actions::PALETTE {
+                match row {
+                    Some(pair) => {
+                        for a in pair {
+                            self.palette_button(ui, *a, Vec2::new(30.0, 28.0));
                         }
-                        ui.end_row();
                     }
-                });
-            });
-        self.show_tools = open;
+                    None => {
+                        ui.add_space(4.0);
+                    }
+                }
+                ui.end_row();
+            }
+        });
     }
 
-    /// Floating tape-deck style Controls: transport, counter and level meters.
-    fn controls_window(&mut self, ctx: &egui::Context) {
-        let mut open = self.show_controls;
-        // Level meters follow the playhead and fall back smoothly.
+    /// Update the playback level meters (they follow the playhead and fall back smoothly).
+    fn update_meters(&mut self, ctx: &egui::Context) {
         let n_ch = self.audio.as_ref().map_or(2, |a| a.num_channels().max(1));
         self.meter.resize(n_ch, 0.0);
         let playing = self.player.is_playing();
@@ -1318,69 +1308,52 @@ impl App {
         if self.meter.iter().any(|m| *m > 0.001) {
             ctx.request_repaint();
         }
-
-        self.place("Controls", Pos2::new(self.desk.left() + 112.0, self.desk.bottom() - 138.0))
-            .open(&mut open)
-            .auto_sized()
-            .fade_in(false)
-            .collapsible(false)
-            .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(3.0, 4.0);
-                egui::Grid::new("transport").spacing(Vec2::new(3.0, 0.0)).show(ui, |ui| {
-                    for a in [Action::GoStart, Action::PlayPause, Action::Stop, Action::Record, Action::Loop, Action::GoEnd] {
-                        self.palette_button(ui, a, Vec2::new(32.0, 26.0));
-                    }
-                });
-                let rate = self.audio.as_ref().map_or(44100, |a| a.rate) as f64;
-                let at = if playing { pos } else { self.cursor };
-                let (counter_rect, _) = ui.allocate_exact_size(Vec2::new(202.0, 30.0), Sense::hover());
-                let p = ui.painter();
-                p.rect_filled(counter_rect, 0.0, Color32::from_rgb(20, 30, 20));
-                p.rect_stroke(counter_rect, 0.0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Inside);
-                p.text(
-                    counter_rect.left_center() + Vec2::new(8.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    fmt_time(at as f64 / rate),
-                    FontId::monospace(20.0),
-                    Color32::from_rgb(120, 255, 120),
-                );
-                if let Some((s, e)) = self.sel {
-                    p.text(
-                        counter_rect.right_center() - Vec2::new(8.0, 0.0),
-                        Align2::RIGHT_CENTER,
-                        format!("sel {}", fmt_time((e - s) as f64 / rate)),
-                        FontId::monospace(11.0),
-                        Color32::from_rgb(90, 200, 90),
-                    );
-                }
-                // Segmented level meters, one per channel.
-                for (c, level) in self.meter.clone().iter().enumerate() {
-                    let (r, _) = ui.allocate_exact_size(Vec2::new(counter_rect.width(), 9.0), Sense::hover());
-                    let p = ui.painter();
-                    let segs = 32;
-                    let db = 20.0 * level.max(1e-6).log10();
-                    let lit = (((db + 48.0) / 48.0).clamp(0.0, 1.0) * segs as f32).round() as usize;
-                    let w = (r.width() - 12.0) / segs as f32;
-                    p.text(r.left_center(), Align2::LEFT_CENTER, if c == 0 { "L" } else { "R" }, FontId::monospace(9.0), Color32::BLACK);
-                    for i in 0..segs {
-                        let x = r.left() + 12.0 + i as f32 * w;
-                        let seg = Rect::from_min_size(Pos2::new(x, r.top()), Vec2::new(w - 1.0, r.height()));
-                        let on = i < lit;
-                        let col = match (on, i >= segs - 4) {
-                            (true, true) => Color32::from_rgb(220, 0, 0),
-                            (true, false) => Color32::BLACK,
-                            (false, _) => Color32::from_gray(200),
-                        };
-                        p.rect_filled(seg, 0.0, col);
-                    }
-                }
-            });
-        self.show_controls = open;
     }
 
-    /// Floating Info window with details about the sound and the selection.
-    fn info_window(&mut self, ctx: &egui::Context) {
-        let mut open = self.show_info;
+    /// Transport bar along the bottom: buttons, time counter and level meters.
+    fn transport_panel(&mut self, ui: &mut egui::Ui) {
+        let playing = self.player.is_playing();
+        let pos = self.player.position();
+        ui.horizontal_centered(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for a in [Action::GoStart, Action::PlayPause, Action::Stop, Action::Record, Action::Loop, Action::GoEnd] {
+                self.palette_button(ui, a, Vec2::new(34.0, 28.0));
+            }
+            ui.add_space(12.0);
+            let rate = self.audio.as_ref().map_or(44100, |a| a.rate) as f64;
+            let at = if playing { pos } else { self.cursor };
+            ui.label(egui::RichText::new(fmt_time(at as f64 / rate)).monospace().size(20.0).color(INK));
+            if let Some((s, e)) = self.sel {
+                ui.label(egui::RichText::new(format!("sel {}", fmt_time((e - s) as f64 / rate))).monospace().size(12.0).color(MUTED));
+            }
+            ui.add_space(12.0);
+            let meters = self.meter.clone();
+            let (r, _) = ui.allocate_exact_size(Vec2::new(180.0, 22.0), Sense::hover());
+            let h = (r.height() - 2.0 * (meters.len().saturating_sub(1)) as f32) / meters.len().max(1) as f32;
+            for (c, level) in meters.iter().enumerate() {
+                let row = Rect::from_min_size(Pos2::new(r.left(), r.top() + c as f32 * (h + 2.0)), Vec2::new(r.width(), h));
+                draw_meter(ui.painter(), row, *level);
+            }
+        });
+    }
+
+    /// Right-hand side panel with the Info and Cues sections.
+    fn side_panel(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        if self.show_info {
+            ui.label(egui::RichText::new("INFO").size(11.0).color(MUTED).strong());
+            ui.add_space(4.0);
+            self.info_section(ui);
+            ui.add_space(14.0);
+        }
+        if self.show_cues {
+            ui.label(egui::RichText::new("CUES").size(11.0).color(MUTED).strong());
+            ui.add_space(4.0);
+            self.cues_section(ui);
+        }
+    }
+
+    fn info_section(&mut self, ui: &mut egui::Ui) {
         let peak = self.audio.as_ref().map(|a| {
             let key = (Arc::as_ptr(a) as usize, self.sel);
             match self.info_peak {
@@ -1393,61 +1366,100 @@ impl App {
                 }
             }
         });
-        self.place("Info", Pos2::new(self.desk.left() + 350.0, self.desk.bottom() - 138.0))
-            .open(&mut open)
-            .auto_sized()
-            .fade_in(false)
-            .collapsible(false)
-            .show(ctx, |ui| {
-                let Some(a) = &self.audio else {
-                    ui.label("No sound open.");
-                    return;
-                };
-                let r = a.rate as f64;
-                egui::Grid::new("info").num_columns(2).spacing(Vec2::new(12.0, 2.0)).show(ui, |ui| {
-                    ui.label("Sound");
-                    ui.label(self.path.as_deref().map(file_name).unwrap_or_else(|| "Untitled".into()));
+        let Some(a) = &self.audio else {
+            ui.label("No sound open.");
+            return;
+        };
+        let r = a.rate as f64;
+        let key = |ui: &mut egui::Ui, t: &str| {
+            ui.label(egui::RichText::new(t).color(MUTED));
+        };
+        egui::Grid::new("info").num_columns(2).spacing(Vec2::new(12.0, 4.0)).show(ui, |ui| {
+            key(ui, "Sound");
+            ui.label(self.path.as_deref().map(file_name).unwrap_or_else(|| "Untitled".into()));
+            ui.end_row();
+            key(ui, "Format");
+            ui.label(format!(
+                "{} Hz, {}",
+                a.rate,
+                match a.num_channels() {
+                    1 => "mono".to_string(),
+                    2 => "stereo".to_string(),
+                    n => format!("{n} channels"),
+                }
+            ));
+            ui.end_row();
+            key(ui, "Length");
+            ui.label(format!("{}  ({} samples)", fmt_time(a.duration_secs()), a.frames()));
+            ui.end_row();
+            match self.sel {
+                Some((s, e)) => {
+                    key(ui, "Selection");
+                    ui.label(format!("{} – {}", fmt_time(s as f64 / r), fmt_time(e as f64 / r)));
                     ui.end_row();
-                    ui.label("Format");
-                    ui.label(format!(
-                        "{} Hz, {}",
-                        a.rate,
-                        match a.num_channels() {
-                            1 => "mono".to_string(),
-                            2 => "stereo".to_string(),
-                            n => format!("{n} channels"),
-                        }
-                    ));
+                    key(ui, "Sel. length");
+                    ui.label(format!("{}  ({} samples)", fmt_time((e - s) as f64 / r), e - s));
                     ui.end_row();
-                    ui.label("Length");
-                    ui.label(format!("{}  ({} samples)", fmt_time(a.duration_secs()), a.frames()));
+                }
+                None => {
+                    key(ui, "Cursor");
+                    ui.label(fmt_time(self.cursor as f64 / r));
                     ui.end_row();
-                    match self.sel {
-                        Some((s, e)) => {
-                            ui.label("Selection");
-                            ui.label(format!("{} – {}", fmt_time(s as f64 / r), fmt_time(e as f64 / r)));
-                            ui.end_row();
-                            ui.label("Sel. length");
-                            ui.label(format!("{}  ({} samples)", fmt_time((e - s) as f64 / r), e - s));
-                            ui.end_row();
-                        }
-                        None => {
-                            ui.label("Cursor");
-                            ui.label(fmt_time(self.cursor as f64 / r));
-                            ui.end_row();
-                        }
+                }
+            }
+            if let Some(p) = peak {
+                key(ui, "Peak");
+                ui.label(if p > 0.0 { format!("{:.1} dB", 20.0 * p.log10()) } else { "silent".into() });
+                ui.end_row();
+            }
+            key(ui, "Export as");
+            ui.label(self.wav_format.label());
+            ui.end_row();
+        });
+    }
+
+    /// List of cue points: rename, jump to, delete.
+    fn cues_section(&mut self, ui: &mut egui::Ui) {
+        let rate = self.audio.as_ref().map_or(44100, |a| a.rate) as f64;
+        let mut go: Option<usize> = None;
+        let mut remove: Option<usize> = None;
+        let mut renamed = false;
+        if self.cues.is_empty() {
+            ui.label(egui::RichText::new("No cue points yet. Insert ▸ Cue Point (⌘M) adds one at the cursor.").color(MUTED));
+        }
+        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+            egui::Grid::new("cues").num_columns(4).spacing(Vec2::new(6.0, 4.0)).show(ui, |ui| {
+                for (i, c) in self.cues.iter_mut().enumerate() {
+                    if ui.add_sized([110.0, 20.0], egui::TextEdit::singleline(&mut c.name)).changed() {
+                        renamed = true;
                     }
-                    if let Some(p) = peak {
-                        ui.label("Peak");
-                        ui.label(if p > 0.0 { format!("{:.1} dB", 20.0 * p.log10()) } else { "silent".into() });
-                        ui.end_row();
+                    ui.label(egui::RichText::new(fmt_time(c.frame as f64 / rate)).monospace().color(MUTED));
+                    if ui.small_button("Go").clicked() {
+                        go = Some(c.frame);
                     }
-                    ui.label("Export as");
-                    ui.label(self.wav_format.label());
+                    if ui.small_button("×").on_hover_text("Remove this cue").clicked() {
+                        remove = Some(i);
+                    }
                     ui.end_row();
-                });
+                }
             });
-        self.show_info = open;
+        });
+        ui.add_space(4.0);
+        let add = ui.add_enabled(self.audio.is_some(), Button::new("Add at Cursor")).clicked();
+        if renamed {
+            self.dirty = true;
+        }
+        if let Some(f) = go {
+            self.go_to(f);
+        }
+        if let Some(i) = remove {
+            self.push_undo("Remove Cue");
+            self.cues.remove(i);
+            self.dirty = true;
+        }
+        if add {
+            self.add_cue();
+        }
     }
 
     /// Envelope / Bender: draw a curve over the selection, then apply it.
@@ -1599,61 +1611,6 @@ impl App {
         }
     }
 
-    /// Floating list of cue points: rename, jump to, delete.
-    fn cues_window(&mut self, ctx: &egui::Context) {
-        let mut open = self.show_cues;
-        let rate = self.audio.as_ref().map_or(44100, |a| a.rate) as f64;
-        let mut go: Option<usize> = None;
-        let mut remove: Option<usize> = None;
-        let mut add = false;
-        let mut renamed = false;
-        self.place("Cues", Pos2::new(self.desk.right() - 330.0, self.desk.bottom() - 138.0))
-            .open(&mut open)
-            .auto_sized()
-            .fade_in(false)
-            .collapsible(false)
-            .show(ctx, |ui| {
-                if self.cues.is_empty() {
-                    ui.label("No cue points yet.");
-                    ui.label("Insert ▸ Cue Point (⌘M) adds one at the cursor.");
-                }
-                egui::ScrollArea::vertical().max_height(160.0).show(ui, |ui| {
-                    egui::Grid::new("cues").num_columns(4).spacing(Vec2::new(6.0, 3.0)).show(ui, |ui| {
-                        for (i, c) in self.cues.iter_mut().enumerate() {
-                            if ui.add_sized([120.0, 20.0], egui::TextEdit::singleline(&mut c.name)).changed() {
-                                renamed = true;
-                            }
-                            ui.label(egui::RichText::new(fmt_time(c.frame as f64 / rate)).monospace());
-                            if ui.small_button("Go").clicked() {
-                                go = Some(c.frame);
-                            }
-                            if ui.small_button("×").on_hover_text("Remove this cue").clicked() {
-                                remove = Some(i);
-                            }
-                            ui.end_row();
-                        }
-                    });
-                });
-                ui.add_space(2.0);
-                add = ui.add_enabled(self.audio.is_some(), Button::new("Add at Cursor")).clicked();
-            });
-        self.show_cues = open;
-        if renamed {
-            self.dirty = true;
-        }
-        if let Some(f) = go {
-            self.go_to(f);
-        }
-        if let Some(i) = remove {
-            self.push_undo("Remove Cue");
-            self.cues.remove(i);
-            self.dirty = true;
-        }
-        if add {
-            self.add_cue();
-        }
-    }
-
     /// Record window: record from the default input, then insert at the cursor.
     fn record_window(&mut self, ctx: &egui::Context) {
         let mut open = self.show_record;
@@ -1665,7 +1622,7 @@ impl App {
             self.rec_meter *= 0.85;
         }
         let mut toggle = false;
-        self.place("Record", Pos2::new(self.desk.center().x - 130.0, self.desk.center().y - 80.0))
+        self.place("Record", Pos2::new(self.desk.center().x - 135.0, self.desk.top() + 40.0))
             .open(&mut open)
             .auto_sized()
             .fade_in(false)
@@ -1674,27 +1631,14 @@ impl App {
                 ui.set_width(250.0);
                 ui.horizontal(|ui| {
                     let label = if recording { "■ Stop" } else { "● Record" };
-                    let btn = Button::new(egui::RichText::new(label).size(16.0).color(if recording { Color32::BLACK } else { Color32::from_rgb(200, 0, 0) }))
+                    let btn = Button::new(egui::RichText::new(label).size(15.0).color(INK))
                         .min_size(Vec2::new(110.0, 32.0));
                     toggle = ui.add(btn).clicked();
                     let secs = self.recorder.as_ref().map_or(0.0, |r| r.seconds());
                     ui.label(egui::RichText::new(fmt_time(secs)).monospace().size(18.0));
                 });
-                let (r, _) = ui.allocate_exact_size(Vec2::new(250.0, 10.0), Sense::hover());
-                let p = ui.painter();
-                let segs = 34;
-                let db = 20.0 * self.rec_meter.max(1e-6).log10();
-                let lit = (((db + 48.0) / 48.0).clamp(0.0, 1.0) * segs as f32).round() as usize;
-                let w = r.width() / segs as f32;
-                for i in 0..segs {
-                    let seg = Rect::from_min_size(Pos2::new(r.left() + i as f32 * w, r.top()), Vec2::new(w - 1.0, r.height()));
-                    let col = match (i < lit, i >= segs - 4) {
-                        (true, true) => Color32::from_rgb(220, 0, 0),
-                        (true, false) => Color32::BLACK,
-                        _ => Color32::from_gray(200),
-                    };
-                    p.rect_filled(seg, 0.0, col);
-                }
+                let (r, _) = ui.allocate_exact_size(Vec2::new(250.0, 8.0), Sense::hover());
+                draw_meter(ui.painter(), r, self.rec_meter);
                 ui.label(if self.audio.is_some() {
                     "Records from the Mac's current input. The recording goes in at the cursor, or replaces the selection."
                 } else {
@@ -2083,7 +2027,7 @@ impl App {
             }
         }
 
-        // --- painting: black waveform on white, selection shown inverted ---
+        // --- painting: dark waveform on white, selection as a grey band ---
         let audio = self.audio.clone().unwrap();
         let painter = ui.painter_at(full);
         let vs = self.view_start;
@@ -2092,12 +2036,12 @@ impl App {
         let black = Color32::BLACK;
 
         painter.rect_filled(wave, 0.0, Color32::WHITE);
-        painter.rect_filled(ruler, 0.0, Color32::from_gray(214));
-        painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0, black));
+        painter.rect_filled(ruler, 0.0, PANEL);
+        painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0, LINE));
         if let Some((s, e)) = self.sel {
             let (x0, x1) = (frame_to_x(s as f64).max(wave.left()), frame_to_x(e as f64).min(wave.right()));
             if x1 > x0 {
-                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, ruler.top()), Pos2::new(x1, ruler.bottom() - 1.0)), 0.0, Color32::from_gray(170));
+                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, ruler.top()), Pos2::new(x1, ruler.bottom() - 1.0)), 0.0, Color32::from_gray(222));
             }
         }
 
@@ -2113,21 +2057,21 @@ impl App {
             if x >= wave.left() {
                 let major = k % 5 == 0;
                 let h = if major { 7.0 } else { 3.0 };
-                painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, black));
+                painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, MUTED));
                 if major {
-                    painter.line_segment([Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, Color32::from_gray(232)));
-                    painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, fmt_tick(t, step), FontId::proportional(11.0), black);
+                    painter.line_segment([Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, Color32::from_gray(242)));
+                    painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, fmt_tick(t, step), FontId::proportional(11.0), MUTED);
                 }
             }
             k += 1;
             t = k as f64 * minor;
         }
 
-        // Selection: inverted (black) background.
+        // Selection: a grey band behind the waveform.
         let sel_px = self.sel.map(|(s, e)| (frame_to_x(s as f64).max(wave.left()), frame_to_x(e as f64).min(wave.right())));
         if let Some((x0, x1)) = sel_px {
             if x1 > x0 {
-                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, wave.top()), Pos2::new(x1, wave.bottom())), 0.0, black);
+                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, wave.top()), Pos2::new(x1, wave.bottom())), 0.0, Color32::from_gray(222));
             }
         }
 
@@ -2138,11 +2082,11 @@ impl App {
             let mid = top + lane_h / 2.0;
             let amp = lane_h / 2.0 * 0.92;
             let in_sel = |f: usize| matches!(self.sel, Some((s, e)) if f >= s && f < e);
-            let color_at = |f: usize| if in_sel(f) { Color32::WHITE } else { black };
+            let color_at = |f: usize| if in_sel(f) { black } else { Color32::from_gray(55) };
             // Centre line, drawn per segment so it inverts inside the selection.
-            painter.line_segment([Pos2::new(wave.left(), mid), Pos2::new(wave.right(), mid)], Stroke::new(1.0, Color32::from_gray(170)));
+            painter.line_segment([Pos2::new(wave.left(), mid), Pos2::new(wave.right(), mid)], Stroke::new(1.0, Color32::from_gray(205)));
             if ci > 0 {
-                painter.line_segment([Pos2::new(wave.left(), top), Pos2::new(wave.right(), top)], Stroke::new(1.0, black));
+                painter.line_segment([Pos2::new(wave.left(), top), Pos2::new(wave.right(), top)], Stroke::new(1.0, LINE));
             }
             if spp <= 1.5 {
                 // Zoomed in: connect individual samples.
@@ -2198,18 +2142,18 @@ impl App {
                 continue;
             }
             let in_sel = matches!(self.sel, Some((s, e)) if c.frame >= s && c.frame < e);
-            let col = if in_sel { Color32::from_rgb(255, 210, 0) } else { Color32::from_rgb(0, 90, 200) };
+            let col = if in_sel { black } else { Color32::from_gray(110) };
             painter.add(egui::Shape::dashed_line(&[Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, col), 4.0, 3.0));
             painter.add(egui::Shape::convex_polygon(
                 vec![Pos2::new(x, ruler.top() + 2.0), Pos2::new(x + 7.0, ruler.top() + 6.0), Pos2::new(x, ruler.top() + 10.0)],
-                Color32::from_rgb(0, 90, 200),
+                Color32::from_gray(60),
                 Stroke::NONE,
             ));
-            painter.line_segment([Pos2::new(x, ruler.top() + 2.0), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, Color32::from_rgb(0, 90, 200)));
-            let label = painter.layout_no_wrap(c.name.clone(), FontId::proportional(10.0), Color32::from_rgb(0, 60, 160));
+            painter.line_segment([Pos2::new(x, ruler.top() + 2.0), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, Color32::from_gray(60)));
+            let label = painter.layout_no_wrap(c.name.clone(), FontId::proportional(10.0), INK);
             let bg = Rect::from_min_size(Pos2::new(x + 8.0, ruler.top() + 1.0), label.size() + Vec2::new(4.0, 0.0));
-            painter.rect_filled(bg, 0.0, Color32::from_gray(230));
-            painter.galley(bg.min + Vec2::new(2.0, 0.0), label, Color32::from_rgb(0, 60, 160));
+            painter.rect_filled(bg, 2.0, Color32::WHITE);
+            painter.galley(bg.min + Vec2::new(2.0, 0.0), label, INK);
         }
 
         // Insertion point (blinks like a text caret) and playhead.
@@ -2229,25 +2173,20 @@ impl App {
         if playing {
             let px = frame_to_x(play_pos as f64);
             if px >= wave.left() && px <= wave.right() {
-                painter.line_segment([Pos2::new(px, ruler.top()), Pos2::new(px, wave.bottom())], Stroke::new(1.5, Color32::from_rgb(220, 0, 0)));
+                painter.line_segment([Pos2::new(px, ruler.top()), Pos2::new(px, wave.bottom())], Stroke::new(1.5, black));
             }
         }
 
         // Scroll bar: platinum track with a lavender thumb.
-        painter.rect_filled(scroll, 0.0, Color32::from_gray(200));
-        painter.line_segment([scroll.left_top(), scroll.right_top()], Stroke::new(1.0, black));
-        let thumb_col = if self.scrollbar_drag { Color32::from_rgb(150, 150, 220) } else { Color32::from_rgb(204, 204, 255) };
-        painter.rect_filled(thumb.shrink2(Vec2::new(0.0, 1.0)), 0.0, thumb_col);
-        painter.rect_stroke(thumb.shrink2(Vec2::new(0.0, 1.0)), 0.0, Stroke::new(1.0, black), egui::StrokeKind::Inside);
-        for dx in [-3.0f32, 0.0, 3.0] {
-            let x = thumb.center().x + dx;
-            painter.line_segment([Pos2::new(x, thumb.top() + 4.0), Pos2::new(x, thumb.bottom() - 4.0)], Stroke::new(1.0, Color32::from_rgb(90, 90, 160)));
-        }
+        painter.rect_filled(scroll, 0.0, PANEL);
+        painter.line_segment([scroll.left_top(), scroll.right_top()], Stroke::new(1.0, LINE));
+        let thumb_col = if self.scrollbar_drag { Color32::from_gray(120) } else { Color32::from_gray(185) };
+        painter.rect_filled(thumb.shrink2(Vec2::new(1.0, 4.0)), 4.0, thumb_col);
 
         // Hover time readout.
         if let Some(p) = resp.hover_pos() {
             let f = x_to_frame(p.x, vs, vl);
-            painter.text(Pos2::new(wave.right() - 6.0, ruler.top() + 1.0), Align2::RIGHT_TOP, fmt_time(f as f64 / rate), FontId::monospace(11.0), black);
+            painter.text(Pos2::new(wave.right() - 6.0, ruler.top() + 1.0), Align2::RIGHT_TOP, fmt_time(f as f64 / rate), FontId::monospace(11.0), MUTED);
         }
     }
 
@@ -2355,45 +2294,35 @@ impl eframe::App for App {
         }
         self.menu.sync(|a| self.enabled(a), |a| self.checked(a), |a| self.menu_label(a));
 
-        // The "desktop", with the sound shown in a classic document window.
+        // Docked layout: tools on the left, transport and status at the bottom, Info/Cues on
+        // the right, and the waveform filling the middle.
+        self.update_meters(&ctx);
+        let bar = egui::Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(10, 6));
+        egui::Panel::bottom("status").frame(bar).show(ui, |ui| self.status_bar(ui));
+        if self.show_controls {
+            egui::Panel::bottom("transport").frame(bar).show(ui, |ui| self.transport_panel(ui));
+        }
+        if self.show_tools {
+            egui::Panel::left("tools")
+                .frame(egui::Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(8, 4)))
+                .resizable(false)
+                .show(ui, |ui| self.tools_panel(ui));
+        }
+        if self.show_info || self.show_cues {
+            egui::Panel::right("side")
+                .frame(egui::Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(12, 4)))
+                .resizable(false)
+                .exact_size(290.0)
+                .show(ui, |ui| self.side_panel(ui));
+        }
         egui::CentralPanel::no_frame().show(ui, |ui| {
-            let screen = ui.max_rect();
-            ui.painter().rect_filled(screen, 0.0, DESKTOP);
-            self.desk = screen;
-            let left = if self.show_tools { 112.0 } else { 12.0 };
-            let bottom = if self.show_controls || self.show_info { 150.0 } else { 12.0 };
-            let doc = Rect::from_min_max(screen.min + Vec2::new(left, 12.0), screen.max - Vec2::new(12.0, bottom));
-            if doc.width() < 100.0 || doc.height() < 80.0 {
-                return;
-            }
-            let p = ui.painter();
-            p.rect_filled(doc.translate(Vec2::new(2.0, 2.0)), 0.0, Color32::from_black_alpha(110));
-            p.rect_filled(doc, 0.0, Color32::from_gray(221));
-            let title_bar = Rect::from_min_size(doc.min, Vec2::new(doc.width(), 20.0));
-            paint_title_bar(p, title_bar, &format!("{name}{}", if self.dirty { " •" } else { "" }));
-            let status = Rect::from_min_max(Pos2::new(doc.left(), doc.bottom() - 20.0), doc.max);
-            let body = Rect::from_min_max(Pos2::new(doc.left() + 1.0, title_bar.bottom()), Pos2::new(doc.right() - 1.0, status.top()));
-            ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| self.waveform(ui));
-            ui.painter().line_segment([status.left_top(), status.right_top()], Stroke::new(1.0, Color32::BLACK));
-            ui.scope_builder(egui::UiBuilder::new().max_rect(status.shrink2(Vec2::new(6.0, 1.0))), |ui| self.status_bar(ui));
-            ui.painter().rect_stroke(doc, 0.0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Outside);
+            self.desk = ui.max_rect();
+            self.waveform(ui);
         });
 
-        if self.show_tools {
-            self.tools_window(&ctx);
-        }
-        if self.show_controls {
-            self.controls_window(&ctx);
-        }
-        if self.show_cues {
-            self.cues_window(&ctx);
-        }
         if self.show_record || self.recorder.is_some() {
             self.show_record = true;
             self.record_window(&ctx);
-        }
-        if self.show_info {
-            self.info_window(&ctx);
         }
 
         // Highlight when a file is dragged over the window.
@@ -2412,68 +2341,64 @@ impl eframe::App for App {
     }
 }
 
-const DESKTOP: Color32 = Color32::from_rgb(160, 160, 184);
-
-/// Classic Mac title bar: pinstripes with the title on a plain patch in the middle.
-fn paint_title_bar(p: &egui::Painter, r: Rect, title: &str) {
-    p.rect_filled(r, 0.0, Color32::from_gray(221));
-    let mut y = r.top() + 4.0;
-    while y < r.bottom() - 3.0 {
-        p.line_segment([Pos2::new(r.left() + 4.0, y), Pos2::new(r.right() - 4.0, y)], Stroke::new(1.0, Color32::from_gray(120)));
-        p.line_segment([Pos2::new(r.left() + 4.0, y + 1.0), Pos2::new(r.right() - 4.0, y + 1.0)], Stroke::new(1.0, Color32::WHITE));
-        y += 2.0;
+/// A level meter bar: dark fill up to the level on a -48..0 dB scale, black near clipping.
+fn draw_meter(p: &egui::Painter, r: Rect, level: f32) {
+    let db = 20.0 * level.max(1e-6).log10();
+    let t = ((db + 48.0) / 48.0).clamp(0.0, 1.0);
+    p.rect_filled(r, 2.0, Color32::from_gray(228));
+    if t > 0.0 {
+        let fill = Rect::from_min_size(r.min, Vec2::new(r.width() * t, r.height()));
+        p.rect_filled(fill, 2.0, if db > -3.0 { Color32::BLACK } else { Color32::from_gray(90) });
     }
-    let galley = p.layout_no_wrap(title.to_string(), FontId::proportional(13.0), Color32::BLACK);
-    let patch = Rect::from_center_size(r.center(), galley.size() + Vec2::new(16.0, 0.0)).intersect(r);
-    p.rect_filled(Rect::from_x_y_ranges(patch.x_range(), r.y_range()), 0.0, Color32::from_gray(221));
-    p.galley(patch.center() - galley.size() / 2.0, galley, Color32::BLACK);
-    p.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0, Color32::BLACK));
 }
 
-/// Platinum-era Mac look: grey surfaces, square corners, 1 px black outlines, inverted
-/// highlights, and Geneva/Monaco when the system has them.
-fn classic_style(ctx: &egui::Context) {
+/// Text, secondary text, panel and line colours for the clean monochrome look.
+const INK: Color32 = Color32::from_gray(20);
+const MUTED: Color32 = Color32::from_gray(120);
+const PANEL: Color32 = Color32::from_gray(246);
+const LINE: Color32 = Color32::from_gray(218);
+
+/// Clean monochrome look: white and light-grey surfaces, thin grey lines, black accents, and
+/// the system font when available.
+fn clean_style(ctx: &egui::Context) {
     use egui::{CornerRadius, Shadow};
     ctx.set_theme(egui::Theme::Light);
-    let black = Color32::BLACK;
     let mut v = egui::Visuals::light();
-    let platinum = Color32::from_gray(221);
-    v.panel_fill = platinum;
-    v.window_fill = platinum;
-    v.window_stroke = Stroke::new(1.0, black);
-    v.window_corner_radius = CornerRadius::ZERO;
-    v.menu_corner_radius = CornerRadius::ZERO;
-    let shadow = Shadow { offset: [2, 2], blur: 0, spread: 0, color: Color32::from_black_alpha(110) };
-    v.window_shadow = shadow;
-    v.popup_shadow = shadow;
+    v.panel_fill = PANEL;
+    v.window_fill = Color32::WHITE;
+    v.window_stroke = Stroke::new(1.0, LINE);
+    v.window_corner_radius = CornerRadius::same(8);
+    v.menu_corner_radius = CornerRadius::same(6);
+    v.window_shadow = Shadow { offset: [0, 6], blur: 24, spread: 0, color: Color32::from_black_alpha(40) };
+    v.popup_shadow = Shadow { offset: [0, 3], blur: 12, spread: 0, color: Color32::from_black_alpha(35) };
     v.extreme_bg_color = Color32::WHITE;
-    v.override_text_color = Some(black);
-    v.selection.bg_fill = black;
+    v.faint_bg_color = Color32::from_gray(250);
+    v.override_text_color = Some(INK);
+    v.selection.bg_fill = Color32::from_gray(30);
     v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
     v.window_highlight_topmost = false;
     for w in [&mut v.widgets.noninteractive, &mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
-        w.corner_radius = CornerRadius::ZERO;
+        w.corner_radius = CornerRadius::same(5);
         w.expansion = 0.0;
-        w.fg_stroke = Stroke::new(1.0, black);
+        w.fg_stroke = Stroke::new(1.0, INK);
     }
-    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, Color32::from_gray(150));
-    v.widgets.inactive.bg_fill = Color32::from_gray(238);
-    v.widgets.inactive.weak_bg_fill = Color32::from_gray(238);
-    v.widgets.inactive.bg_stroke = Stroke::new(1.0, black);
-    v.widgets.hovered.bg_fill = Color32::from_gray(250);
-    v.widgets.hovered.weak_bg_fill = Color32::from_gray(250);
-    v.widgets.hovered.bg_stroke = Stroke::new(1.0, black);
-    v.widgets.active.bg_fill = Color32::from_gray(120);
-    v.widgets.active.weak_bg_fill = Color32::from_gray(120);
-    v.widgets.active.bg_stroke = Stroke::new(1.0, black);
-    v.widgets.active.fg_stroke = Stroke::new(1.0, Color32::WHITE);
+    v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, LINE);
+    v.widgets.inactive.bg_fill = Color32::WHITE;
+    v.widgets.inactive.weak_bg_fill = Color32::WHITE;
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_gray(205));
+    v.widgets.hovered.bg_fill = Color32::from_gray(238);
+    v.widgets.hovered.weak_bg_fill = Color32::from_gray(238);
+    v.widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::from_gray(160));
+    v.widgets.active.bg_fill = Color32::from_gray(215);
+    v.widgets.active.weak_bg_fill = Color32::from_gray(215);
+    v.widgets.active.bg_stroke = Stroke::new(1.0, Color32::from_gray(120));
     v.widgets.open = v.widgets.hovered;
     ctx.set_visuals_of(egui::Theme::Light, v);
 
     let mut fonts = egui::FontDefinitions::default();
     for (name, path, family) in [
-        ("Geneva", "/System/Library/Fonts/Geneva.ttf", egui::FontFamily::Proportional),
-        ("Monaco", "/System/Library/Fonts/Monaco.ttf", egui::FontFamily::Monospace),
+        ("SF", "/System/Library/Fonts/SFNS.ttf", egui::FontFamily::Proportional),
+        ("SF Mono", "/System/Library/Fonts/SFNSMono.ttf", egui::FontFamily::Monospace),
     ] {
         if let Ok(bytes) = std::fs::read(path) {
             fonts.font_data.insert(name.into(), Arc::new(egui::FontData::from_owned(bytes)));
@@ -2685,7 +2610,7 @@ fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color32, playing:
             let r1 = Rect::from_center_size(pt(-2.5, -2.5), Vec2::new(10.0, 12.0));
             let r2 = r1.translate(Vec2::new(5.0, 5.0));
             p.rect_stroke(r1, 0.0, st, egui::StrokeKind::Middle);
-            p.rect_filled(r2, 0.0, Color32::from_gray(238));
+            p.rect_filled(r2, 0.0, Color32::WHITE);
             p.rect_stroke(r2, 0.0, st, egui::StrokeKind::Middle);
         }
         Action::Paste => {
@@ -2766,8 +2691,7 @@ fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color32, playing:
             p.rect_filled(Rect::from_center_size(c, Vec2::splat(11.0)), 0.0, color);
         }
         Action::Record => {
-            let red = if color == Color32::WHITE { Color32::WHITE } else if color == Color32::BLACK { Color32::from_rgb(210, 0, 0) } else { color };
-            p.circle_filled(c, 6.5, red);
+            p.circle_filled(c, 6.0, color);
         }
         Action::Loop => {
             let pts: Vec<Pos2> = (0..=24)

@@ -14,10 +14,10 @@ Try the files in `samples/`.
 
 ## Using it
 
-The look is modelled on classic Mac sound editors: a platinum desktop, the sound in a document
-window (black waveform on white, selection shown inverted), and floating **Tools**, **Controls**
-, **Info** and **Cues** windows (Window menu, ⌘1 / ⌘2 / ⌘I / ⌘3). Every command is in the menu bar:
-**File, Edit, Insert, Effects, Control, View, Window**.
+A clean black, white and grey layout: tools on the left, the waveform in the middle, the transport
+bar (play controls, time counter, level meters) along the bottom, and an Info / Cues side panel on
+the right. Window ▸ Tools / Controls / Info / Cues (⌘1 / ⌘2 / ⌘I / ⌘3) shows or hides each part.
+Every command is in the menu bar: **File, Edit, Insert, Effects, Control, View, Window**.
 
 **Tools** (palette, or press the key):
 
@@ -28,8 +28,8 @@ window (black waveform on white, selection shown inverted), and floating **Tools
 | Zoom | Z | Click to zoom in, ⌥-click to zoom out, drag a range to zoom to it |
 | Pencil | P | Redraw the waveform by hand (zoom in close first); each stroke is one undo step |
 
-**Controls** has rewind, play/pause, stop, loop and end buttons, a time counter and L/R level
-meters. **Info** shows the format, length, selection and peak level.
+The transport bar has rewind, play/pause, stop, record, loop and end buttons, a time counter and
+level meters. **Info** shows the format, length, selection and peak level.
 
 | Do this | How |
 |---|---|
@@ -44,14 +44,14 @@ meters. **Info** shows the format, length, selection and peak level.
 | Export | ⌘S whole sound, ⇧⌘S selection. Bit depth is under File ▸ Export Format. |
 | Split into sounds | ⇧⌘K — see below |
 
-**Recording:** Control ▸ Record… (⌘R), or the red button in Controls, opens the Record window.
+**Recording:** Control ▸ Record… (⌘R), or the record button in the transport bar, opens the Record window.
 Press Record, then Stop: the take goes in at the insertion point (or replaces the selection), or
 becomes a new sound if nothing is open. It records from the Mac's current input (System Settings ▸
 Sound ▸ Input); macOS asks for microphone permission the first time.
 
-**Cue points:** Insert ▸ Cue Point (⌘M) marks the insertion point. Cues show as blue flags in the
+**Cue points:** Insert ▸ Cue Point (⌘M) marks the insertion point. Cues show as flags in the
 ruler: drag a flag to move it, click it to jump there, and use [ and ] to step between cues. The
-Cues window lists them so you can rename, jump to or remove them. Cues move with your edits and are
+Cues panel lists them so you can rename, jump to or remove them. Cues move with your edits and are
 saved in exported WAV files (and read back when you open one).
 
 **Insert menu:** Silence, Tone (sine/square/triangle/sawtooth, frequency, level, length),
