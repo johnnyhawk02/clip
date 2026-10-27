@@ -63,6 +63,7 @@ enum Dialog {
     InsertSilence,
     InsertTone,
     InsertNoise,
+    InsertDtmf,
     MixPaste,
     Convert,
     Equalizer,
@@ -118,11 +119,11 @@ impl CurveKind {
 }
 
 impl Dialog {
-    const ALL: [Dialog; 17] = [
+    const ALL: [Dialog; 18] = [
         Dialog::Normalize, Dialog::Amplify, Dialog::Split, Dialog::Echo, Dialog::Reverb, Dialog::Flanger,
         Dialog::Smooth, Dialog::NoiseGate, Dialog::Pitch, Dialog::Tempo, Dialog::Speed,
         Dialog::InsertSilence, Dialog::InsertTone, Dialog::InsertNoise, Dialog::MixPaste,
-        Dialog::Convert, Dialog::Equalizer,
+        Dialog::Convert, Dialog::Equalizer, Dialog::InsertDtmf,
     ];
 
     fn title(self) -> &'static str {
@@ -141,6 +142,7 @@ impl Dialog {
             Dialog::InsertSilence => "Insert Silence",
             Dialog::InsertTone => "Insert Tone",
             Dialog::InsertNoise => "Insert Noise",
+            Dialog::InsertDtmf => "Insert Touch Tones",
             Dialog::MixPaste => "Mix Paste",
             Dialog::Convert => "Convert Format",
             Dialog::Equalizer => "Equalizer",
@@ -166,7 +168,7 @@ impl Dialog {
             Dialog::Pitch => format!("Raise or lower the pitch of {scope} without changing its length."),
             Dialog::Tempo => format!("Speed up or slow down {scope} without changing its pitch."),
             Dialog::Speed => format!("Play {scope} faster or slower like a tape, changing pitch and length together."),
-            Dialog::InsertSilence | Dialog::InsertTone | Dialog::InsertNoise => {
+            Dialog::InsertSilence | Dialog::InsertTone | Dialog::InsertNoise | Dialog::InsertDtmf => {
                 "Inserted at the cursor, or replaces the selection.".to_string()
             }
             Dialog::MixPaste => "Mix the clipboard into the sound, starting at the cursor or selection start.".to_string(),
@@ -216,6 +218,13 @@ impl Dialog {
                 field("noise_secs", "Length", 0.01, 600.0, 1.0, 0.01, " s", 2),
             ] },
             Dialog::MixPaste => const { &[field("mix_db", "Clipboard level", -48.0, 12.0, 0.0, 0.1, " dB", 1)] },
+            Dialog::InsertDtmf => const {
+                &[
+                    field("dtmf_ms", "Tone length", 20.0, 1000.0, 100.0, 1.0, " ms", 0),
+                    field("dtmf_gap", "Gap", 10.0, 1000.0, 80.0, 1.0, " ms", 0),
+                    field("dtmf_db", "Level", -60.0, 0.0, -6.0, 0.2, " dB", 1),
+                ]
+            },
             Dialog::Convert => const {
                 &[
                     choice("conv_rate", "Sample rate", 0.0, &[
@@ -271,6 +280,7 @@ pub struct App {
     wav_format: WavFormat,
     params: HashMap<&'static str, f32>,
     tone_wave: Wave,
+    dtmf_digits: String,
 
     status: String,
     loading: Option<(PathBuf, Receiver<Result<Audio, String>>)>,
@@ -336,6 +346,7 @@ impl App {
             wav_format: WavFormat::Pcm16,
             params: Dialog::ALL.iter().flat_map(|d| d.fields()).map(|f| (f.key, f.default)).collect(),
             tone_wave: Wave::Sine,
+            dtmf_digits: "555-0123".into(),
             status,
             loading: None,
             pending: None,
@@ -762,6 +773,14 @@ impl App {
                 let clip = effects::tone(rate, nch, p("tone_secs"), p("tone_hz"), p("tone_db"), self.tone_wave);
                 self.insert_clip("Insert Tone", clip);
             }
+            Dialog::InsertDtmf => {
+                let clip = effects::dtmf(rate, nch, &self.dtmf_digits, p("dtmf_ms"), p("dtmf_gap"), p("dtmf_db"));
+                if clip.frames() == 0 {
+                    self.status = "No touch-tone keys to insert (use 0–9, *, #, A–D)".into();
+                } else {
+                    self.insert_clip("Insert Touch Tones", clip);
+                }
+            }
             Dialog::InsertNoise => self.insert_clip("Insert Noise", effects::noise(rate, nch, p("noise_secs"), p("noise_db"))),
             Dialog::MixPaste => self.mix_paste(),
             Dialog::Equalizer => {
@@ -1026,7 +1045,7 @@ impl App {
             Action::Undo => !self.undo.is_empty(),
             Action::Redo => !self.redo.is_empty(),
             Action::Paste | Action::MixPaste => has && self.clipboard.is_some(),
-            Action::InsertSilence | Action::InsertTone | Action::InsertNoise | Action::SelectAll => has,
+            Action::InsertSilence | Action::InsertTone | Action::InsertNoise | Action::InsertDtmf | Action::SelectAll => has,
             Action::ToMono => self.audio.as_ref().is_some_and(|a| a.num_channels() > 1),
             Action::ExportSelection
             | Action::Cut
@@ -1106,6 +1125,7 @@ impl App {
             Action::Silence => self.silence(),
             Action::InsertSilence => self.dialog = Some(Dialog::InsertSilence),
             Action::InsertTone => self.dialog = Some(Dialog::InsertTone),
+            Action::InsertDtmf => self.dialog = Some(Dialog::InsertDtmf),
             Action::InsertNoise => self.dialog = Some(Dialog::InsertNoise),
             Action::FadeIn => self.fade(true),
             Action::FadeOut => self.fade(false),
@@ -1725,6 +1745,12 @@ impl App {
                             .suffix(f.suffix)
                             .fixed_decimals(f.decimals),
                     );
+                    ui.end_row();
+                }
+                if kind == Dialog::InsertDtmf {
+                    ui.label("Keys");
+                    ui.add_sized([180.0, 20.0], egui::TextEdit::singleline(&mut self.dtmf_digits).hint_text("e.g. 555-0123"))
+                        .on_hover_text("0–9, *, #, A–D. A comma adds a pause; other characters are ignored.");
                     ui.end_row();
                 }
                 if kind == Dialog::InsertTone {

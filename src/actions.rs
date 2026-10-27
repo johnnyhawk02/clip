@@ -26,6 +26,7 @@ pub enum Action {
     InsertSilence,
     InsertTone,
     InsertNoise,
+    InsertDtmf,
     FadeIn,
     FadeOut,
     Normalize,
@@ -73,7 +74,7 @@ use Action::*;
 pub const ALL: &[Action] = &[
     New, Open, Export, ExportSelection, FormatPcm8, FormatPcm16, FormatPcm24, FormatFloat32, Quit, Undo, Redo,
     Cut, Copy, Paste, MixPaste, Delete, SelectAll, SelectNone, Trim, Silence, InsertSilence,
-    InsertTone, InsertNoise, FadeIn, FadeOut, Normalize, Gain, Reverse, Echo, Reverb, Flanger,
+    InsertTone, InsertNoise, InsertDtmf, FadeIn, FadeOut, Normalize, Gain, Reverse, Echo, Reverb, Flanger,
     Smooth, NoiseGate, Pitch, Tempo, Speed, ToMono, Split, PlayPause, Stop, Loop, GoStart, GoEnd,
     ZoomIn, ZoomOut, ZoomSel, ZoomFit, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
     ShowControls, ShowInfo, Convert, Equalizer, Envelope, Bender, Record, AddCue, NextCue, PrevCue,
@@ -124,7 +125,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(Silence),
         ],
     ),
-    ("Insert", &[Do(InsertSilence), Do(InsertTone), Do(InsertNoise), Separator, Do(AddCue)]),
+    ("Insert", &[Do(InsertSilence), Do(InsertTone), Do(InsertNoise), Do(InsertDtmf), Separator, Do(AddCue)]),
     (
         "Effects",
         &[
@@ -234,6 +235,7 @@ impl Action {
             InsertSilence => "Silence…",
             InsertTone => "Tone…",
             InsertNoise => "Noise…",
+            InsertDtmf => "Touch Tones…",
             FadeIn => "Fade In",
             FadeOut => "Fade Out",
             Normalize => "Normalize…",

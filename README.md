@@ -54,8 +54,9 @@ ruler: drag a flag to move it, click it to jump there, and use [ and ] to step b
 Cues window lists them so you can rename, jump to or remove them. Cues move with your edits and are
 saved in exported WAV files (and read back when you open one).
 
-**Insert menu:** Silence, Tone (sine/square/triangle/sawtooth, frequency, level, length) and
-Noise, at the insertion point or replacing the selection.
+**Insert menu:** Silence, Tone (sine/square/triangle/sawtooth, frequency, level, length),
+Noise and Touch Tones (phone-dial DTMF beeps for any keys you type, e.g. `555-0123`; a comma adds a
+pause), at the insertion point or replacing the selection.
 
 **Effects menu** (selection, or the whole sound if nothing is selected): Amplify, Normalize,
 Fade In/Out, Backwards, Echo, Reverb, Flanger, Smooth (low-pass), Noise Gate, Change Pitch (keeps

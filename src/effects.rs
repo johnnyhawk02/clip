@@ -271,6 +271,39 @@ pub fn tone(rate: u32, channels: usize, secs: f32, freq: f32, level_db: f32, wav
     Audio { rate, channels: vec![c; channels.max(1)] }
 }
 
+/// Telephone touch-tone (DTMF) frequencies for a key: (low, high) in Hz.
+pub fn dtmf_freqs(key: char) -> Option<(f32, f32)> {
+    let rows = [697.0, 770.0, 852.0, 941.0];
+    let cols = [1209.0, 1336.0, 1477.0, 1633.0];
+    let keys = ["123A", "456B", "789C", "*0#D"];
+    let key = key.to_ascii_uppercase();
+    keys.iter().enumerate().find_map(|(r, row)| row.find(key).map(|c| (rows[r], cols[c])))
+}
+
+/// Touch tones for `digits` (0-9, *, #, A-D; a comma adds a longer pause). Unknown characters
+/// are skipped.
+pub fn dtmf(rate: u32, channels: usize, digits: &str, tone_ms: f32, gap_ms: f32, level_db: f32) -> Audio {
+    let amp = db_to_gain(level_db) * 0.5; // two tones summed
+    let tone_n = ms_to_frames(rate, tone_ms);
+    let gap_n = ms_to_frames(rate, gap_ms);
+    let ramp = ms_to_frames(rate, 3.0).min(tone_n / 2).max(1);
+    let mut out: Vec<f32> = Vec::new();
+    for ch in digits.chars() {
+        if ch == ',' {
+            out.extend(std::iter::repeat_n(0.0, gap_n * 4));
+            continue;
+        }
+        let Some((lo, hi)) = dtmf_freqs(ch) else { continue };
+        for i in 0..tone_n {
+            let t = i as f32 / rate as f32;
+            let edge = (i.min(tone_n - 1 - i) as f32 / ramp as f32).min(1.0);
+            out.push(((2.0 * PI * lo * t).sin() + (2.0 * PI * hi * t).sin()) * amp * edge);
+        }
+        out.extend(std::iter::repeat_n(0.0, gap_n));
+    }
+    Audio { rate, channels: vec![out; channels.max(1)] }
+}
+
 pub fn noise(rate: u32, channels: usize, secs: f32, level_db: f32) -> Audio {
     let n = (secs * rate as f32) as usize;
     let amp = db_to_gain(level_db);
@@ -537,5 +570,15 @@ mod tests {
         assert_eq!(env.peak(0, env.frames()), 0.0);
         let up = bender(&a, &[(0.0, 12.0), (1.0, 12.0)]).frames();
         assert!((up as i64 - a.frames() as i64 / 2).abs() < 10, "{up}");
+    }
+
+    #[test]
+    fn dtmf_keys() {
+        assert_eq!(dtmf_freqs('5'), Some((770.0, 1336.0)));
+        assert_eq!(dtmf_freqs('#'), Some((941.0, 1477.0)));
+        assert_eq!(dtmf_freqs('x'), None);
+        let a = dtmf(8000, 1, "12x", 100.0, 50.0, -6.0);
+        assert_eq!(a.frames(), 2 * (800 + 400));
+        assert!(a.peak(0, a.frames()) <= 0.51);
     }
 }
