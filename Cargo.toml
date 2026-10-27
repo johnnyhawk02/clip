@@ -7,6 +7,7 @@ edition = "2024"
 cpal = "0.18.2"
 eframe = "0.37"
 hound = "3.5.1"
+muda = "0.21.2"
 png = "0.18.1"
 rfd = "0.17.2"
 symphonia = { version = "0.6.1", features = ["all"] }
@@ -20,3 +21,8 @@ short_description = "A simple audio editor"
 
 [profile.release]
 strip = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSResponder"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray"] }

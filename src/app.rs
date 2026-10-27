@@ -1,4 +1,4 @@
-//! The editor window: toolbar, waveform view with selection, status bar, keyboard shortcuts.
+//! The editor window: tool palette, waveform view with selection, status bar, menus and shortcuts.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -8,7 +8,9 @@ use eframe::egui::{
     self, Align2, Button, Color32, FontId, Key, Modifiers, Pos2, Rect, Sense, Stroke, Vec2,
 };
 
+use crate::actions::{self, Action};
 use crate::audio::{self, Audio, Peaks, WavFormat};
+use crate::menu::NativeMenu;
 use crate::player::Player;
 
 type Sel = (usize, usize);
@@ -21,6 +23,14 @@ struct Snapshot {
     sel: Option<Sel>,
     cursor: usize,
     label: &'static str,
+}
+
+/// A small dialog asking for an effect's setting before applying it.
+#[derive(Clone, Copy, PartialEq)]
+enum ParamDialog {
+    Normalize,
+    Gain,
+    Split,
 }
 
 enum Pending {
@@ -51,7 +61,6 @@ pub struct App {
 
     clipboard: Option<Audio>,
     wav_format: WavFormat,
-    export_selection: bool,
     normalize_db: f32,
     gain_db: f32,
     split_gap: usize,
@@ -61,6 +70,8 @@ pub struct App {
     pending: Option<Pending>,
     allow_close: bool,
     automation: Option<Automation>,
+    menu: NativeMenu,
+    param: Option<ParamDialog>,
 }
 
 impl App {
@@ -89,7 +100,6 @@ impl App {
             play_origin: 0,
             clipboard: None,
             wav_format: WavFormat::Pcm16,
-            export_selection: false,
             normalize_db: -0.1,
             gain_db: 3.0,
             split_gap: 10,
@@ -98,6 +108,8 @@ impl App {
             pending: None,
             allow_close: false,
             automation: Automation::from_env(),
+            menu: NativeMenu::install(&cc.egui_ctx),
+            param: None,
         };
         if let Some(p) = initial {
             app.start_load(p, &cc.egui_ctx);
@@ -184,9 +196,9 @@ impl App {
         self.clamp_view();
     }
 
-    fn export(&mut self) {
+    fn export(&mut self, selection_only: bool) {
         let Some(a) = self.audio.clone() else { return };
-        let (a, suffix) = match (self.export_selection, self.sel) {
+        let (a, suffix) = match (selection_only, self.sel) {
             (true, Some((s, e))) => (Arc::new(a.slice(s, e)), "-selection"),
             _ => (a, "-edit"),
         };
@@ -478,223 +490,228 @@ impl App {
 
     // ---------- UI ----------
 
+    fn enabled(&self, a: Action) -> bool {
+        let has = self.audio.is_some();
+        let sel = has && self.sel.is_some();
+        match a {
+            Action::Open | Action::Quit => true,
+            Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop => true,
+            Action::Undo => !self.undo.is_empty(),
+            Action::Redo => !self.redo.is_empty(),
+            Action::Paste => has && self.clipboard.is_some(),
+            Action::ToMono => self.audio.as_ref().is_some_and(|a| a.num_channels() > 1),
+            Action::ExportSelection
+            | Action::Cut
+            | Action::Copy
+            | Action::Delete
+            | Action::SelectNone
+            | Action::Trim
+            | Action::Silence
+            | Action::FadeIn
+            | Action::FadeOut
+            | Action::ZoomSel => sel,
+            _ => has,
+        }
+    }
+
+    fn checked(&self, a: Action) -> bool {
+        match a {
+            Action::Loop => self.looping,
+            Action::FormatPcm16 => self.wav_format == WavFormat::Pcm16,
+            Action::FormatPcm24 => self.wav_format == WavFormat::Pcm24,
+            Action::FormatFloat32 => self.wav_format == WavFormat::Float32,
+            _ => false,
+        }
+    }
+
+    fn menu_label(&self, a: Action) -> String {
+        match a {
+            Action::Undo => self.undo.last().map_or("Undo".into(), |s| format!("Undo {}", s.label)),
+            Action::Redo => self.redo.last().map_or("Redo".into(), |s| format!("Redo {}", s.label)),
+            _ => a.label().to_string(),
+        }
+    }
+
+    fn run(&mut self, a: Action, ctx: &egui::Context) {
+        if !self.enabled(a) {
+            return;
+        }
+        let mid = self.view_start + self.view_len / 2.0;
+        match a {
+            Action::Open => self.open_dialog(ctx),
+            Action::Export => self.export(false),
+            Action::ExportSelection => self.export(true),
+            Action::FormatPcm16 => self.wav_format = WavFormat::Pcm16,
+            Action::FormatPcm24 => self.wav_format = WavFormat::Pcm24,
+            Action::FormatFloat32 => self.wav_format = WavFormat::Float32,
+            Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Action::Undo => self.undo(),
+            Action::Redo => self.redo(),
+            Action::Cut => self.cut(ctx),
+            Action::Copy => {
+                self.copy(ctx);
+            }
+            Action::Paste => self.paste(),
+            Action::Delete => self.delete(),
+            Action::SelectAll => self.sel = Some((0, self.frames())),
+            Action::SelectNone => self.sel = None,
+            Action::Trim => self.trim(),
+            Action::Silence => self.silence(),
+            Action::FadeIn => self.fade(true),
+            Action::FadeOut => self.fade(false),
+            Action::Normalize => self.param = Some(ParamDialog::Normalize),
+            Action::Gain => self.param = Some(ParamDialog::Gain),
+            Action::Reverse => self.reverse(),
+            Action::ToMono => self.to_mono(),
+            Action::Split => self.param = Some(ParamDialog::Split),
+            Action::PlayPause => self.toggle_play(),
+            Action::Stop => self.stop(),
+            Action::Loop => {
+                self.looping = !self.looping;
+                self.player.set_looping(self.looping && self.sel.is_some());
+            }
+            Action::GoStart => {
+                self.cursor = 0;
+                self.sel = None;
+                self.view_start = 0.0;
+                self.clamp_view();
+            }
+            Action::GoEnd => {
+                self.cursor = self.frames();
+                self.sel = None;
+                self.view_start = self.frames() as f64;
+                self.clamp_view();
+            }
+            Action::ZoomIn => self.zoom(0.5, mid),
+            Action::ZoomOut => self.zoom(2.0, mid),
+            Action::ZoomSel => self.zoom_to_selection(),
+            Action::ZoomFit => self.zoom_fit(),
+        }
+    }
+
+    /// Plain-key shortcuts. ⌘ shortcuts come through the native menu bar instead.
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         if ctx.egui_wants_keyboard_input() {
             return;
         }
-        let cmd = Modifiers::COMMAND;
-        let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
-        let mut copy = false;
-        let mut cut = false;
-        let mut paste = false;
-        ctx.input(|i| {
-            for ev in &i.events {
-                match ev {
-                    egui::Event::Copy => copy = true,
-                    egui::Event::Cut => cut = true,
-                    egui::Event::Paste(_) => paste = true,
-                    _ => {}
-                }
+        let none = Modifiers::NONE;
+        let keys: &[(Modifiers, Key, Action)] = &[
+            (none, Key::Space, Action::PlayPause),
+            (none, Key::Delete, Action::Delete),
+            (none, Key::Backspace, Action::Delete),
+            (none, Key::Home, Action::GoStart),
+            (none, Key::End, Action::GoEnd),
+            (none, Key::Equals, Action::ZoomIn),
+            (Modifiers::SHIFT, Key::Equals, Action::ZoomIn),
+            (none, Key::Plus, Action::ZoomIn),
+            (none, Key::Minus, Action::ZoomOut),
+            (none, Key::F, Action::ZoomFit),
+            (none, Key::Z, Action::ZoomSel),
+            (none, Key::L, Action::Loop),
+        ];
+        for &(m, k, a) in keys {
+            if ctx.input_mut(|i| i.consume_key(m, k)) {
+                self.run(a, ctx);
             }
-        });
-        let pressed = |m: Modifiers, k: Key| ctx.input_mut(|i| i.consume_key(m, k));
-
-        if pressed(cmd, Key::O) {
-            self.open_dialog(ctx);
         }
-        if self.audio.is_none() {
-            return;
-        }
-        if copy {
-            self.copy(ctx);
-        }
-        if cut {
-            self.cut(ctx);
-        }
-        if paste {
-            self.paste();
-        }
-        if pressed(cmd_shift, Key::Z) || pressed(cmd, Key::Y) {
-            self.redo();
-        }
-        if pressed(cmd, Key::Z) {
-            self.undo();
-        }
-        if pressed(cmd, Key::S) || pressed(cmd, Key::E) {
-            self.export();
-        }
-        if pressed(cmd, Key::A) {
-            self.sel = Some((0, self.frames()));
-        }
-        if pressed(cmd, Key::T) {
-            self.trim();
-        }
-        if pressed(Modifiers::NONE, Key::Space) {
-            self.toggle_play();
-        }
-        if pressed(Modifiers::NONE, Key::Escape) {
+        if ctx.input_mut(|i| i.consume_key(none, Key::Escape)) {
             if self.player.is_playing() {
                 self.stop();
             } else {
                 self.sel = None;
             }
         }
-        if pressed(Modifiers::NONE, Key::Delete) || pressed(Modifiers::NONE, Key::Backspace) {
-            self.delete();
-        }
-        if pressed(Modifiers::NONE, Key::Home) {
-            self.cursor = 0;
-            self.view_start = 0.0;
-            self.clamp_view();
-        }
-        if pressed(Modifiers::NONE, Key::End) {
-            self.cursor = self.frames();
-            self.view_start = self.frames() as f64;
-            self.clamp_view();
-        }
-        if pressed(Modifiers::NONE, Key::Equals) || pressed(Modifiers::SHIFT, Key::Equals) || pressed(Modifiers::NONE, Key::Plus) {
-            let c = self.view_start + self.view_len / 2.0;
-            self.zoom(0.5, c);
-        }
-        if pressed(Modifiers::NONE, Key::Minus) {
-            let c = self.view_start + self.view_len / 2.0;
-            self.zoom(2.0, c);
-        }
-        if pressed(Modifiers::NONE, Key::F) {
-            self.zoom_fit();
-        }
-        if pressed(Modifiers::NONE, Key::Z) {
-            self.zoom_to_selection();
-        }
-        if pressed(Modifiers::NONE, Key::L) {
-            self.looping = !self.looping;
-            self.player.set_looping(self.looping);
-        }
     }
 
-    fn toolbar(&mut self, ui: &mut egui::Ui) {
+    /// The row of icon buttons under the menu bar.
+    fn palette(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        let has = self.audio.is_some();
-        let has_sel = self.sel.is_some();
-        let has_audio_sel = has && has_sel;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 3.0;
+            for slot in actions::PALETTE {
+                let Some(a) = *slot else {
+                    ui.add_space(6.0);
+                    ui.separator();
+                    ui.add_space(6.0);
+                    continue;
+                };
+                let playing = a == Action::PlayPause && self.player.is_playing();
+                let icon = if playing { "⏸" } else { a.icon() };
+                let mut tip = if playing { "Pause".to_string() } else { self.menu_label(a).trim_end_matches('…').to_string() };
+                if let Some(k) = a.shortcut() {
+                    tip += &format!("  ({k})");
+                }
+                if !a.help().is_empty() {
+                    tip += &format!("\n{}", a.help());
+                }
+                let drawn = has_drawn_icon(a);
+                let btn = Button::new(egui::RichText::new(if drawn { "" } else { icon }).size(17.0))
+                    .min_size(Vec2::new(34.0, 30.0))
+                    .selected(self.checked(a));
+                let enabled = self.enabled(a);
+                let resp = ui.add_enabled(enabled, btn);
+                if drawn {
+                    let color = if enabled { ui.visuals().text_color() } else { ui.visuals().weak_text_color() };
+                    paint_icon(ui.painter(), resp.rect, a, color);
+                }
+                if resp.on_hover_text(tip).on_disabled_hover_text(a.label()).clicked() {
+                    self.run(a, &ctx);
+                }
+            }
+        });
+    }
 
-        ui.horizontal_wrapped(|ui| {
-            if ui.button("📂 Open…").on_hover_text("⌘O — or drag a file onto the window").clicked() {
-                self.open_dialog(&ctx);
-            }
-            if ui.add_enabled(has, Button::new("💾 Export WAV…")).on_hover_text("⌘S").clicked() {
-                self.export();
-            }
-            egui::ComboBox::from_id_salt("wavfmt")
-                .selected_text(self.wav_format.label())
-                .show_ui(ui, |ui| {
-                    for f in [WavFormat::Pcm16, WavFormat::Pcm24, WavFormat::Float32] {
-                        ui.selectable_value(&mut self.wav_format, f, f.label());
+    fn param_dialog(&mut self, ctx: &egui::Context) {
+        let Some(kind) = self.param else { return };
+        let scope = if self.sel.is_some() { "the selection" } else { "the whole file" };
+        let mut apply = false;
+        let mut cancel = false;
+        let resp = egui::Modal::new(egui::Id::unique("param")).show(ctx, |ui| {
+            ui.set_width(340.0);
+            match kind {
+                ParamDialog::Normalize => {
+                    ui.heading("Normalize");
+                    ui.label(format!("Scale {scope} so its loudest peak reaches:"));
+                    ui.add(egui::DragValue::new(&mut self.normalize_db).range(-24.0..=0.0).speed(0.1).suffix(" dB"));
+                }
+                ParamDialog::Gain => {
+                    ui.heading("Gain");
+                    ui.label(format!("Make {scope} louder or quieter by:"));
+                    ui.add(egui::DragValue::new(&mut self.gain_db).range(-48.0..=24.0).speed(0.1).suffix(" dB"));
+                }
+                ParamDialog::Split => {
+                    ui.heading("Split into sounds");
+                    ui.label(format!(
+                        "Save every separate sound in {scope} as sound01.wav, sound02.wav… \
+                         ({}). A sound starts at the first non-zero sample and ends after this many zero samples in a row:",
+                        self.wav_format.label()
+                    ));
+                    ui.add(egui::DragValue::new(&mut self.split_gap).range(1..=100_000).suffix(" zeros"));
+                    if let Some(a) = &self.audio {
+                        let (s, e) = self.sel.unwrap_or((0, a.frames()));
+                        let n = a.slice(s, e).find_sounds(self.split_gap).len();
+                        ui.label(format!("{n} sound{} found.", if n == 1 { "" } else { "s" }));
                     }
-                });
-            ui.add_enabled(has_sel, egui::Checkbox::new(&mut self.export_selection, "selection only"));
-
-            ui.separator();
-            let undo_tip = self.undo.last().map_or("Nothing to undo".to_string(), |s| format!("Undo {} (⌘Z)", s.label));
-            if ui.add_enabled(!self.undo.is_empty(), Button::new("↶ Undo")).on_hover_text(undo_tip).clicked() {
-                self.undo();
+                }
             }
-            let redo_tip = self.redo.last().map_or("Nothing to redo".to_string(), |s| format!("Redo {} (⇧⌘Z)", s.label));
-            if ui.add_enabled(!self.redo.is_empty(), Button::new("↷ Redo")).on_hover_text(redo_tip).clicked() {
-                self.redo();
-            }
-
-            ui.separator();
-            let playing = self.player.is_playing();
-            let label = if playing { "⏸ Pause" } else { "▶ Play" };
-            if ui.add_enabled(has, Button::new(label)).on_hover_text("Space — plays the selection if there is one").clicked() {
-                self.toggle_play();
-            }
-            if ui.add_enabled(has, Button::new("⏹ Stop")).on_hover_text("Esc").clicked() {
-                self.stop();
-            }
-            if ui.checkbox(&mut self.looping, "🔁 Loop selection").on_hover_text("L").changed() {
-                self.player.set_looping(self.looping && self.sel.is_some());
-            }
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let ok = if kind == ParamDialog::Split { "Choose Folder…" } else { "Apply" };
+                apply = ui.button(ok).clicked();
+                cancel = ui.button("Cancel").clicked();
+            });
         });
-
-        ui.add_space(2.0);
-        ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(has_audio_sel, Button::new("✂ Trim to selection")).on_hover_text("Keep only the selection (⌘T)").clicked() {
-                self.trim();
+        apply |= ctx.input(|i| i.key_pressed(Key::Enter));
+        if cancel || resp.should_close() {
+            self.param = None;
+        } else if apply {
+            self.param = None;
+            match kind {
+                ParamDialog::Normalize => self.normalize(),
+                ParamDialog::Gain => self.gain(self.gain_db),
+                ParamDialog::Split => self.split_dialog(),
             }
-            if ui.add_enabled(has_audio_sel, Button::new("🗑 Delete")).on_hover_text("Remove the selection (⌫)").clicked() {
-                self.delete();
-            }
-            if ui.add_enabled(has_audio_sel, Button::new("Silence")).on_hover_text("Replace the selection with silence").clicked() {
-                self.silence();
-            }
-            ui.separator();
-            if ui.add_enabled(has_audio_sel, Button::new("Cut")).on_hover_text("⌘X").clicked() {
-                self.cut(&ctx);
-            }
-            if ui.add_enabled(has_audio_sel, Button::new("Copy")).on_hover_text("⌘C").clicked() {
-                self.copy(&ctx);
-            }
-            if ui.add_enabled(has && self.clipboard.is_some(), Button::new("Paste")).on_hover_text("⌘V — inserts at the cursor or replaces the selection").clicked() {
-                self.paste();
-            }
-            ui.separator();
-            if ui.add_enabled(has_audio_sel, Button::new("◢ Fade in")).on_hover_text("Fade in across the selection").clicked() {
-                self.fade(true);
-            }
-            if ui.add_enabled(has_audio_sel, Button::new("◣ Fade out")).on_hover_text("Fade out across the selection").clicked() {
-                self.fade(false);
-            }
-            ui.separator();
-            let scope = if has_sel { "the selection" } else { "the whole file" };
-            if ui.add_enabled(has, Button::new("Normalize")).on_hover_text(format!("Scale {scope} so its peak hits the target")).clicked() {
-                self.normalize();
-            }
-            ui.add(egui::DragValue::new(&mut self.normalize_db).range(-24.0..=0.0).speed(0.1).suffix(" dB"));
-            ui.separator();
-            if ui.add_enabled(has, Button::new("Gain")).on_hover_text(format!("Apply gain to {scope}")).clicked() {
-                self.gain(self.gain_db);
-            }
-            ui.add(egui::DragValue::new(&mut self.gain_db).range(-48.0..=24.0).speed(0.1).suffix(" dB"));
-            ui.separator();
-            if ui.add_enabled(has, Button::new("Reverse")).on_hover_text(format!("Reverse {scope}")).clicked() {
-                self.reverse();
-            }
-            let stereo = self.audio.as_ref().is_some_and(|a| a.num_channels() > 1);
-            if ui.add_enabled(stereo, Button::new("To mono")).clicked() {
-                self.to_mono();
-            }
-            ui.separator();
-            if ui
-                .add_enabled(has, Button::new("✂ Split into sounds…"))
-                .on_hover_text(format!(
-                    "Save every separate sound in {scope} as sound01.wav, sound02.wav… \
-                     A sound starts at the first non-zero sample and ends after the gap of zero samples."
-                ))
-                .clicked()
-            {
-                self.split_dialog();
-            }
-            ui.label("gap");
-            ui.add(egui::DragValue::new(&mut self.split_gap).range(1..=100_000).suffix(" zeros"))
-                .on_hover_text("How many zero samples in a row end a sound");
-            ui.separator();
-            if ui.add_enabled(has, Button::new("🔍+")).on_hover_text("Zoom in (=, or ⌘/pinch + scroll)").clicked() {
-                let c = self.view_start + self.view_len / 2.0;
-                self.zoom(0.5, c);
-            }
-            if ui.add_enabled(has, Button::new("🔍−")).on_hover_text("Zoom out (-)").clicked() {
-                let c = self.view_start + self.view_len / 2.0;
-                self.zoom(2.0, c);
-            }
-            if ui.add_enabled(has_audio_sel, Button::new("Zoom sel")).on_hover_text("Z").clicked() {
-                self.zoom_to_selection();
-            }
-            if ui.add_enabled(has, Button::new("Fit")).on_hover_text("F").clicked() {
-                self.zoom_fit();
-            }
-        });
+        }
     }
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
@@ -1025,7 +1042,7 @@ impl App {
         });
         match choice {
             Some(0) => {
-                self.export();
+                self.export(false);
                 if !self.dirty {
                     self.resolve_pending(ctx);
                 }
@@ -1075,13 +1092,21 @@ impl eframe::App for App {
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        if self.pending.is_none() {
+        for a in self.menu.poll() {
+            if self.pending.is_none() && self.param.is_none() {
+                self.run(a, &ctx);
+            } else if a == Action::Quit {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+        if self.pending.is_none() && self.param.is_none() {
             self.handle_shortcuts(&ctx);
         }
+        self.menu.sync(|a| self.enabled(a), |a| self.checked(a), |a| self.menu_label(a));
 
-        egui::Panel::top("toolbar").show(ui, |ui| {
+        egui::Panel::top("palette").show(ui, |ui| {
             ui.add_space(4.0);
-            self.toolbar(ui);
+            self.palette(ui);
             ui.add_space(4.0);
         });
         egui::Panel::bottom("status").show(ui, |ui| {
@@ -1101,6 +1126,7 @@ impl eframe::App for App {
             painter.text(screen.center(), Align2::CENTER_CENTER, "Drop to open", FontId::proportional(28.0), Color32::WHITE);
         }
 
+        self.param_dialog(&ctx);
         self.confirm_dialog(&ctx);
         self.run_automation(&ctx);
     }
@@ -1114,6 +1140,8 @@ struct Automation {
     snapshot: Option<PathBuf>,
     frames_after_load: u32,
     requested: bool,
+    /// Print the native menu bar a few frames later, once its state has synced.
+    dump_menu: bool,
     done: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -1131,6 +1159,7 @@ impl Automation {
             snapshot,
             frames_after_load: 0,
             requested: false,
+            dump_menu: false,
             done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
@@ -1165,6 +1194,11 @@ impl App {
                     "silence" => self.silence(),
                     "reverse" => self.reverse(),
                     "split" => self.split_to(Path::new(arg)),
+                    "dumpmenu" => auto.dump_menu = true,
+                    "run" => match Action::from_id(arg) {
+                        Some(act) => self.run(act, ctx),
+                        None => eprintln!("unknown action id {arg}"),
+                    },
                     "copy" => { self.copy(ctx); }
                     "cut" => self.cut(ctx),
                     "paste" => self.paste(),
@@ -1181,6 +1215,10 @@ impl App {
                 }
                 eprintln!("action {a}: {}", self.status);
             }
+        }
+        #[cfg(target_os = "macos")]
+        if auto.dump_menu && auto.frames_after_load == 10 {
+            crate::menu::dump_main_menu();
         }
         if auto.frames_after_load >= 30 && !auto.requested {
             auto.requested = true;
@@ -1213,6 +1251,79 @@ fn save_png(img: &egui::ColorImage, path: &Path) -> Result<(), String> {
     let mut w = enc.write_header().map_err(|e| e.to_string())?;
     let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
     w.write_image_data(&bytes).map_err(|e| e.to_string())
+}
+
+fn has_drawn_icon(a: Action) -> bool {
+    matches!(a, Action::Trim | Action::Copy | Action::Normalize | Action::ZoomSel | Action::ZoomFit | Action::Split)
+}
+
+/// Vector icons for palette tools that have no suitable glyph in the bundled fonts.
+fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color32) {
+    let c = rect.center();
+    let st = Stroke::new(1.6, color);
+    let line = |x0: f32, y0: f32, x1: f32, y1: f32| {
+        p.line_segment([c + Vec2::new(x0, y0), c + Vec2::new(x1, y1)], st);
+    };
+    // Square brackets at ±x, 16 px tall.
+    let brackets = |x: f32| {
+        for s in [-1.0f32, 1.0] {
+            line(s * x, -8.0, s * x, 8.0);
+            line(s * x, -8.0, s * (x - 3.0), -8.0);
+            line(s * x, 8.0, s * (x - 3.0), 8.0);
+        }
+    };
+    let arrow_h = |x0: f32, x1: f32| {
+        line(x0, 0.0, x1, 0.0);
+        line(x0, 0.0, x0 + 3.0, -3.0);
+        line(x0, 0.0, x0 + 3.0, 3.0);
+        line(x1, 0.0, x1 - 3.0, -3.0);
+        line(x1, 0.0, x1 - 3.0, 3.0);
+    };
+    match a {
+        Action::Trim => {
+            brackets(8.0);
+            for (x, h) in [(-3.0, 3.0), (0.0, 6.0), (3.0, 4.0)] {
+                line(x, -h, x, h);
+            }
+            for x in [-12.0f32, 12.0] {
+                line(x, -1.0, x, 1.0);
+            }
+        }
+        Action::Copy => {
+            let r1 = Rect::from_center_size(c + Vec2::new(-2.5, -2.5), Vec2::new(10.0, 12.0));
+            let r2 = r1.translate(Vec2::new(5.0, 5.0));
+            p.rect_stroke(r1, 1.5, st, egui::StrokeKind::Middle);
+            p.rect_filled(r2, 1.5, p.ctx().global_style().visuals.widgets.inactive.weak_bg_fill);
+            p.rect_stroke(r2, 1.5, st, egui::StrokeKind::Middle);
+        }
+        Action::Normalize => {
+            line(-9.0, -8.0, 9.0, -8.0);
+            line(-9.0, 8.0, 9.0, 8.0);
+            for (x, h) in [(-6.0, 3.0), (-2.0, 6.0), (2.0, 4.0), (6.0, 2.0)] {
+                line(x, -h, x, h);
+            }
+        }
+        Action::ZoomSel => {
+            brackets(10.0);
+            arrow_h(-6.0, 6.0);
+        }
+        Action::ZoomFit => {
+            line(-10.0, -7.0, -10.0, 7.0);
+            line(10.0, -7.0, 10.0, 7.0);
+            arrow_h(-8.0, 8.0);
+        }
+        Action::Split => {
+            for x in [-5.0f32, 5.0] {
+                for y in [-8.0f32, -3.0, 2.0, 7.0] {
+                    line(x, y, x, y + 2.5);
+                }
+            }
+            for (x, h) in [(-10.0, 5.0), (-8.0, 3.0), (-1.0, 6.0), (1.0, 4.0), (8.0, 4.0), (10.0, 6.0)] {
+                line(x, -h, x, h);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// sound01.wav, sound02.wav… (more digits once there are 100+ sounds).

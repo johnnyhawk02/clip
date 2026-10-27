@@ -14,29 +14,24 @@ Try the files in `samples/`.
 
 ## Using it
 
+All commands are in the macOS menu bar (**File, Edit, Effects, Play, View**). The common ones are
+also in the tool palette across the top of the window; hover over a tool to see its name and shortcut.
+
 | Do this | How |
 |---|---|
-| Select | Drag on the waveform. Shift-click/shift-drag extends. Double-click selects all (⌘A). |
-| Place cursor | Click. Esc clears the selection. |
+| Select | Drag on the waveform. Shift-click/shift-drag extends. Double-click or ⌘A selects all, ⌘D/Esc none. |
+| Place cursor | Click |
 | Play / pause | Space. Plays the selection if there is one, otherwise from the cursor. |
-| Stop | Esc while playing (returns to where playback started). L toggles looping the selection. |
-| Zoom | Pinch or ⌘-scroll over the waveform, `=` / `-`, **F** fit, **Z** zoom to selection |
+| Stop | Esc while playing (returns to where playback started). ⌘L (or L) loops the selection. |
+| Zoom | Pinch or ⌘-scroll over the waveform, ⌘= / ⌘- (or = / -), ⌘0 or F to fit, ⌘E or Z to zoom to the selection |
 | Scroll | Scroll / two-finger swipe, or drag the bar under the waveform |
 | Trim to selection | ⌘T |
 | Delete selection | ⌫ |
 | Cut / copy / paste | ⌘X / ⌘C / ⌘V (paste inserts at the cursor or replaces the selection) |
 | Undo / redo | ⌘Z / ⇧⌘Z |
-| Export WAV | ⌘S (tick "selection only" to export just the selection) |
-
-**Split into sounds…** cuts a recording of separate clicks/hits into one file per sound and saves
-them as `sound01.wav`, `sound02.wav`… in a folder you pick. A sound starts at the first non-zero
-sample and ends once there have been at least *gap* zero samples in a row (10 by default, set next
-to the button). It works on the selection, or the whole file if nothing is selected, and uses the
-WAV format chosen in the toolbar. It looks for exact zeros, so it suits WAV/AIFF/FLAC recordings
-with true digital silence; MP3/AAC rarely contain exact zeros between sounds.
-
-Fade in/out, Silence, Normalize (to the dB target next to it), Gain, Reverse and To mono are in the
-toolbar. Normalize, Gain and Reverse act on the whole file when nothing is selected.
+| Export WAV | ⌘S for the whole file, ⇧⌘S for just the selection. Bit depth is under File ▸ Export Format. |
+| Normalize / Gain | ⇧⌘N / ⇧⌘G — opens a small dialog for the dB value |
+| Split into sounds | ⇧⌘K — see below |
 
 Edits are never written to your original file. You'll be asked before quitting or opening another
 file with unexported changes.
@@ -56,7 +51,10 @@ After bundling, `cp -R "target/release/bundle/osx/Sound Edit.app" /Applications/
 
 - `src/audio.rs` — decoding, WAV export, the edit operations, waveform peak cache
 - `src/player.rs` — playback through the default output device (resamples to the device rate)
-- `src/app.rs` — the window: toolbar, waveform view, selection, shortcuts, undo/redo
+- `src/actions.rs` — every command with its label, icon and shortcut; the menu and palette layouts
+- `src/menu.rs` — the native macOS menu bar (muda)
+- `src/app.rs` — the window: tool palette, waveform view, selection, dialogs, undo/redo
 
 For headless checks, `SOUND_EDIT_ACTIONS="sel:1-2,fadeout"` and `SOUND_EDIT_SNAPSHOT=out.png`
-run scripted actions on the opened file, save a screenshot and quit.
+run scripted actions on the opened file, save a screenshot and quit (`run:<Action>` runs any
+command, `dumpmenu` prints the menu bar).
