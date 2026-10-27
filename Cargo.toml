@@ -1,0 +1,22 @@
+[package]
+name = "sound-edit"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cpal = "0.18.2"
+eframe = "0.37"
+hound = "3.5.1"
+png = "0.18.1"
+rfd = "0.17.2"
+symphonia = { version = "0.6.1", features = ["all"] }
+
+[package.metadata.bundle]
+name = "Sound Edit"
+identifier = "com.johnnyhawk.soundedit"
+icon = ["assets/icon.png"]
+category = "public.app-category.music"
+short_description = "A simple audio editor"
+
+[profile.release]
+strip = true
