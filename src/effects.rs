@@ -328,6 +328,27 @@ pub fn silence(rate: u32, channels: usize, secs: f32) -> Audio {
     Audio { rate, channels: vec![vec![0.0; n]; channels.max(1)] }
 }
 
+/// Mix several sounds (each with a linear gain) into one. All must share a sample rate. The
+/// result is as long as the longest input and has as many channels as the widest one; mono
+/// inputs are spread across every channel.
+pub fn mix(inputs: &[(&Audio, f32)], rate: u32) -> Audio {
+    let frames = inputs.iter().map(|(a, _)| a.frames()).max().unwrap_or(0);
+    let channels = inputs.iter().map(|(a, _)| a.num_channels()).max().unwrap_or(1).max(1);
+    let mut out = vec![vec![0.0f32; frames]; channels];
+    for (a, gain) in inputs {
+        if a.num_channels() == 0 || *gain == 0.0 {
+            continue;
+        }
+        for (ci, o) in out.iter_mut().enumerate() {
+            let src = &a.channels[ci.min(a.num_channels() - 1)];
+            for (d, s) in o.iter_mut().zip(src) {
+                *d += s * gain;
+            }
+        }
+    }
+    Audio { rate, channels: out }
+}
+
 /// Mix `clip` into `base` starting at frame `at`, at `level` (linear). Extends the file if
 /// the clip runs past the end.
 pub fn mix_into(base: &Audio, at: usize, clip: &Audio, level: f32) -> Audio {
@@ -580,5 +601,17 @@ mod tests {
         let a = dtmf(8000, 1, "12x", 100.0, 50.0, -6.0);
         assert_eq!(a.frames(), 2 * (800 + 400));
         assert!(a.peak(0, a.frames()) <= 0.51);
+    }
+
+    #[test]
+    fn mixes_tracks() {
+        let a = Audio { rate: 10, channels: vec![vec![0.5; 4]] };
+        let b = Audio { rate: 10, channels: vec![vec![0.25; 6], vec![-0.25; 6]] };
+        let m = mix(&[(&a, 1.0), (&b, 2.0)], 10);
+        assert_eq!(m.frames(), 6);
+        assert_eq!(m.num_channels(), 2);
+        assert_eq!(m.channels[0][0], 1.0);
+        assert_eq!(m.channels[1][0], 0.0);
+        assert_eq!(m.channels[1][5], -0.5);
     }
 }

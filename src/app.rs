@@ -22,8 +22,29 @@ type Sel = (usize, usize);
 /// Undo history is capped by memory rather than step count, since each step is a full copy.
 const UNDO_BUDGET_BYTES: usize = 2 << 30;
 
+/// One track of a multi-track sound. All tracks share the sound's sample rate.
+#[derive(Clone)]
+struct Track {
+    name: String,
+    audio: Arc<Audio>,
+    peaks: Arc<Peaks>,
+    /// Linear volume (1 = unchanged).
+    gain: f32,
+    mute: bool,
+    solo: bool,
+}
+
+impl Track {
+    fn new(name: impl Into<String>, audio: Arc<Audio>) -> Track {
+        let peaks = Arc::new(Peaks::build(&audio));
+        Track { name: name.into(), audio, peaks, gain: 1.0, mute: false, solo: false }
+    }
+}
+
 struct Snapshot {
     audio: Arc<Audio>,
+    tracks: Vec<Track>,
+    active: usize,
     cues: Vec<Cue>,
     sel: Option<Sel>,
     cursor: usize,
@@ -257,7 +278,12 @@ enum Pending {
 
 pub struct App {
     audio: Option<Arc<Audio>>,
-    peaks: Option<Peaks>,
+    peaks: Option<Arc<Peaks>>,
+    /// All tracks; `audio`/`peaks` mirror the active one, which is the one being edited.
+    tracks: Vec<Track>,
+    active: usize,
+    /// What the player is playing: the active track alone, or the mix of all tracks.
+    play_audio: Option<Arc<Audio>>,
     path: Option<PathBuf>,
     dirty: bool,
 
@@ -283,7 +309,8 @@ pub struct App {
     dtmf_digits: String,
 
     status: String,
-    loading: Option<(PathBuf, Receiver<Result<Audio, String>>)>,
+    /// File being loaded in the background, and whether it becomes a new track.
+    loading: Option<(PathBuf, Receiver<Result<Audio, String>>, bool)>,
     pending: Option<Pending>,
     allow_close: bool,
     automation: Option<Automation>,
@@ -338,6 +365,9 @@ impl App {
         let mut app = App {
             audio: None,
             peaks: None,
+            tracks: Vec::new(),
+            active: 0,
+            play_audio: None,
             path: None,
             dirty: false,
             undo: Vec::new(),
@@ -420,6 +450,20 @@ impl App {
     }
 
     fn start_load(&mut self, path: PathBuf, ctx: &egui::Context) {
+        self.start_load_as(path, ctx, false);
+    }
+
+    fn import_track_dialog(&mut self, ctx: &egui::Context) {
+        let picked = rfd::FileDialog::new()
+            .set_title("Import a file as a new track")
+            .add_filter("Audio", &["wav", "mp3", "flac", "ogg", "oga", "m4a", "mp4", "aac", "aif", "aiff", "caf"])
+            .pick_file();
+        if let Some(p) = picked {
+            self.start_load_as(p, ctx, true);
+        }
+    }
+
+    fn start_load_as(&mut self, path: PathBuf, ctx: &egui::Context, as_track: bool) {
         let (tx, rx) = channel();
         let p = path.clone();
         let ctx = ctx.clone();
@@ -428,14 +472,28 @@ impl App {
             ctx.request_repaint();
         });
         self.status = format!("Loading {}…", file_name(&path));
-        self.loading = Some((path, rx));
+        self.loading = Some((path, rx, as_track));
     }
 
     fn poll_loading(&mut self) {
-        let Some((path, rx)) = &self.loading else { return };
+        let Some((path, rx, as_track)) = &self.loading else { return };
         let Ok(result) = rx.try_recv() else { return };
-        let path = path.clone();
+        let (path, as_track) = (path.clone(), *as_track);
         self.loading = None;
+        if as_track && self.audio.is_some() {
+            match result {
+                Ok(a) if a.frames() > 0 => {
+                    let rate = self.audio.as_ref().unwrap().rate;
+                    let a = effects::convert_rate(&a, rate);
+                    let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Track".into());
+                    self.add_track(Track::new(name, Arc::new(a)), "Import Track");
+                    self.status = format!("Imported {} as a new track", file_name(&path));
+                }
+                Ok(_) => self.status = format!("{} contains no audio", file_name(&path)),
+                Err(e) => self.status = format!("Couldn't open {}: {e}", file_name(&path)),
+            }
+            return;
+        }
         match result {
             Ok(a) if a.frames() > 0 => {
                 self.status = format!(
@@ -452,8 +510,12 @@ impl App {
                 self.cursor = 0;
                 self.dirty = false;
                 self.cues = audio::read_wav_cues(&path);
+                let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Track 1".into());
+                let a = Arc::new(a);
+                self.tracks = vec![Track::new(name, a.clone())];
+                self.active = 0;
                 self.path = Some(path);
-                self.set_audio(Arc::new(a));
+                self.set_audio(a);
                 self.zoom_fit();
             }
             Ok(_) => self.status = format!("{} contains no audio", file_name(&path)),
@@ -463,21 +525,124 @@ impl App {
 
     fn set_audio(&mut self, a: Arc<Audio>) {
         // If the whole file was in view, keep it that way after the length changes.
-        let was_full = self.view_start <= 0.0 && self.view_len >= self.frames() as f64;
-        self.peaks = Some(Peaks::build(&a));
-        self.player.set_audio(a.clone());
+        let was_full = self.view_start <= 0.0 && self.view_len >= self.timeline_frames() as f64;
+        let peaks = Arc::new(Peaks::build(&a));
+        self.peaks = Some(peaks.clone());
+        if self.tracks.is_empty() {
+            self.tracks.push(Track::new("Track 1", a.clone()));
+            self.active = 0;
+        }
+        let t = &mut self.tracks[self.active];
+        t.audio = a.clone();
+        t.peaks = peaks;
         let n = a.frames();
         self.cursor = self.cursor.min(n);
         self.sel = self.sel.map(|(s, e)| (s.min(n), e.min(n))).filter(|(s, e)| e > s);
         self.audio = Some(a);
+        self.refresh_playback();
         if was_full {
             self.zoom_fit();
         }
         self.clamp_view();
     }
 
-    fn export(&mut self, selection_only: bool) {
+    /// Hand the player the active track, or the mix of all audible tracks when there are several.
+    fn refresh_playback(&mut self) {
+        let Some(active) = self.audio.clone() else { return };
+        let play = if self.tracks.len() <= 1 { active } else { Arc::new(self.mixdown()) };
+        self.player.set_audio(play.clone());
+        self.play_audio = Some(play);
+    }
+
+    /// Mix of all audible tracks (solo wins over mute), with their volumes.
+    fn mixdown(&self) -> Audio {
+        let rate = self.audio.as_ref().map_or(44100, |a| a.rate);
+        let any_solo = self.tracks.iter().any(|t| t.solo);
+        let inputs: Vec<(&Audio, f32)> = self
+            .tracks
+            .iter()
+            .filter(|t| if any_solo { t.solo } else { !t.mute })
+            .map(|t| (&*t.audio, t.gain))
+            .collect();
+        effects::mix(&inputs, rate)
+    }
+
+    /// Length of the longest track: the extent of the timeline.
+    fn timeline_frames(&self) -> usize {
+        self.tracks.iter().map(|t| t.audio.frames()).max().unwrap_or(0).max(self.frames())
+    }
+
+    fn set_active(&mut self, i: usize) {
+        if i >= self.tracks.len() || i == self.active {
+            return;
+        }
+        self.active = i;
+        let t = &self.tracks[i];
+        self.peaks = Some(t.peaks.clone());
+        let a = t.audio.clone();
+        let n = a.frames();
+        self.audio = Some(a);
+        self.cursor = self.cursor.min(n);
+        self.sel = self.sel.map(|(s, e)| (s.min(n), e.min(n))).filter(|(s, e)| e > s);
+    }
+
+    fn add_track(&mut self, track: Track, label: &'static str) {
+        self.push_undo(label);
+        self.tracks.insert(self.active + 1, track);
+        self.active += 1;
+        let a = self.tracks[self.active].audio.clone();
+        self.set_audio(a);
+        self.dirty = true;
+    }
+
+    fn new_track(&mut self) {
         let Some(a) = self.audio.clone() else { return };
+        let n = (1..).find(|i| !self.tracks.iter().any(|t| t.name == format!("Track {i}"))).unwrap();
+        let clip = effects::silence(a.rate, a.num_channels(), 0.0);
+        let clip = Audio { rate: a.rate, channels: vec![vec![0.0; self.timeline_frames()]; clip.num_channels()] };
+        self.add_track(Track::new(format!("Track {n}"), Arc::new(clip)), "New Track");
+        self.status = "New silent track — paste, record, Mix Paste or Insert into it".into();
+    }
+
+    fn duplicate_track(&mut self) {
+        let mut t = self.tracks[self.active].clone();
+        t.name = format!("{} copy", t.name);
+        t.solo = false;
+        self.add_track(t, "Duplicate Track");
+    }
+
+    fn delete_track(&mut self) {
+        if self.tracks.len() < 2 {
+            return;
+        }
+        self.push_undo("Delete Track");
+        self.tracks.remove(self.active);
+        self.active = self.active.min(self.tracks.len() - 1);
+        let a = self.tracks[self.active].audio.clone();
+        self.peaks = Some(self.tracks[self.active].peaks.clone());
+        self.set_audio(a);
+        self.dirty = true;
+    }
+
+    fn mix_down(&mut self) {
+        if self.tracks.len() < 2 {
+            return;
+        }
+        let mix = Arc::new(self.mixdown());
+        self.push_undo("Mix Down");
+        self.tracks = vec![Track::new("Mix", mix.clone())];
+        self.active = 0;
+        self.set_audio(mix);
+        self.dirty = true;
+        self.status = "Mixed all tracks into one — ⌘Z to undo".into();
+    }
+
+    fn export(&mut self, selection_only: bool) {
+        let Some(mut a) = self.audio.clone() else { return };
+        if self.tracks.len() > 1 {
+            // Several tracks export as their mix.
+            a = Arc::new(self.mixdown());
+        }
         let (a, suffix) = match (selection_only, self.sel) {
             (true, Some((s, e))) => (Arc::new(a.slice(s, e)), "-selection"),
             _ => (a, "-edit"),
@@ -537,7 +702,7 @@ impl App {
 
     fn push_undo(&mut self, label: &'static str) {
         let Some(a) = self.audio.clone() else { return };
-        self.undo.push(Snapshot { audio: a, cues: self.cues.clone(), sel: self.sel, cursor: self.cursor, label });
+        self.undo.push(Snapshot { audio: a, tracks: self.tracks.clone(), active: self.active, cues: self.cues.clone(), sel: self.sel, cursor: self.cursor, label });
         self.redo.clear();
         // Drop oldest steps beyond the memory budget (always keep at least one).
         let mut total: usize = self.undo.iter().map(|s| s.audio.bytes()).sum();
@@ -592,7 +757,15 @@ impl App {
     fn undo(&mut self) {
         let Some(snap) = self.undo.pop() else { return };
         let cur = self.audio.clone().unwrap();
-        self.redo.push(Snapshot { audio: cur, cues: std::mem::replace(&mut self.cues, snap.cues), sel: self.sel, cursor: self.cursor, label: snap.label });
+        self.redo.push(Snapshot {
+            audio: cur,
+            tracks: std::mem::replace(&mut self.tracks, snap.tracks),
+            active: std::mem::replace(&mut self.active, snap.active),
+            cues: std::mem::replace(&mut self.cues, snap.cues),
+            sel: self.sel,
+            cursor: self.cursor,
+            label: snap.label,
+        });
         self.sel = snap.sel;
         self.cursor = snap.cursor;
         self.set_audio(snap.audio);
@@ -603,7 +776,15 @@ impl App {
     fn redo(&mut self) {
         let Some(snap) = self.redo.pop() else { return };
         let cur = self.audio.clone().unwrap();
-        self.undo.push(Snapshot { audio: cur, cues: std::mem::replace(&mut self.cues, snap.cues), sel: self.sel, cursor: self.cursor, label: snap.label });
+        self.undo.push(Snapshot {
+            audio: cur,
+            tracks: std::mem::replace(&mut self.tracks, snap.tracks),
+            active: std::mem::replace(&mut self.active, snap.active),
+            cues: std::mem::replace(&mut self.cues, snap.cues),
+            sel: self.sel,
+            cursor: self.cursor,
+            label: snap.label,
+        });
         self.sel = snap.sel;
         self.cursor = snap.cursor;
         self.set_audio(snap.audio);
@@ -944,7 +1125,10 @@ impl App {
         self.dirty = false;
         self.path = None;
         self.cues.clear();
-        self.set_audio(Arc::new(Audio { rate: 44100, channels: vec![Vec::new(); 2] }));
+        let a = Arc::new(Audio { rate: 44100, channels: vec![Vec::new(); 2] });
+        self.tracks = vec![Track::new("Track 1", a.clone())];
+        self.active = 0;
+        self.set_audio(a);
         self.zoom_fit();
         self.status = "New sound (44.1 kHz stereo). Use the Insert menu, Paste or Mix Paste to add audio.".into();
     }
@@ -1010,7 +1194,7 @@ impl App {
             self.player.stop();
             return;
         }
-        let n = self.frames();
+        let n = self.timeline_frames();
         let (start, end) = match self.sel {
             Some((s, e)) if self.cursor > s && self.cursor < e => (self.cursor, e),
             Some((s, e)) => (s, e),
@@ -1030,7 +1214,7 @@ impl App {
 
     fn zoom_fit(&mut self) {
         self.view_start = 0.0;
-        self.view_len = self.frames().max(1) as f64;
+        self.view_len = self.timeline_frames().max(1) as f64;
     }
 
     fn zoom_to_selection(&mut self) {
@@ -1044,7 +1228,7 @@ impl App {
 
     /// Zoom by `factor` (<1 zooms in) keeping frame `anchor` fixed on screen.
     fn zoom(&mut self, factor: f64, anchor: f64) {
-        let new_len = (self.view_len * factor).clamp(32.0, self.frames().max(32) as f64);
+        let new_len = (self.view_len * factor).clamp(32.0, self.timeline_frames().max(32) as f64);
         let t = (anchor - self.view_start) / self.view_len;
         self.view_start = anchor - t * new_len;
         self.view_len = new_len;
@@ -1052,7 +1236,7 @@ impl App {
     }
 
     fn clamp_view(&mut self) {
-        let n = self.frames().max(1) as f64;
+        let n = self.timeline_frames().max(1) as f64;
         self.view_len = self.view_len.clamp(32f64.min(n), n);
         self.view_start = self.view_start.clamp(0.0, (n - self.view_len).max(0.0));
     }
@@ -1067,6 +1251,8 @@ impl App {
             Action::New | Action::Open | Action::Quit => true,
             Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop => true,
             Action::ShowCues | Action::Record => true,
+            Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack | Action::SoloTrack => has,
+            Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack => has && self.tracks.len() > 1,
             Action::AddCue => has,
             Action::NextCue | Action::PrevCue => has && !self.cues.is_empty(),
             Action::ShowTools | Action::ShowControls | Action::ShowInfo => true,
@@ -1106,6 +1292,8 @@ impl App {
             Action::ShowInfo => self.show_info,
             Action::ShowCues => self.show_cues,
             Action::Record => self.recorder.is_some(),
+            Action::MuteTrack => self.tracks.get(self.active).is_some_and(|t| t.mute),
+            Action::SoloTrack => self.tracks.get(self.active).is_some_and(|t| t.solo),
             _ => false,
         }
     }
@@ -1213,6 +1401,25 @@ impl App {
                 }
             }
             Action::AddCue => self.add_cue(),
+            Action::NewTrack => self.new_track(),
+            Action::ImportTrack => self.import_track_dialog(ctx),
+            Action::DuplicateTrack => self.duplicate_track(),
+            Action::DeleteTrack => self.delete_track(),
+            Action::MixDown => self.mix_down(),
+            Action::MuteTrack => {
+                let t = &mut self.tracks[self.active];
+                t.mute = !t.mute;
+                self.dirty = true;
+                self.refresh_playback();
+            }
+            Action::SoloTrack => {
+                let t = &mut self.tracks[self.active];
+                t.solo = !t.solo;
+                self.dirty = true;
+                self.refresh_playback();
+            }
+            Action::NextTrack => self.set_active((self.active + 1) % self.tracks.len()),
+            Action::PrevTrack => self.set_active((self.active + self.tracks.len() - 1) % self.tracks.len()),
             Action::NextCue => self.jump_cue(true),
             Action::PrevCue => self.jump_cue(false),
         }
@@ -1332,12 +1539,12 @@ impl App {
 
     /// Update the playback level meters (they follow the playhead and fall back smoothly).
     fn update_meters(&mut self, ctx: &egui::Context) {
-        let n_ch = self.audio.as_ref().map_or(2, |a| a.num_channels().max(1));
+        let n_ch = self.play_audio.as_ref().map_or(2, |a| a.num_channels().max(1));
         self.meter.resize(n_ch, 0.0);
         let playing = self.player.is_playing();
         let pos = self.player.position();
         for (c, m) in self.meter.iter_mut().enumerate() {
-            let now = match (&self.audio, playing) {
+            let now = match (&self.play_audio, playing) {
                 (Some(a), true) if pos < a.frames() => {
                     let end = (pos + 2048).min(a.frames());
                     a.channels[c][pos..end].iter().fold(0.0f32, |p, s| p.max(s.abs()))
@@ -1419,6 +1626,11 @@ impl App {
             key(ui, "Sound");
             ui.label(self.path.as_deref().map(file_name).unwrap_or_else(|| "Untitled".into()));
             ui.end_row();
+            if self.tracks.len() > 1 {
+                key(ui, "Tracks");
+                ui.label(format!("{} — editing {}", self.tracks.len(), self.tracks[self.active].name));
+                ui.end_row();
+            }
             key(ui, "Format");
             ui.label(format!(
                 "{} Hz, {}",
@@ -1794,6 +2006,9 @@ impl App {
         ui.horizontal_centered(|ui| {
             if let Some(a) = &self.audio {
                 let r = a.rate as f64;
+                if self.tracks.len() > 1 {
+                    ui.label(format!("{} ·", self.tracks[self.active].name));
+                }
                 ui.label(format!("{} Hz · {} ch · {}", a.rate, a.num_channels(), fmt_time(a.duration_secs())));
                 ui.separator();
                 match self.sel {
@@ -1811,7 +2026,7 @@ impl App {
 
     fn waveform(&mut self, ui: &mut egui::Ui) {
         let full = ui.available_rect_before_wrap();
-        let Some(n) = self.audio.as_ref().map(|a| a.frames()) else {
+        let Some(_) = self.audio.as_ref() else {
             ui.painter().rect_filled(full, 0.0, Color32::WHITE);
             ui.painter().text(
                 full.center(),
@@ -1825,14 +2040,35 @@ impl App {
         let rate = self.audio.as_ref().unwrap().rate as f64;
         let n_ch = self.audio.as_ref().unwrap().num_channels().max(1);
 
-        let ruler = Rect::from_min_size(full.min, Vec2::new(full.width(), 18.0));
-        let scroll = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - 15.0), full.max);
-        let wave = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.right(), scroll.top()));
-        let lane_h = wave.height() / n_ch as f32;
+        // With several tracks, a header column on the left holds each track's controls.
+        let n_tracks = self.tracks.len().max(1);
+        let header_w = if n_tracks > 1 { 150.0 } else { 0.0 };
+        let total = self.timeline_frames();
+        let ruler = Rect::from_min_max(Pos2::new(full.left() + header_w, full.top()), Pos2::new(full.right(), full.top() + 18.0));
+        let scroll = Rect::from_min_max(Pos2::new(full.left() + header_w, full.bottom() - 15.0), full.max);
+        let wave = Rect::from_min_max(Pos2::new(full.left() + header_w, ruler.bottom()), Pos2::new(full.right(), scroll.top()));
+        let header = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.left() + header_w, scroll.top()));
+        let track_h = wave.height() / n_tracks as f32;
+        let track_lane = move |i: usize| Rect::from_min_size(Pos2::new(wave.left(), wave.top() + i as f32 * track_h), Vec2::new(wave.width(), track_h));
+        let alane = track_lane(self.active);
+        let lane_h = alane.height() / n_ch as f32;
         let spp = self.view_len / wave.width() as f64; // frames per pixel
 
         // --- interaction on the waveform ---
         let resp = ui.allocate_rect(Rect::from_min_max(ruler.min, wave.max), Sense::click_and_drag());
+        // Pressing in another track's lane makes it the track being edited.
+        if n_tracks > 1 && (resp.drag_started() || resp.clicked()) {
+            if let Some(p) = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos()) {
+                if p.y > wave.top() {
+                    let ti = (((p.y - wave.top()) / track_h) as usize).min(n_tracks - 1);
+                    if ti != self.active {
+                        self.set_active(ti);
+                    }
+                }
+            }
+        }
+        // The active track may have changed above.
+        let n = self.frames();
         let x_to_frame = |x: f32, vs: f64, vl: f64| -> usize {
             let t = ((x - wave.left()) / wave.width()) as f64;
             (vs + t * vl).round().clamp(0.0, n as f64) as usize
@@ -2065,14 +2301,14 @@ impl App {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
                 }
                 let value_at = |y: f32, ch: usize| {
-                    let mid = wave.top() + ch as f32 * lane_h + lane_h / 2.0;
+                    let mid = alane.top() + ch as f32 * lane_h + lane_h / 2.0;
                     ((mid - y) / (lane_h / 2.0 * 0.92)).clamp(-1.0, 1.0)
                 };
                 if (resp.drag_started() || resp.clicked()) && self.pencil.is_none() {
                     if spp > PENCIL_MAX_SPP || n == 0 {
                         self.status = "Zoom in closer to draw with the pencil".into();
                     } else if let Some(p) = press {
-                        let mut channel = (((p.y - wave.top()) / lane_h) as usize).min(n_ch - 1);
+                        let mut channel = (((p.y - alane.top()).max(0.0) / lane_h) as usize).min(n_ch - 1);
                         // Shift-click draws a straight line on from the end of the last stroke.
                         let mut last = None;
                         if let (true, Some((ch, f, v))) = (shift, self.pencil_last) {
@@ -2104,9 +2340,9 @@ impl App {
 
         // --- scrollbar ---
         let sresp = ui.allocate_rect(scroll, Sense::click_and_drag());
-        let thumb_w = (self.view_len / n.max(1) as f64 * scroll.width() as f64).max(16.0).min(scroll.width() as f64) as f32;
+        let thumb_w = (self.view_len / total.max(1) as f64 * scroll.width() as f64).max(16.0).min(scroll.width() as f64) as f32;
         let track = scroll.width() - thumb_w;
-        let max_start = (n as f64 - self.view_len).max(0.0);
+        let max_start = (total as f64 - self.view_len).max(0.0);
         let thumb_x = if max_start > 0.0 { (self.view_start / max_start) as f32 * track } else { 0.0 };
         let thumb = Rect::from_min_size(Pos2::new(scroll.left() + thumb_x, scroll.top()), Vec2::new(thumb_w, scroll.height()));
         if sresp.drag_started() {
@@ -2177,64 +2413,98 @@ impl App {
             t = k as f64 * minor;
         }
 
-        // Selection: a grey band behind the waveform.
+        // Selection: a grey band behind the active track's waveform.
         let sel_px = self.sel.map(|(s, e)| (frame_to_x(s as f64).max(wave.left()), frame_to_x(e as f64).min(wave.right())));
-        if let Some((x0, x1)) = sel_px {
-            if x1 > x0 {
-                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, wave.top()), Pos2::new(x1, wave.bottom())), 0.0, Color32::from_gray(222));
+
+        // Waveforms: one lane per track, split into one strip per channel.
+        let n_tracks = self.tracks.len().max(1);
+        for ti in 0..n_tracks {
+            let is_active = ti == self.active;
+            let (audio, peaks) = if is_active {
+                (audio.clone(), self.peaks.clone().unwrap())
+            } else {
+                (self.tracks[ti].audio.clone(), self.tracks[ti].peaks.clone())
+            };
+            let lane = track_lane(ti);
+            let tn = audio.frames();
+            let muted = self.tracks.get(ti).is_some_and(|t| {
+                let any_solo = self.tracks.iter().any(|t| t.solo);
+                if any_solo { !t.solo } else { t.mute }
+            });
+            if n_tracks > 1 {
+                if !is_active {
+                    painter.rect_filled(lane, 0.0, Color32::from_gray(250));
+                }
+                if ti > 0 {
+                    painter.line_segment([lane.left_top(), lane.right_top()], Stroke::new(1.0, Color32::from_gray(190)));
+                }
+            }
+            // Selection band (only on the track being edited).
+            if let (true, Some((x0, x1))) = (is_active, sel_px) {
+                if x1 > x0 {
+                    painter.rect_filled(Rect::from_min_max(Pos2::new(x0, lane.top()), Pos2::new(x1, lane.bottom())), 0.0, Color32::from_gray(222));
+                }
+            }
+            let base = if muted {
+                Color32::from_gray(190)
+            } else if is_active || n_tracks == 1 {
+                Color32::from_gray(55)
+            } else {
+                Color32::from_gray(110)
+            };
+            let tch = audio.num_channels().max(1);
+            let lane_h = lane.height() / tch as f32;
+            for (ci, ch) in audio.channels.iter().enumerate() {
+                let top = lane.top() + ci as f32 * lane_h;
+                let mid = top + lane_h / 2.0;
+                let amp = lane_h / 2.0 * 0.92;
+                let in_sel = |f: usize| is_active && matches!(self.sel, Some((s, e)) if f >= s && f < e);
+                let color_at = |f: usize| if in_sel(f) && !muted { black } else { base };
+                painter.line_segment([Pos2::new(wave.left(), mid), Pos2::new(wave.right(), mid)], Stroke::new(1.0, Color32::from_gray(212)));
+                if ci > 0 {
+                    painter.line_segment([Pos2::new(wave.left(), top), Pos2::new(wave.right(), top)], Stroke::new(1.0, Color32::from_gray(232)));
+                }
+                if spp <= 1.5 {
+                    // Zoomed in: connect individual samples.
+                    let first = vs.floor().max(0.0) as usize;
+                    let last = ((vs + vl).ceil() as usize + 1).min(tn);
+                    let mut prev: Option<Pos2> = None;
+                    for (i, &s) in ch.iter().enumerate().take(last).skip(first) {
+                        let p = Pos2::new(frame_to_x(i as f64), mid - s.clamp(-1.0, 1.0) * amp);
+                        if let Some(q) = prev {
+                            painter.line_segment([q, p], Stroke::new(1.0, color_at(i)));
+                        }
+                        if spp < 0.12 {
+                            painter.rect_filled(Rect::from_center_size(p, Vec2::splat(3.0)), 0.0, color_at(i));
+                        }
+                        prev = Some(p);
+                    }
+                } else {
+                    let blocks = &peaks.data[ci];
+                    let w = wave.width().ceil() as usize;
+                    for px in 0..w {
+                        let f0 = (vs + px as f64 * spp).max(0.0) as usize;
+                        let f1 = ((vs + (px + 1) as f64 * spp) as usize).min(tn);
+                        if f0 >= f1 {
+                            continue;
+                        }
+                        let (lo, hi) = if spp >= peaks.block as f64 * 2.0 {
+                            blocks[f0 / peaks.block..(f1 / peaks.block).max(f0 / peaks.block + 1).min(blocks.len())]
+                                .iter()
+                                .fold((f32::MAX, f32::MIN), |(a, b), &(l, h)| (a.min(l), b.max(h)))
+                        } else {
+                            ch[f0..f1].iter().fold((f32::MAX, f32::MIN), |(a, b), &s| (a.min(s), b.max(s)))
+                        };
+                        let x = wave.left() + px as f32 + 0.5;
+                        let y0 = mid - hi.clamp(-1.0, 1.0) * amp;
+                        let y1 = (mid - lo.clamp(-1.0, 1.0) * amp).max(y0 + 1.0);
+                        painter.line_segment([Pos2::new(x, y0), Pos2::new(x, y1)], Stroke::new(1.0, color_at(f0)));
+                    }
+                }
             }
         }
-
-        // Waveforms, one lane per channel.
-        let peaks = self.peaks.as_ref().unwrap();
-        for (ci, ch) in audio.channels.iter().enumerate() {
-            let top = wave.top() + ci as f32 * lane_h;
-            let mid = top + lane_h / 2.0;
-            let amp = lane_h / 2.0 * 0.92;
-            let in_sel = |f: usize| matches!(self.sel, Some((s, e)) if f >= s && f < e);
-            let color_at = |f: usize| if in_sel(f) { black } else { Color32::from_gray(55) };
-            // Centre line, drawn per segment so it inverts inside the selection.
-            painter.line_segment([Pos2::new(wave.left(), mid), Pos2::new(wave.right(), mid)], Stroke::new(1.0, Color32::from_gray(205)));
-            if ci > 0 {
-                painter.line_segment([Pos2::new(wave.left(), top), Pos2::new(wave.right(), top)], Stroke::new(1.0, LINE));
-            }
-            if spp <= 1.5 {
-                // Zoomed in: connect individual samples.
-                let first = vs.floor().max(0.0) as usize;
-                let last = ((vs + vl).ceil() as usize + 1).min(n);
-                let mut prev: Option<Pos2> = None;
-                for (i, &s) in ch.iter().enumerate().take(last).skip(first) {
-                    let p = Pos2::new(frame_to_x(i as f64), mid - s.clamp(-1.0, 1.0) * amp);
-                    if let Some(q) = prev {
-                        painter.line_segment([q, p], Stroke::new(1.0, color_at(i)));
-                    }
-                    if spp < 0.12 {
-                        painter.rect_filled(Rect::from_center_size(p, Vec2::splat(3.0)), 0.0, color_at(i));
-                    }
-                    prev = Some(p);
-                }
-            } else {
-                let blocks = &peaks.data[ci];
-                let w = wave.width().ceil() as usize;
-                for px in 0..w {
-                    let f0 = (vs + px as f64 * spp).max(0.0) as usize;
-                    let f1 = ((vs + (px + 1) as f64 * spp) as usize).min(n);
-                    if f0 >= f1 {
-                        continue;
-                    }
-                    let (lo, hi) = if spp >= peaks.block as f64 * 2.0 {
-                        blocks[f0 / peaks.block..(f1 / peaks.block).max(f0 / peaks.block + 1).min(blocks.len())]
-                            .iter()
-                            .fold((f32::MAX, f32::MIN), |(a, b), &(l, h)| (a.min(l), b.max(h)))
-                    } else {
-                        ch[f0..f1].iter().fold((f32::MAX, f32::MIN), |(a, b), &s| (a.min(s), b.max(s)))
-                    };
-                    let x = wave.left() + px as f32 + 0.5;
-                    let y0 = mid - hi.clamp(-1.0, 1.0) * amp;
-                    let y1 = (mid - lo.clamp(-1.0, 1.0) * amp).max(y0 + 1.0);
-                    painter.line_segment([Pos2::new(x, y0), Pos2::new(x, y1)], Stroke::new(1.0, color_at(f0)));
-                }
-            }
+        if n_tracks > 1 {
+            self.track_headers(ui, header, n_tracks, &track_lane);
         }
 
         // Zoom tool rubber band.
@@ -2297,6 +2567,65 @@ impl App {
         if let Some(p) = resp.hover_pos() {
             let f = x_to_frame(p.x, vs, vl);
             painter.text(Pos2::new(wave.right() - 6.0, ruler.top() + 1.0), Align2::RIGHT_TOP, fmt_time(f as f64 / rate), FontId::monospace(11.0), MUTED);
+        }
+    }
+
+    /// Per-track controls beside each lane: name, mute, solo and volume.
+    fn track_headers(&mut self, ui: &mut egui::Ui, header: Rect, n_tracks: usize, lane: &dyn Fn(usize) -> Rect) {
+        // The whole column, including the corners beside the ruler and scroll bar.
+        let column = Rect::from_min_max(Pos2::new(header.left(), header.top() - 18.0), Pos2::new(header.right(), header.bottom() + 15.0));
+        ui.painter().rect_filled(column, 0.0, PANEL);
+        ui.painter().line_segment([header.right_top(), header.right_bottom()], Stroke::new(1.0, LINE));
+        let mut activate = None;
+        let mut changed = false;
+        for ti in 0..n_tracks {
+            let l = lane(ti);
+            let r = Rect::from_min_max(Pos2::new(header.left(), l.top()), Pos2::new(header.right() - 1.0, l.bottom()));
+            let is_active = ti == self.active;
+            if is_active {
+                ui.painter().rect_filled(r, 0.0, Color32::WHITE);
+                ui.painter().rect_filled(Rect::from_min_size(r.min, Vec2::new(3.0, r.height())), 0.0, INK);
+            }
+            if ti > 0 {
+                ui.painter().line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, Color32::from_gray(190)));
+            }
+            let bg = ui.interact(r, ui.scope_id().with(("track_bg", ti)), Sense::click());
+            if bg.clicked() {
+                activate = Some(ti);
+            }
+            let inner = r.shrink2(Vec2::new(10.0, 6.0));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+                let t = &mut self.tracks[ti];
+                let name = ui.add(egui::TextEdit::singleline(&mut t.name).desired_width(inner.width()).font(egui::TextStyle::Body));
+                if name.gained_focus() {
+                    activate = Some(ti);
+                }
+                if inner.height() > 44.0 {
+                    ui.horizontal(|ui| {
+                        if ui.add(Button::new("M").selected(t.mute).min_size(Vec2::new(24.0, 20.0))).on_hover_text("Mute").clicked() {
+                            t.mute = !t.mute;
+                            changed = true;
+                        }
+                        if ui.add(Button::new("S").selected(t.solo).min_size(Vec2::new(24.0, 20.0))).on_hover_text("Solo").clicked() {
+                            t.solo = !t.solo;
+                            changed = true;
+                        }
+                        ui.spacing_mut().slider_width = (inner.width() - 60.0).max(30.0);
+                        let vol = ui.add(egui::Slider::new(&mut t.gain, 0.0..=2.0).show_value(false)).on_hover_text(format!("Volume {:.0}%", t.gain * 100.0));
+                        if vol.drag_stopped() || (vol.changed() && !vol.dragged()) {
+                            changed = true;
+                        }
+                    });
+                }
+            });
+        }
+        if let Some(ti) = activate {
+            self.set_active(ti);
+        }
+        if changed {
+            self.dirty = true;
+            self.refresh_playback();
         }
     }
 

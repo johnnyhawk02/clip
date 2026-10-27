@@ -67,6 +67,15 @@ pub enum Action {
     NextCue,
     PrevCue,
     ShowCues,
+    NewTrack,
+    ImportTrack,
+    DuplicateTrack,
+    DeleteTrack,
+    MixDown,
+    MuteTrack,
+    SoloTrack,
+    NextTrack,
+    PrevTrack,
 }
 
 use Action::*;
@@ -78,7 +87,8 @@ pub const ALL: &[Action] = &[
     Smooth, NoiseGate, Pitch, Tempo, Speed, ToMono, Split, PlayPause, Stop, Loop, GoStart, GoEnd,
     ZoomIn, ZoomOut, ZoomSel, ZoomFit, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
     ShowControls, ShowInfo, Convert, Equalizer, Envelope, Bender, Record, AddCue, NextCue, PrevCue,
-    ShowCues,
+    ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, SoloTrack, NextTrack,
+    PrevTrack,
 ];
 
 pub enum Item {
@@ -154,6 +164,23 @@ pub const MENUS: &[(&str, &[Item])] = &[
         ],
     ),
     (
+        "Tracks",
+        &[
+            Do(NewTrack),
+            Do(ImportTrack),
+            Do(DuplicateTrack),
+            Do(DeleteTrack),
+            Separator,
+            Do(MuteTrack),
+            Do(SoloTrack),
+            Separator,
+            Do(PrevTrack),
+            Do(NextTrack),
+            Separator,
+            Do(MixDown),
+        ],
+    ),
+    (
         "Control",
         &[Do(PlayPause), Do(Stop), Do(Loop), Separator, Do(Record), Separator, Do(GoStart), Do(GoEnd), Do(PrevCue), Do(NextCue)],
     ),
@@ -207,7 +234,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
+            || matches!(self, Loop | MuteTrack | SoloTrack | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
     }
 
     pub fn label(self) -> &'static str {
@@ -276,6 +303,15 @@ impl Action {
             NextCue => "Next Cue Point",
             PrevCue => "Previous Cue Point",
             ShowCues => "Cues",
+            NewTrack => "New Track",
+            ImportTrack => "Import File as Track…",
+            DuplicateTrack => "Duplicate Track",
+            DeleteTrack => "Delete Track",
+            MixDown => "Mix Down to One Track",
+            MuteTrack => "Mute Track",
+            SoloTrack => "Solo Track",
+            NextTrack => "Next Track",
+            PrevTrack => "Previous Track",
         }
     }
 
@@ -310,6 +346,10 @@ impl Action {
             ShowControls => "CmdOrCtrl+2",
             ShowInfo => "CmdOrCtrl+I",
             ShowCues => "CmdOrCtrl+3",
+            NewTrack => "CmdOrCtrl+Shift+T",
+            ImportTrack => "CmdOrCtrl+Shift+O",
+            NextTrack => "Alt+CmdOrCtrl+Down",
+            PrevTrack => "Alt+CmdOrCtrl+Up",
             Record => "CmdOrCtrl+R",
             AddCue => "CmdOrCtrl+M",
             _ => return None,
@@ -352,6 +392,10 @@ impl Action {
             ToolPencil => "P",
             Record => "⌘R",
             AddCue => "⌘M",
+            NewTrack => "⇧⌘T",
+            ImportTrack => "⇧⌘O",
+            NextTrack => "⌥⌘↓",
+            PrevTrack => "⌥⌘↑",
             NextCue => "]",
             PrevCue => "[",
             _ => return None,

@@ -60,6 +60,13 @@ level meters. **Info** shows the format, length, selection and peak level.
 | Export | ⌘S whole sound, ⇧⌘S selection. Bit depth is under File ▸ Export Format. |
 | Split into sounds | ⇧⌘K — see below |
 
+**Multiple tracks:** the Tracks menu adds tracks: New Track (⇧⌘T, silent, as long as the sound),
+Import File as Track… (⇧⌘O), Duplicate Track and Delete Track. Tracks play together, mixed. Each one
+has a header with its name, **M** (mute), **S** (solo) and a volume slider. Click a track, or use ⌥⌘↑ / ⌥⌘↓,
+to make it the one you're editing: selections, effects, pasting, recording and the pencil all
+work on that track. Export writes the mix of all tracks, and Tracks ▸ Mix Down to One Track
+combines them into a single track (undoable).
+
 **Recording:** Control ▸ Record… (⌘R), or the record button in the transport bar, opens the Record window.
 Press Record, then Stop: the take goes in at the insertion point (or replaces the selection), or
 becomes a new sound if nothing is open. It records from the Mac's current input (System Settings ▸
