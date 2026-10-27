@@ -67,6 +67,11 @@ to make it the one you're editing: selections, effects, pasting, recording and t
 work on that track. Export writes the mix of all tracks, and Tracks ▸ Mix Down to One Track
 combines them into a single track (undoable).
 
+**Quality:** sample-rate changes (Convert Format, Batch Convert, pasting between files) use a
+Kaiser-windowed sinc resampler, so nothing aliases when converting down. Writing 8/16/24-bit files
+adds TPDF dither (File ▸ Export Format ▸ Dither, on by default). Tracks ▸ Auto Gain (on by default)
+turns a mix down if it would clip. Effects ▸ Cut Out Gaps shortens silent stretches.
+
 **Loops and regions:** Insert ▸ Set Loop to Selection (⇧⌘L) marks loop points (a black bar in the
 ruler); with Loop on (⌘L) and nothing selected, Play repeats them. Insert ▸ Region from Selection
 (⇧⌘R) adds a named region (a grey band in the ruler; click it to select it). Window ▸ Regions lists

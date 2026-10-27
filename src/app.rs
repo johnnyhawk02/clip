@@ -153,6 +153,7 @@ enum Dialog {
     Fade,
     FmSynth,
     OffsetTrack,
+    CutGaps,
 }
 
 struct Field {
@@ -205,12 +206,12 @@ impl CurveKind {
 }
 
 impl Dialog {
-    const ALL: [Dialog; 24] = [
+    const ALL: [Dialog; 25] = [
         Dialog::Normalize, Dialog::Amplify, Dialog::Split, Dialog::Echo, Dialog::Reverb, Dialog::Flanger,
         Dialog::Smooth, Dialog::NoiseGate, Dialog::Pitch, Dialog::Tempo, Dialog::Speed,
         Dialog::InsertSilence, Dialog::InsertTone, Dialog::InsertNoise, Dialog::MixPaste,
         Dialog::Convert, Dialog::Equalizer, Dialog::InsertDtmf, Dialog::Delay, Dialog::Emphasize,
-        Dialog::Compressor, Dialog::Fade, Dialog::FmSynth, Dialog::OffsetTrack,
+        Dialog::Compressor, Dialog::Fade, Dialog::FmSynth, Dialog::OffsetTrack, Dialog::CutGaps,
     ];
 
     fn title(self) -> &'static str {
@@ -239,6 +240,7 @@ impl Dialog {
             Dialog::Fade => "Fade",
             Dialog::FmSynth => "FM Synthesis",
             Dialog::OffsetTrack => "Offset Track",
+            Dialog::CutGaps => "Cut Out Gaps",
         }
     }
 
@@ -274,6 +276,10 @@ impl Dialog {
             Dialog::Compressor => format!("Even out the loud and quiet parts of {scope}: levels above the threshold are turned down by the ratio."),
             Dialog::Fade => format!("Fade {scope} from one level to another, with a choice of curve."),
             Dialog::FmSynth => "Make a tone by frequency modulation (bells, brass, metallic sounds). Inserted at the cursor, or replaces the selection.".to_string(),
+            Dialog::CutGaps => format!(
+                "Shorten the silent gaps in {scope}: stretches quieter than the threshold and at least the minimum length \
+                 are cut down to the kept percentage."
+            ),
             Dialog::OffsetTrack => "Move the track later (positive: adds silence at the start) or earlier (negative: removes the start).".to_string(),
         }
     }
@@ -373,6 +379,13 @@ impl Dialog {
                     field("fm_db", "Level", -60.0, 0.0, -6.0, 0.2, " dB", 1),
                 ]
             },
+            Dialog::CutGaps => const {
+                &[
+                    field("gap_db", "Threshold", -90.0, -10.0, -50.0, 0.2, " dB", 1),
+                    field("gap_min", "Minimum gap", 10.0, 10_000.0, 300.0, 1.0, " ms", 0),
+                    field("gap_keep", "Keep", 0.0, 100.0, 25.0, 0.5, " %", 0),
+                ]
+            },
             Dialog::OffsetTrack => const { &[field("offset_secs", "Offset", -60.0, 60.0, 0.5, 0.01, " s", 3)] },
             Dialog::Equalizer => const {
                 &[
@@ -459,6 +472,8 @@ pub struct App {
     /// Mix dialog: which tracks to include (open while Some), and whether to add a new track.
     mix_include: Option<Vec<bool>>,
     mix_to_new: bool,
+    /// Turn mixes down when they would clip.
+    auto_gain: bool,
     cue_drag: Option<usize>,
     /// ⌥-drag fine adjustment: (moving the end edge?, exact position in frames).
     fine_edge: Option<(bool, f64)>,
@@ -544,6 +559,7 @@ impl App {
             batch: Batch::default(),
             mix_include: None,
             mix_to_new: true,
+            auto_gain: true,
             cue_drag: None,
             fine_edge: None,
             last_double: None,
@@ -708,7 +724,8 @@ impl App {
             .filter(|t| if any_solo { t.solo } else { !t.mute })
             .map(|t| (&*t.audio, t.gain, t.pan))
             .collect();
-        effects::mix_panned(&inputs, rate)
+        let mix = effects::mix_panned(&inputs, rate);
+        if self.auto_gain { auto_gain(mix) } else { mix }
     }
 
     /// Length of the longest track: the extent of the timeline.
@@ -1195,6 +1212,21 @@ impl App {
                 self.insert_clip("FM Synthesis", clip);
             }
             Dialog::OffsetTrack => self.offset_track(p("offset_secs")),
+            Dialog::CutGaps => {
+                let (s, e) = self.range_or_all();
+                let (out, cuts) = effects::cut_gaps(&a.slice(s, e), p("gap_db"), p("gap_min"), p("gap_keep") / 100.0);
+                if cuts.is_empty() {
+                    self.status = "No gaps found that long and that quiet".into();
+                    return;
+                }
+                let removed: usize = cuts.iter().map(|c| c.1).sum();
+                // Later cuts first, so earlier positions stay valid while cues move.
+                let shifts: Vec<(usize, usize, usize)> = cuts.iter().rev().map(|&(at, len)| (s + at, len, 0)).collect();
+                let new = a.insert(s, e, &out);
+                let sel = self.sel.map(|_| (s, s + out.frames()));
+                self.apply_edit("Cut Out Gaps", new, sel, &shifts);
+                self.status = format!("Cut {} gaps, {} shorter — ⌘Z to undo", cuts.len(), fmt_time(removed as f64 / rate as f64));
+            }
             Dialog::Equalizer => {
                 let g = [p("eq0"), p("eq1"), p("eq2"), p("eq3"), p("eq4")];
                 self.process("Equalizer", |c| effects::equalize(c, g));
@@ -1549,6 +1581,7 @@ impl App {
             Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
             Action::ShowSpectrum | Action::BatchConvert | Action::ShowRegions => true,
             Action::FmSynth | Action::OffsetTrack | Action::TrackColor => has,
+            Action::Dither | Action::AutoGain => true,
             Action::AddCue => has,
             Action::NextCue | Action::PrevCue => has && !self.cues.is_empty(),
             Action::ShowTools | Action::ShowControls | Action::ShowInfo => true,
@@ -1594,6 +1627,8 @@ impl App {
             Action::RulerTimecode => self.ruler == RulerUnits::Timecode,
             Action::ShowSpectrum => self.show_spectrum,
             Action::ShowRegions => self.show_regions,
+            Action::Dither => audio::DITHER.load(std::sync::atomic::Ordering::Relaxed),
+            Action::AutoGain => self.auto_gain,
             Action::SoloTrack => self.tracks.get(self.active).is_some_and(|t| t.solo),
             _ => false,
         }
@@ -1739,6 +1774,15 @@ impl App {
             Action::RulerTimecode => self.ruler = RulerUnits::Timecode,
             Action::ShowSpectrum => self.show_spectrum = !self.show_spectrum,
             Action::ShowRegions => self.show_regions = !self.show_regions,
+            Action::Dither => {
+                let on = !audio::DITHER.load(std::sync::atomic::Ordering::Relaxed);
+                audio::DITHER.store(on, std::sync::atomic::Ordering::Relaxed);
+            }
+            Action::CutGaps => self.dialog = Some(Dialog::CutGaps),
+            Action::AutoGain => {
+                self.auto_gain = !self.auto_gain;
+                self.refresh_playback();
+            }
             Action::BatchConvert => self.show_batch = true,
             Action::MixDialog => self.mix_include = Some(vec![true; self.tracks.len()]),
             Action::TrackColor => {
@@ -2601,7 +2645,8 @@ impl App {
         let rate = self.audio.as_ref().map_or(44100, |a| a.rate);
         let inputs: Vec<(&Audio, f32, f32)> =
             self.tracks.iter().zip(&include).filter(|(_, i)| **i).map(|(t, _)| (&*t.audio, t.gain, t.pan)).collect();
-        let mix = Arc::new(effects::mix_panned(&inputs, rate));
+        let mix = effects::mix_panned(&inputs, rate);
+        let mix = Arc::new(if self.auto_gain { auto_gain(mix) } else { mix });
         if self.mix_to_new {
             self.add_track(Track::new("Mix", mix), "Mix");
             self.status = "Mixed into a new track — ⌘Z to undo".into();
@@ -3992,6 +4037,12 @@ fn fmt_time(secs: f64) -> String {
     let m = (secs / 60.0).floor() as u64;
     let s = secs - m as f64 * 60.0;
     format!("{m}:{s:06.3}")
+}
+
+/// Mixer auto gain: if a mix would clip, scale it down so its peak sits just below full scale.
+fn auto_gain(mix: Audio) -> Audio {
+    let peak = mix.peak(0, mix.frames());
+    if peak > 0.99 { mix.gain(0, mix.frames(), 0.99 / peak) } else { mix }
 }
 
 fn fmt_pos_in(units: RulerUnits, rate: u32, f: usize) -> String {

@@ -549,8 +549,8 @@ pub fn convert_rate(clip: &Audio, rate: u32) -> Audio {
     if rate == clip.rate {
         return clip.clone();
     }
-    let src = if rate < clip.rate { smooth(clip, rate as f32 * 0.45) } else { clip.clone() };
-    src.resampled(rate)
+    // The sinc resampler filters out anything above the new Nyquist itself.
+    clip.resampled(rate)
 }
 
 /// Mix down to mono, or duplicate mono to stereo.
@@ -569,7 +569,48 @@ pub fn convert_channels(clip: &Audio, channels: usize) -> Audio {
 /// Reduce to `bits` of resolution (to hear what an 8-bit or 12-bit version sounds like).
 pub fn quantize(clip: &Audio, bits: u32) -> Audio {
     let steps = (1u64 << (bits.clamp(2, 24) - 1)) as f32 - 1.0;
-    map_channels(clip, |c| c.iter().map(|s| (s.clamp(-1.0, 1.0) * steps).round() / steps).collect())
+    let mut rng = 0x2545_F491u32;
+    Audio {
+        rate: clip.rate,
+        channels: clip.channels.iter().map(|c| c.iter().map(|s| crate::audio::to_int(*s, steps, &mut rng) as f32 / steps).collect()).collect(),
+    }
+}
+
+/// Cut Out Gaps: find stretches quieter than `threshold_db` lasting at least `min_ms`, and
+/// shorten each to `keep` (0..1) of its length. Returns the new clip and the removed spans
+/// (start, length) in the original clip, last first.
+pub fn cut_gaps(clip: &Audio, threshold_db: f32, min_ms: f32, keep: f32) -> (Audio, Vec<(usize, usize)>) {
+    let thr = db_to_gain(threshold_db);
+    let min_len = ms_to_frames(clip.rate, min_ms);
+    let n = clip.frames();
+    let quiet = |i: usize| clip.channels.iter().all(|c| c[i].abs() < thr);
+    let mut cuts = Vec::new();
+    let mut i = 0;
+    while i < n {
+        if quiet(i) {
+            let start = i;
+            while i < n && quiet(i) {
+                i += 1;
+            }
+            let len = i - start;
+            if len >= min_len {
+                // Keep a little of each end of the gap, remove the middle.
+                let kept = (len as f32 * keep.clamp(0.0, 1.0)) as usize;
+                let remove = len - kept;
+                if remove > 0 {
+                    cuts.push((start + kept / 2, remove));
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    let mut out = clip.clone();
+    for &(at, len) in cuts.iter().rev() {
+        out = out.delete(at, at + len);
+    }
+    cuts.reverse();
+    (out, cuts)
 }
 
 /// RBJ biquad, used by the equalizer.
@@ -817,5 +858,18 @@ mod tests {
         assert!(r.abs() < 1e-5 && (l - std::f32::consts::SQRT_2).abs() < 1e-5);
         let m = mix_panned(&[(&silence(10, 1, 1.0), 1.0, 0.5)], 10);
         assert_eq!(m.num_channels(), 2);
+    }
+
+    #[test]
+    fn cuts_gaps() {
+        let mut c = vec![0.5f32; 100];
+        c.extend(vec![0.0; 1000]);
+        c.extend(vec![0.5; 100]);
+        c.extend(vec![0.0; 50]); // too short to count
+        c.extend(vec![0.5; 100]);
+        let a = Audio { rate: 1000, channels: vec![c] };
+        let (out, cuts) = cut_gaps(&a, -40.0, 100.0, 0.2);
+        assert_eq!(cuts, vec![(200, 800)]);
+        assert_eq!(out.frames(), a.frames() - 800);
     }
 }

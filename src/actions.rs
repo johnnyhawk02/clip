@@ -94,6 +94,9 @@ pub enum Action {
     OffsetTrack,
     TrackColor,
     ShowRegions,
+    Dither,
+    CutGaps,
+    AutoGain,
 }
 
 use Action::*;
@@ -106,7 +109,8 @@ pub const ALL: &[Action] = &[
     ZoomIn, ZoomOut, ZoomSel, ZoomFit, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
     ShowControls, ShowInfo, Convert, Equalizer, Envelope, Bender, Record, AddCue, NextCue, PrevCue,
     ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, SoloTrack, NextTrack,
-    PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions,
+    PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions, Dither, CutGaps,
+    AutoGain,
 ];
 
 pub enum Item {
@@ -130,7 +134,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(Export),
             Do(ExportSelection),
             Do(ExportRegions),
-            Sub("Export Format", &[Do(FormatPcm8), Do(FormatPcm16), Do(FormatPcm24), Do(FormatFloat32)]),
+            Sub("Export Format", &[Do(FormatPcm8), Do(FormatPcm16), Do(FormatPcm24), Do(FormatFloat32), Separator, Do(Dither)]),
             Separator,
             Do(Split),
             Do(BatchConvert),
@@ -180,6 +184,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(Emphasize),
             Do(Compressor),
             Do(NoiseGate),
+            Do(CutGaps),
             Separator,
             Do(Pitch),
             Do(Tempo),
@@ -209,6 +214,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Separator,
             Do(MixDialog),
             Do(MixDown),
+            Do(AutoGain),
         ],
     ),
     (
@@ -267,7 +273,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
+            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | Dither | AutoGain | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
     }
 
     pub fn label(self) -> &'static str {
@@ -363,6 +369,9 @@ impl Action {
             OffsetTrack => "Offset Track…",
             TrackColor => "Next Track Colour",
             ShowRegions => "Regions",
+            Dither => "Dither",
+            CutGaps => "Cut Out Gaps…",
+            AutoGain => "Auto Gain (Prevent Clipping)",
         }
     }
 

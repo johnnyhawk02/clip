@@ -204,13 +204,39 @@ impl Audio {
         Audio { rate: self.rate, channels: vec![m] }
     }
 
-    /// Linear-interpolation resample (used only when pasting clips between files).
+    /// Band-limited resample using a Kaiser-windowed sinc filter (filters out frequencies above
+    /// the new Nyquist when converting down, so there is no aliasing).
     pub fn resampled(&self, rate: u32) -> Audio {
         if rate == self.rate || self.frames() == 0 {
             return self.clone();
         }
-        let ratio = self.rate as f64 / rate as f64;
-        let out_len = ((self.frames() as f64) / ratio).floor() as usize;
+        let step = self.rate as f64 / rate as f64; // input frames per output frame
+        let cutoff = (1.0 / step).min(1.0) * 0.95;
+        let half = (24.0 / cutoff).ceil() as usize; // filter half-length, in input frames
+        const RES: usize = 256; // kernel table entries per input frame
+        let beta = 8.0;
+        let i0b = bessel_i0(beta);
+        let table: Vec<f32> = (0..=half * RES)
+            .map(|k| {
+                let t = k as f64 / RES as f64;
+                let x = t * cutoff;
+                let sinc = if x == 0.0 { 1.0 } else { (std::f64::consts::PI * x).sin() / (std::f64::consts::PI * x) };
+                let r = t / half as f64;
+                let w = if r < 1.0 { bessel_i0(beta * (1.0 - r * r).sqrt()) / i0b } else { 0.0 };
+                (cutoff * sinc * w) as f32
+            })
+            .collect();
+        let kernel = |t: f64| {
+            let p = t.abs() * RES as f64;
+            let i = p as usize;
+            if i >= half * RES {
+                return 0.0;
+            }
+            let f = (p - i as f64) as f32;
+            table[i] * (1.0 - f) + table[i + 1] * f
+        };
+        let n = self.frames() as i64;
+        let out_len = ((self.frames() as f64) / step).floor() as usize;
         Audio {
             rate,
             channels: self
@@ -219,17 +245,52 @@ impl Audio {
                 .map(|c| {
                     (0..out_len)
                         .map(|i| {
-                            let p = i as f64 * ratio;
-                            let i0 = p as usize;
-                            let i1 = (i0 + 1).min(c.len() - 1);
-                            let t = (p - i0 as f64) as f32;
-                            c[i0] * (1.0 - t) + c[i1] * t
+                            let centre = i as f64 * step;
+                            let base = centre.floor() as i64;
+                            let mut acc = 0.0f32;
+                            for j in (base - half as i64 + 1).max(0)..=(base + half as i64).min(n - 1) {
+                                acc += c[j as usize] * kernel(centre - j as f64);
+                            }
+                            acc
                         })
                         .collect()
                 })
                 .collect(),
         }
     }
+}
+
+/// Modified Bessel function of the first kind, order 0 (for the Kaiser window).
+fn bessel_i0(x: f64) -> f64 {
+    let (mut sum, mut term) = (1.0, 1.0);
+    let y = x * x / 4.0;
+    for k in 1..60 {
+        term *= y / (k * k) as f64;
+        sum += term;
+        if term < 1e-12 * sum {
+            break;
+        }
+    }
+    sum
+}
+
+/// Whether to add TPDF dither when writing integer samples (reducing to 8/16/24 bits).
+pub static DITHER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Turn a float sample into an integer at `scale`, with triangular dither of ±1 step when
+/// dithering is on (so quiet parts fade into soft noise instead of grainy distortion).
+pub fn to_int(s: f32, scale: f32, rng: &mut u32) -> i32 {
+    let mut v = s.clamp(-1.0, 1.0) * scale;
+    if DITHER.load(std::sync::atomic::Ordering::Relaxed) {
+        let mut uniform = || {
+            *rng ^= *rng << 13;
+            *rng ^= *rng >> 17;
+            *rng ^= *rng << 5;
+            *rng as f32 / u32::MAX as f32
+        };
+        v += uniform() - uniform();
+    }
+    (v.round() as i32).clamp(-(scale as i32) - 1, scale as i32)
 }
 
 /// Decode any format symphonia supports (wav, mp3, flac, ogg/vorbis, aac/m4a, aiff, caf...).
@@ -339,12 +400,13 @@ pub fn save_wav(audio: &Audio, path: &Path, fmt: WavFormat) -> Result<(), String
         WavFormat::Pcm24 => 8_388_607.0,
         WavFormat::Float32 => 1.0,
     };
+    let mut rng = 0x9E37_79B9u32;
     for i in 0..audio.frames() {
         for c in &audio.channels {
             let s = c[i];
             let r = match fmt {
                 WavFormat::Float32 => w.write_sample(s),
-                _ => w.write_sample((s.clamp(-1.0, 1.0) * scale).round() as i32),
+                _ => w.write_sample(to_int(s, scale, &mut rng)),
             };
             r.map_err(|e| e.to_string())?;
         }
@@ -548,9 +610,10 @@ pub fn save_aiff(audio: &Audio, path: &Path, fmt: WavFormat) -> Result<(), Strin
     out.extend(be32(0));
     out.extend(be32(0));
     let scale = ((1i64 << (bits - 1)) - 1) as f32;
+    let mut rng = 0x9E37_79B9u32;
     for i in 0..n {
         for c in &audio.channels {
-            let v = (c[i].clamp(-1.0, 1.0) * scale).round() as i32;
+            let v = to_int(c[i], scale, &mut rng);
             out.extend(&v.to_be_bytes()[4 - bytes_per..]);
         }
     }
@@ -705,5 +768,30 @@ mod tests {
         assert_eq!((b.frames(), b.num_channels(), b.rate), (400, 2, 1000));
         assert!((b.channels[1][200] - a.channels[1][200]).abs() < 1e-3);
         std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn sinc_resampling() {
+        // A 1 kHz tone at 44.1 kHz keeps its level and frequency at 22.05 kHz...
+        let n = 44100;
+        let tone = |hz: f32| Audio { rate: 44100, channels: vec![(0..n).map(|i| (i as f32 * hz * 2.0 * std::f32::consts::PI / 44100.0).sin() * 0.5).collect()] };
+        let down = tone(1000.0).resampled(22050);
+        assert_eq!(down.frames(), 22050);
+        assert!((down.peak(1000, 21000) - 0.5).abs() < 0.01, "{}", down.peak(1000, 21000));
+        // ...but a 15 kHz tone, above the new 11 kHz Nyquist, is filtered out instead of aliasing.
+        let high = tone(15000.0).resampled(22050);
+        assert!(high.peak(1000, 21000) < 0.01, "{}", high.peak(1000, 21000));
+        let up = tone(1000.0).resampled(48000);
+        assert!((up.peak(1000, 47000) - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn dither_stays_within_a_step() {
+        let mut rng = 1u32;
+        for i in 0..1000 {
+            let s = (i as f32 / 1000.0) * 2.0 - 1.0;
+            let v = to_int(s, 127.0, &mut rng);
+            assert!((v as f32 - s * 127.0).abs() <= 2.0);
+        }
     }
 }
