@@ -1954,24 +1954,30 @@ impl App {
         });
     }
 
-    /// Right-hand side panel with the Info and Cues sections.
+    /// Right-hand side panel with the Info, Cues and Regions sections.
     fn side_panel(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(8.0);
+        let section = |ui: &mut egui::Ui, title: &str, first: bool| {
+            if !first {
+                ui.add_space(12.0);
+                ui.separator();
+            }
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(title).size(11.0).color(MUTED).strong());
+            ui.add_space(6.0);
+        };
+        let mut first = true;
         if self.show_info {
-            ui.label(egui::RichText::new("INFO").size(11.0).color(MUTED).strong());
-            ui.add_space(4.0);
+            section(ui, "INFO", first);
+            first = false;
             self.info_section(ui);
-            ui.add_space(14.0);
         }
         if self.show_cues {
-            ui.label(egui::RichText::new("CUES").size(11.0).color(MUTED).strong());
-            ui.add_space(4.0);
+            section(ui, "CUES", first);
+            first = false;
             self.cues_section(ui);
-            ui.add_space(14.0);
         }
         if self.show_regions {
-            ui.label(egui::RichText::new("REGIONS").size(11.0).color(MUTED).strong());
-            ui.add_space(4.0);
+            section(ui, "REGIONS", first);
             self.regions_section(ui);
         }
     }
@@ -1987,9 +1993,9 @@ impl App {
         let units = self.ruler;
         let rate = self.audio.as_ref().map_or(44100, |a| a.rate);
         egui::ScrollArea::vertical().id_salt("regions").max_height(200.0).show(ui, |ui| {
-            egui::Grid::new("regions").num_columns(3).spacing(Vec2::new(6.0, 4.0)).show(ui, |ui| {
+            egui::Grid::new("regions").num_columns(3).spacing(Vec2::new(6.0, 6.0)).show(ui, |ui| {
                 for (i, r) in self.regions.iter_mut().enumerate() {
-                    if ui.add_sized([110.0, 20.0], egui::TextEdit::singleline(&mut r.name)).changed() {
+                    if ui.add_sized([150.0, 22.0], egui::TextEdit::singleline(&mut r.name)).changed() {
                         renamed = true;
                     }
                     if ui.small_button("Select").on_hover_text(format!("{} – {}", fmt_pos_in(units, rate, r.start), fmt_pos_in(units, rate, r.end))).clicked() {
@@ -2002,7 +2008,7 @@ impl App {
                 }
             });
         });
-        ui.add_space(4.0);
+        ui.add_space(8.0);
         ui.horizontal(|ui| {
             if ui.add_enabled(self.sel.is_some(), Button::new("Add from Selection")).clicked() {
                 self.add_region();
@@ -2011,7 +2017,7 @@ impl App {
                 self.export_regions();
             }
         });
-        ui.add_space(6.0);
+        ui.add_space(10.0);
         match self.loop_points {
             Some((s, e)) => {
                 ui.horizontal(|ui| {
@@ -2067,7 +2073,7 @@ impl App {
         let key = |ui: &mut egui::Ui, t: &str| {
             ui.label(egui::RichText::new(t).color(MUTED));
         };
-        egui::Grid::new("info").num_columns(2).spacing(Vec2::new(12.0, 4.0)).show(ui, |ui| {
+        egui::Grid::new("info").num_columns(2).min_col_width(78.0).spacing(Vec2::new(12.0, 6.0)).show(ui, |ui| {
             key(ui, "Sound");
             ui.label(self.path.as_deref().map(file_name).unwrap_or_else(|| "Untitled".into()));
             ui.end_row();
@@ -2145,9 +2151,9 @@ impl App {
             ui.label(egui::RichText::new("No cue points yet. Insert ▸ Cue Point (⌘M) adds one at the cursor.").color(MUTED));
         }
         egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-            egui::Grid::new("cues").num_columns(4).spacing(Vec2::new(6.0, 4.0)).show(ui, |ui| {
+            egui::Grid::new("cues").num_columns(4).spacing(Vec2::new(6.0, 6.0)).show(ui, |ui| {
                 for (i, c) in self.cues.iter_mut().enumerate() {
-                    if ui.add_sized([110.0, 20.0], egui::TextEdit::singleline(&mut c.name)).changed() {
+                    if ui.add_sized([118.0, 22.0], egui::TextEdit::singleline(&mut c.name)).changed() {
                         renamed = true;
                     }
                     ui.label(egui::RichText::new(fmt_time(c.frame as f64 / rate)).monospace().color(MUTED));
@@ -2161,7 +2167,7 @@ impl App {
                 }
             });
         });
-        ui.add_space(4.0);
+        ui.add_space(8.0);
         let add = ui.add_enabled(self.audio.is_some(), Button::new("Add at Cursor")).clicked();
         if renamed {
             self.dirty = true;
@@ -2191,26 +2197,19 @@ impl App {
         let (lo, hi) = kind.range();
         let mut apply = false;
         let mut cancel = false;
-        let resp = egui::Modal::new(egui::Id::unique("curve")).show(ctx, |ui| {
-            ui.set_width(480.0);
-            match kind {
-                CurveKind::Envelope => {
-                    ui.heading("Envelope");
-                    ui.label(format!("Draw how the volume of {scope} changes over time (0–200%)."));
-                }
-                CurveKind::Bender => {
-                    ui.heading("Bender");
-                    ui.label(format!(
-                        "Draw a pitch curve across {scope} (±12 semitones). Like a tape, bending up also \
-                         speeds it up and bending down slows it down."
-                    ));
-                }
-            }
-            ui.label("Click to add a point, drag to move it, double-click a point to remove it.");
-            ui.add_space(4.0);
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(480.0, 170.0), Sense::click_and_drag());
+        let resp = dialog_modal("curve").show(ctx, |ui| {
+            ui.set_width(520.0);
+            let (title, blurb) = match kind {
+                CurveKind::Envelope => ("Envelope", format!("Draw how the volume of {scope} changes over time (0–200%).")),
+                CurveKind::Bender => (
+                    "Bender",
+                    format!("Draw a pitch curve across {scope} (±12 semitones). Like a tape, bending up also speeds it up."),
+                ),
+            };
+            dialog_header(ui, title, &format!("{blurb} Click to add a point, drag to move it, double-click to remove it."));
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(520.0, 180.0), Sense::click_and_drag());
             let p = ui.painter_at(rect.expand(4.0));
-            p.rect_filled(rect, 0.0, Color32::WHITE);
+            p.rect_filled(rect, 4.0, Color32::from_gray(252));
             // The selection's waveform, faintly, so the curve can be lined up with the sound.
             let w = rect.width() as usize;
             let len = (e - s).max(1);
@@ -2293,12 +2292,8 @@ impl App {
             if let Some(q) = resp.hover_pos() {
                 p.text(rect.right_top() + Vec2::new(-4.0, 3.0), Align2::RIGHT_TOP, kind.format(from_screen(q).1), FontId::monospace(10.0), Color32::from_gray(90));
             }
-            p.rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::BLACK), egui::StrokeKind::Outside);
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                apply = ui.button("OK").clicked();
-                cancel = ui.button("Cancel").clicked();
-                ui.add_space(20.0);
+            p.rect_stroke(rect, 4.0, Stroke::new(1.0, LINE), egui::StrokeKind::Outside);
+            (apply, cancel) = dialog_buttons(ui, "OK", true, |ui| {
                 if ui.button("Reset").clicked() {
                     *points = kind.flat();
                 }
@@ -2503,7 +2498,7 @@ impl App {
                     }
                 });
                 ui.add_space(6.0);
-                egui::Grid::new("batch").num_columns(2).spacing(Vec2::new(10.0, 6.0)).show(ui, |ui| {
+                dialog_grid("batch").show(ui, |ui| {
                     ui.label("Save to");
                     ui.horizontal(|ui| {
                         if ui.add_enabled(!running, Button::new("Choose…")).clicked() {
@@ -2542,9 +2537,15 @@ impl App {
                     ui.checkbox(&mut b.normalize, "Normalize to -1 dB");
                     ui.end_row();
                 });
-                ui.add_space(6.0);
+                ui.add_space(14.0);
                 let can_go = !running && !b.files.is_empty() && b.out_dir.is_some();
-                if ui.add_enabled(can_go, Button::new(format!("Convert {} files", b.files.len()))).clicked() {
+                let mut go = false;
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        go = ui.add_enabled(can_go, primary_button(&format!("Convert {} files", b.files.len()))).clicked();
+                    });
+                });
+                if go {
                     let progress = Arc::new(std::sync::Mutex::new(BatchProgress { total: b.files.len(), ..Default::default() }));
                     b.progress = Some(progress.clone());
                     let (files, dir, (_, ext, fmt), rate, ch, norm) =
@@ -2602,12 +2603,11 @@ impl App {
         include.resize(self.tracks.len(), true);
         let mut ok = false;
         let mut cancel = false;
-        let resp = egui::Modal::new(egui::Id::unique("mix")).show(ctx, |ui| {
-            ui.set_width(440.0);
-            ui.heading("Mix");
-            ui.label("Choose which tracks to mix and set their volume and pan.");
-            ui.add_space(6.0);
-            egui::Grid::new("mixgrid").num_columns(4).spacing(Vec2::new(10.0, 6.0)).show(ui, |ui| {
+        let resp = dialog_modal("mix").show(ctx, |ui| {
+            ui.set_width(480.0);
+            dialog_header(ui, "Mix", "Choose which tracks to mix and set their volume and pan.");
+            ui.spacing_mut().slider_width = 110.0;
+            egui::Grid::new("mixgrid").num_columns(4).spacing(Vec2::new(14.0, 10.0)).show(ui, |ui| {
                 ui.label("");
                 ui.label(egui::RichText::new("Track").color(MUTED));
                 ui.label(egui::RichText::new("Volume").color(MUTED));
@@ -2625,14 +2625,11 @@ impl App {
                     ui.end_row();
                 }
             });
-            ui.add_space(6.0);
+            ui.add_space(14.0);
             ui.radio_value(&mut self.mix_to_new, true, "Mix into a new track (keeps the originals)");
+            ui.add_space(2.0);
             ui.radio_value(&mut self.mix_to_new, false, "Replace all tracks with the mix");
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ok = ui.add_enabled(include.iter().any(|i| *i), Button::new("Mix")).clicked();
-                cancel = ui.button("Cancel").clicked();
-            });
+            (ok, cancel) = dialog_buttons(ui, "Mix", include.iter().any(|i| *i), |_| {});
         });
         if cancel || resp.should_close() {
             self.refresh_playback();
@@ -2677,7 +2674,7 @@ impl App {
             .fade_in(false)
             .collapsible(false)
             .show(ctx, |ui| {
-                ui.set_width(250.0);
+                ui.set_width(270.0);
                 ui.horizontal(|ui| {
                     let label = if recording { "■ Stop" } else { "● Record" };
                     let btn = Button::new(egui::RichText::new(label).size(15.0).color(INK))
@@ -2686,13 +2683,15 @@ impl App {
                     let secs = self.recorder.as_ref().map_or(0.0, |r| r.seconds());
                     ui.label(egui::RichText::new(fmt_time(secs)).monospace().size(18.0));
                 });
-                let (r, _) = ui.allocate_exact_size(Vec2::new(250.0, 8.0), Sense::hover());
+                ui.add_space(6.0);
+                let (r, _) = ui.allocate_exact_size(Vec2::new(270.0, 8.0), Sense::hover());
                 draw_meter(ui.painter(), r, self.rec_meter);
-                ui.label(if self.audio.is_some() {
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new(if self.audio.is_some() {
                     "Records from the Mac's current input. The recording goes in at the cursor, or replaces the selection."
                 } else {
                     "Records from the Mac's current input into a new sound."
-                });
+                }).color(MUTED));
             });
         if toggle {
             if recording {
@@ -2712,18 +2711,17 @@ impl App {
         let scope = if self.sel.is_some() { "the selection" } else { "the whole sound" };
         let mut apply = false;
         let mut cancel = false;
-        let resp = egui::Modal::new(egui::Id::unique("dialog")).show(ctx, |ui| {
-            ui.set_width(360.0);
-            ui.heading(kind.title());
-            ui.label(kind.blurb(scope));
-            ui.add_space(6.0);
-            egui::Grid::new("fields").num_columns(2).spacing(Vec2::new(10.0, 6.0)).show(ui, |ui| {
+        let resp = dialog_modal("dialog").show(ctx, |ui| {
+            ui.set_width(DIALOG_W);
+            ui.spacing_mut().interact_size.x = 96.0;
+            dialog_header(ui, kind.title(), &kind.blurb(scope));
+            dialog_grid("fields").show(ui, |ui| {
                 for f in kind.fields().iter().filter(|_| kind != Dialog::Equalizer) {
                     ui.label(f.label);
                     let v = self.params.entry(f.key).or_insert(f.default);
                     if !f.choices.is_empty() {
                         let current = f.choices.iter().find(|c| c.1 == *v).map_or("?", |c| c.0);
-                        egui::ComboBox::from_id_salt(f.key).selected_text(current).show_ui(ui, |ui| {
+                        egui::ComboBox::from_id_salt(f.key).width(140.0).selected_text(current).show_ui(ui, |ui| {
                             for &(label, value) in f.choices {
                                 ui.selectable_value(v, value, label);
                             }
@@ -2742,13 +2740,13 @@ impl App {
                 }
                 if kind == Dialog::InsertDtmf {
                     ui.label("Keys");
-                    ui.add_sized([180.0, 20.0], egui::TextEdit::singleline(&mut self.dtmf_digits).hint_text("e.g. 555-0123"))
+                    ui.add_sized([200.0, 22.0], egui::TextEdit::singleline(&mut self.dtmf_digits).hint_text("e.g. 555-0123"))
                         .on_hover_text("0–9, *, #, A–D. A comma adds a pause; other characters are ignored.");
                     ui.end_row();
                 }
                 if kind == Dialog::InsertTone {
                     ui.label("Waveform");
-                    egui::ComboBox::from_id_salt("wave").selected_text(self.tone_wave.label()).show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("wave").width(140.0).selected_text(self.tone_wave.label()).show_ui(ui, |ui| {
                         for w in Wave::ALL {
                             ui.selectable_value(&mut self.tone_wave, w, w.label());
                         }
@@ -2757,36 +2755,41 @@ impl App {
                 }
             });
             if kind == Dialog::Equalizer {
-                // Graphic-EQ style: a vertical slider per band.
-                ui.horizontal(|ui| {
-                    for f in kind.fields() {
-                        ui.vertical(|ui| {
-                            ui.set_width(56.0);
+                // Graphic-EQ style: a vertical slider per band, evenly spaced.
+                ui.columns(kind.fields().len(), |cols| {
+                    for (ui, f) in cols.iter_mut().zip(kind.fields()) {
+                        ui.vertical_centered(|ui| {
                             let v = self.params.entry(f.key).or_insert(f.default);
-                            ui.add(egui::Slider::new(v, f.min..=f.max).vertical().show_value(false));
-                            ui.label(egui::RichText::new(format!("{:+.1}", *v)).monospace().size(10.0));
-                            ui.label(egui::RichText::new(f.label).size(11.0));
+                            ui.spacing_mut().slider_width = 130.0;
+                            // Centre the slider in its column, like the labels under it.
+                            let pad = (ui.available_width() - ui.spacing().interact_size.y) / 2.0;
+                            ui.horizontal(|ui| {
+                                ui.add_space(pad.max(0.0));
+                                ui.add(egui::Slider::new(v, f.min..=f.max).vertical().show_value(false));
+                            });
+                            ui.add_space(4.0);
+                            ui.label(egui::RichText::new(format!("{:+.1} dB", *v)).monospace().size(11.0).color(INK));
+                            ui.label(egui::RichText::new(f.label).size(12.0).color(MUTED));
                         });
                     }
                 });
-                if ui.small_button("Flat").clicked() {
-                    for f in kind.fields() {
-                        self.params.insert(f.key, 0.0);
-                    }
-                }
             }
             if kind == Dialog::Split {
                 if let Some(a) = &self.audio {
                     let (s, e) = self.sel.unwrap_or((0, a.frames()));
                     let n = a.slice(s, e).find_sounds(self.split_gap()).len();
-                    ui.label(format!("{n} sound{} found. Saved as {}.", if n == 1 { "" } else { "s" }, self.wav_format.label()));
+                    ui.add_space(12.0);
+                    ui.label(egui::RichText::new(format!("{n} sound{} found. Saved as {}.", if n == 1 { "" } else { "s" }, self.wav_format.label())).color(MUTED));
                 }
             }
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                let ok = if kind == Dialog::Split { "Choose Folder…" } else { "OK" };
-                apply = ui.button(ok).clicked();
-                cancel = ui.button("Cancel").clicked();
+            let ok = if kind == Dialog::Split { "Choose Folder…" } else { "OK" };
+            let params = &mut self.params;
+            (apply, cancel) = dialog_buttons(ui, ok, true, |ui| {
+                if kind == Dialog::Equalizer && ui.button("Flat").clicked() {
+                    for f in kind.fields() {
+                        params.insert(f.key, 0.0);
+                    }
+                }
             });
         });
         apply |= ctx.input(|i| i.key_pressed(Key::Enter));
@@ -3514,22 +3517,20 @@ impl App {
             Pending::Close => "quit",
         };
         let mut choice = None;
-        egui::Modal::new(egui::Id::unique("unsaved")).show(ctx, |ui| {
-            ui.set_width(320.0);
-            ui.heading("Unsaved changes");
-            ui.label(format!("You have edits that haven't been exported. Discard them and {what}?"));
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui.button("Export…").clicked() {
-                    choice = Some(0);
-                }
-                if ui.button("Discard").clicked() {
+        dialog_modal("unsaved").show(ctx, |ui| {
+            ui.set_width(DIALOG_W);
+            dialog_header(ui, "Unsaved changes", &format!("You have edits that haven't been exported. Discard them and {what}?"));
+            let (export, cancel) = dialog_buttons(ui, "Export…", true, |ui| {
+                if ui.add(Button::new("Discard").min_size(Vec2::new(84.0, 26.0))).clicked() {
                     choice = Some(1);
                 }
-                if ui.button("Cancel").clicked() {
-                    choice = Some(2);
-                }
             });
+            if export {
+                choice = Some(0);
+            }
+            if cancel {
+                choice = Some(2);
+            }
         });
         match choice {
             Some(0) => {
@@ -3612,8 +3613,10 @@ impl eframe::App for App {
             egui::Panel::right("side")
                 .frame(egui::Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(12, 4)))
                 .resizable(false)
-                .exact_size(290.0)
-                .show(ui, |ui| self.side_panel(ui));
+                .exact_size(320.0)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.side_panel(ui));
+                });
         }
         egui::CentralPanel::no_frame().show(ui, |ui| {
             self.desk = ui.max_rect();
@@ -3702,6 +3705,19 @@ fn clean_style(ctx: &egui::Context) {
     v.widgets.active.bg_stroke = Stroke::new(1.0, Color32::from_gray(120));
     v.widgets.open = v.widgets.hovered;
     ctx.set_visuals_of(egui::Theme::Light, v);
+    ctx.all_styles_mut(|style| {
+        use egui::{FontFamily, TextStyle};
+        style.spacing.item_spacing = Vec2::new(8.0, 6.0);
+        style.spacing.button_padding = Vec2::new(10.0, 4.0);
+        style.spacing.interact_size.y = 22.0;
+        style.spacing.window_margin = egui::Margin::same(14);
+        style.spacing.combo_width = 140.0;
+        style.text_styles.insert(TextStyle::Body, FontId::new(13.5, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Button, FontId::new(13.5, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Small, FontId::new(11.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Heading, FontId::new(17.0, FontFamily::Proportional));
+        style.text_styles.insert(TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace));
+    });
 
     let mut fonts = egui::FontDefinitions::default();
     for (name, path, family) in [
@@ -4037,6 +4053,57 @@ fn fmt_time(secs: f64) -> String {
     let m = (secs / 60.0).floor() as u64;
     let s = secs - m as f64 * 60.0;
     format!("{m}:{s:06.3}")
+}
+
+/// Dialog width, label column width and spacing shared by every dialog.
+const DIALOG_W: f32 = 400.0;
+const LABEL_W: f32 = 120.0;
+
+/// A modal dialog with the app's frame: white, rounded, generous margins.
+fn dialog_modal(id: &str) -> egui::Modal {
+    egui::Modal::new(egui::Id::unique(id)).frame(
+        egui::Frame::new()
+            .fill(Color32::WHITE)
+            .stroke(Stroke::new(1.0, LINE))
+            .corner_radius(10)
+            .inner_margin(egui::Margin::same(22))
+            .shadow(egui::Shadow { offset: [0, 8], blur: 28, spread: 0, color: Color32::from_black_alpha(45) }),
+    )
+}
+
+/// Dialog title and a muted explanation under it.
+fn dialog_header(ui: &mut egui::Ui, title: &str, blurb: &str) {
+    ui.label(egui::RichText::new(title).size(17.0).strong().color(INK));
+    if !blurb.is_empty() {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(blurb).color(MUTED));
+    }
+    ui.add_space(14.0);
+}
+
+/// The grid used for a dialog's labelled settings.
+fn dialog_grid(id: &str) -> egui::Grid {
+    egui::Grid::new(id).num_columns(2).min_col_width(LABEL_W).spacing(Vec2::new(12.0, 10.0))
+}
+
+/// A filled black button for a dialog's main action.
+fn primary_button(label: &str) -> Button<'static> {
+    Button::new(egui::RichText::new(label.to_string()).color(Color32::WHITE)).fill(INK).min_size(Vec2::new(84.0, 26.0))
+}
+
+/// Right-aligned Cancel and main-action buttons at the bottom of a dialog, with optional extra
+/// buttons on the left (`extra`). Returns (main clicked, cancel clicked).
+fn dialog_buttons(ui: &mut egui::Ui, ok_label: &str, ok_enabled: bool, extra: impl FnOnce(&mut egui::Ui)) -> (bool, bool) {
+    ui.add_space(18.0);
+    let mut out = (false, false);
+    ui.horizontal(|ui| {
+        extra(ui);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            out.0 = ui.add_enabled(ok_enabled, primary_button(ok_label)).clicked();
+            out.1 = ui.add(Button::new("Cancel").min_size(Vec2::new(84.0, 26.0))).clicked();
+        });
+    });
+    out
 }
 
 /// Mixer auto gain: if a mix would clip, scale it down so its peak sits just below full scale.
