@@ -28,6 +28,13 @@ Try the files in `samples/`.
 | Undo / redo | ⌘Z / ⇧⌘Z |
 | Export WAV | ⌘S (tick "selection only" to export just the selection) |
 
+**Split into sounds…** cuts a recording of separate clicks/hits into one file per sound and saves
+them as `sound01.wav`, `sound02.wav`… in a folder you pick. A sound starts at the first non-zero
+sample and ends once there have been at least *gap* zero samples in a row (10 by default, set next
+to the button). It works on the selection, or the whole file if nothing is selected, and uses the
+WAV format chosen in the toolbar. It looks for exact zeros, so it suits WAV/AIFF/FLAC recordings
+with true digital silence; MP3/AAC rarely contain exact zeros between sounds.
+
 Fade in/out, Silence, Normalize (to the dB target next to it), Gain, Reverse and To mono are in the
 toolbar. Normalize, Gain and Reverse act on the whole file when nothing is selected.
 

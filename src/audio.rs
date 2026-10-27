@@ -126,6 +126,37 @@ impl Audio {
         out
     }
 
+    /// Find the separate sounds in a recording. A sound starts at the first frame that
+    /// isn't exactly zero, and ends once `min_gap` consecutive zero frames follow it.
+    /// Returned ranges run from the first to the last non-zero frame (end exclusive).
+    pub fn find_sounds(&self, min_gap: usize) -> Vec<(usize, usize)> {
+        let min_gap = min_gap.max(1);
+        let is_zero = |i: usize| self.channels.iter().all(|c| c[i] == 0.0);
+        let mut sounds = Vec::new();
+        let mut start: Option<usize> = None;
+        let mut zeros = 0;
+        for i in 0..self.frames() {
+            if is_zero(i) {
+                if let Some(s) = start {
+                    zeros += 1;
+                    if zeros >= min_gap {
+                        sounds.push((s, i + 1 - zeros));
+                        start = None;
+                    }
+                }
+            } else {
+                if start.is_none() {
+                    start = Some(i);
+                }
+                zeros = 0;
+            }
+        }
+        if let Some(s) = start {
+            sounds.push((s, self.frames() - zeros));
+        }
+        sounds
+    }
+
     pub fn peak(&self, a: usize, b: usize) -> f32 {
         self.channels
             .iter()
@@ -346,6 +377,20 @@ mod tests {
         assert!((n.peak(0, 100) - 1.0).abs() < 1e-5);
         let f = a.fade_in(0, 100);
         assert_eq!(f.channels[0][0], 0.0);
+    }
+
+    #[test]
+    fn find_sounds_splits_on_zero_runs() {
+        let mut c = vec![0.0f32; 10];
+        c.extend([0.5, -0.2, 0.0, 0.3]); // sound 1: 10..14 (short gap of one zero inside)
+        c.extend(vec![0.0; 10]);
+        c.extend([0.1, 0.0, 0.0, 0.0, 0.2]); // sound 2: 24..29 (gap shorter than 10)
+        c.extend(vec![0.0; 9]);
+        c.extend([0.4]); // still sound 2: only 9 zeros before it
+        c.extend(vec![0.0; 3]); // file ends mid-gap
+        let a = Audio { rate: 1000, channels: vec![c] };
+        assert_eq!(a.find_sounds(10), vec![(10, 14), (24, 39)]);
+        assert_eq!(a.find_sounds(3), vec![(10, 14), (24, 25), (28, 29), (38, 39)]);
     }
 
     #[test]

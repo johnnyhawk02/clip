@@ -54,6 +54,7 @@ pub struct App {
     export_selection: bool,
     normalize_db: f32,
     gain_db: f32,
+    split_gap: usize,
 
     status: String,
     loading: Option<(PathBuf, Receiver<Result<Audio, String>>)>,
@@ -91,6 +92,7 @@ impl App {
             export_selection: false,
             normalize_db: -0.1,
             gain_db: 3.0,
+            split_gap: 10,
             status,
             loading: None,
             pending: None,
@@ -366,6 +368,55 @@ impl App {
         }
     }
 
+    /// Cut the recording (or the selection) into separate sounds and save each one as
+    /// soundNN.wav in a folder the user picks.
+    fn split_dialog(&mut self) {
+        let Some(a) = self.audio.clone() else { return };
+        let (s, e) = self.range_or_all();
+        let count = a.slice(s, e).find_sounds(self.split_gap).len();
+        if count == 0 {
+            self.status = "No sounds found — the range is completely silent".into();
+            return;
+        }
+        let mut dialog = rfd::FileDialog::new().set_title(format!("Choose a folder for {count} sounds"));
+        if let Some(dir) = self.path.as_ref().and_then(|p| p.parent()) {
+            dialog = dialog.set_directory(dir);
+        }
+        let Some(dir) = dialog.pick_folder() else { return };
+        let names = split_names(count);
+        let existing = names.iter().filter(|n| dir.join(n).exists()).count();
+        if existing > 0 {
+            let ok = rfd::MessageDialog::new()
+                .set_title("Replace files?")
+                .set_description(format!("{existing} of the files (e.g. {}) already exist in that folder. Replace them?", names[0]))
+                .set_buttons(rfd::MessageButtons::OkCancel)
+                .show();
+            if ok != rfd::MessageDialogResult::Ok {
+                return;
+            }
+        }
+        self.split_to(&dir);
+    }
+
+    fn split_to(&mut self, dir: &Path) {
+        let Some(a) = self.audio.clone() else { return };
+        let (s, e) = self.range_or_all();
+        let src = a.slice(s, e);
+        let sounds = src.find_sounds(self.split_gap);
+        let names = split_names(sounds.len());
+        for ((a0, a1), name) in sounds.iter().zip(&names) {
+            if let Err(err) = audio::save_wav(&src.slice(*a0, *a1), &dir.join(name), self.wav_format) {
+                self.status = format!("Couldn't save {name}: {err}");
+                return;
+            }
+        }
+        self.status = match names.as_slice() {
+            [only] => format!("Saved 1 sound ({only}) to {}", dir.display()),
+            [first, .., last] => format!("Saved {} sounds ({first} … {last}) to {}", names.len(), dir.display()),
+            [] => "No sounds found".into(),
+        };
+    }
+
     // ---------- transport ----------
 
     fn toggle_play(&mut self) {
@@ -614,6 +665,20 @@ impl App {
             if ui.add_enabled(stereo, Button::new("To mono")).clicked() {
                 self.to_mono();
             }
+            ui.separator();
+            if ui
+                .add_enabled(has, Button::new("✂ Split into sounds…"))
+                .on_hover_text(format!(
+                    "Save every separate sound in {scope} as sound01.wav, sound02.wav… \
+                     A sound starts at the first non-zero sample and ends after the gap of zero samples."
+                ))
+                .clicked()
+            {
+                self.split_dialog();
+            }
+            ui.label("gap");
+            ui.add(egui::DragValue::new(&mut self.split_gap).range(1..=100_000).suffix(" zeros"))
+                .on_hover_text("How many zero samples in a row end a sound");
             ui.separator();
             if ui.add_enabled(has, Button::new("🔍+")).on_hover_text("Zoom in (=, or ⌘/pinch + scroll)").clicked() {
                 let c = self.view_start + self.view_len / 2.0;
@@ -1099,6 +1164,7 @@ impl App {
                     "gain" => self.gain(arg.parse().unwrap_or(3.0)),
                     "silence" => self.silence(),
                     "reverse" => self.reverse(),
+                    "split" => self.split_to(Path::new(arg)),
                     "copy" => { self.copy(ctx); }
                     "cut" => self.cut(ctx),
                     "paste" => self.paste(),
@@ -1147,6 +1213,12 @@ fn save_png(img: &egui::ColorImage, path: &Path) -> Result<(), String> {
     let mut w = enc.write_header().map_err(|e| e.to_string())?;
     let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
     w.write_image_data(&bytes).map_err(|e| e.to_string())
+}
+
+/// sound01.wav, sound02.wav… (more digits once there are 100+ sounds).
+fn split_names(count: usize) -> Vec<String> {
+    let width = count.to_string().len().max(2);
+    (1..=count).map(|i| format!("sound{i:0width$}.wav")).collect()
 }
 
 fn file_name(p: &Path) -> String {
