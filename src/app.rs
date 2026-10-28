@@ -36,7 +36,7 @@ use self::dialogs::*;
 use self::files::*;
 use self::look::*;
 use self::automation::Automation;
-use self::autoarrange::PoolLoop;
+use self::autoarrange::{PoolDrag, PoolLoop};
 
 type Sel = (usize, usize);
 
@@ -245,6 +245,7 @@ pub struct App {
     regions: Vec<Region>,
     loop_points: Option<Sel>,
     show_regions: bool,
+    show_pool: bool,
     ruler: RulerUnits,
     show_spectrum: bool,
     spectrum_3d: bool,
@@ -369,6 +370,7 @@ impl App {
             regions: Vec::new(),
             loop_points: None,
             show_regions: false,
+            show_pool: false,
             ruler: RulerUnits::Time,
             show_spectrum: false,
             spectrum_3d: false,
@@ -886,7 +888,7 @@ impl App {
                 Action::New | Action::Open | Action::Quit | Action::BatchConvert | Action::Record | Action::NewClip | Action::ImportClip => true,
                 Action::SaveProject | Action::SaveProjectAs => doc,
                 Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Dither | Action::AutoGain => true,
-                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions => true,
+                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool => true,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
                 Action::Export | Action::ExportStems | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
@@ -944,7 +946,7 @@ impl App {
             Action::ClearLoop => has && self.loop_points.is_some(),
             Action::ExportRegions => has && !self.regions.is_empty(),
             Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
-            Action::ShowSpectrum | Action::BatchConvert | Action::ShowRegions => true,
+            Action::ShowSpectrum | Action::BatchConvert | Action::ShowRegions | Action::ShowPool => true,
             Action::FmSynth | Action::OffsetTrack | Action::TrackColor => has,
             Action::Dither | Action::AutoGain => true,
             Action::AddCue => has,
@@ -995,6 +997,7 @@ impl App {
             Action::RulerTimecode => self.ruler == RulerUnits::Timecode,
             Action::ShowSpectrum => self.show_spectrum,
             Action::ShowRegions => self.show_regions,
+            Action::ShowPool => self.show_pool,
             Action::ToggleSnap => self.snap,
             Action::AutoWarp => self.auto_warp,
             Action::WarpClip => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.warp.is_some()),
@@ -1271,6 +1274,12 @@ impl App {
             Action::RulerTimecode => self.ruler = RulerUnits::Timecode,
             Action::ShowSpectrum => self.show_spectrum = !self.show_spectrum,
             Action::ShowRegions => self.show_regions = !self.show_regions,
+            Action::ShowPool => {
+                self.show_pool = !self.show_pool;
+                if self.show_pool && self.pool.is_empty() {
+                    self.gather_pool();
+                }
+            }
             Action::Dither => {
                 let on = !audio::DITHER.load(std::sync::atomic::Ordering::Relaxed);
                 audio::DITHER.store(on, std::sync::atomic::Ordering::Relaxed);
@@ -1532,7 +1541,7 @@ impl eframe::App for App {
                 .resizable(false)
                 .show(ui, |ui| self.tools_panel(ui));
         }
-        if self.show_info || self.show_cues || self.show_regions {
+        if self.show_info || self.show_cues || self.show_regions || self.show_pool {
             egui::Panel::right("side")
                 .frame(egui::Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(12, 4)))
                 .resizable(false)

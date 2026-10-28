@@ -14,6 +14,10 @@ pub(super) struct PoolLoop {
     pub(super) clip: Clip,
 }
 
+/// What a row of the Loop Pool carries while it is dragged onto the tracks.
+#[derive(Clone, Copy)]
+pub(super) struct PoolDrag(pub(super) usize);
+
 impl App {
     /// The distinct loops in the song (copies and slices of one file count once), at full length.
     fn collect_pool(&self) -> Vec<PoolLoop> {
@@ -50,6 +54,7 @@ impl App {
         }
         self.pool = pool;
         self.variation = 1;
+        self.show_pool = true;
         self.build_arrangement();
     }
 
@@ -64,6 +69,7 @@ impl App {
         if self.pool.is_empty() {
             self.pool = self.collect_pool();
             self.variation = 1;
+            self.show_pool = true;
         }
         if self.pool.is_empty() {
             return;
@@ -106,6 +112,73 @@ impl App {
         self.dirty = true;
         self.refresh_playback();
         self.status = "Swapped for a random section from the pool (R again for another, ⌘Z to undo)".into();
+    }
+
+    /// Add the song's loops that aren't in the pool yet.
+    pub(super) fn gather_pool(&mut self) {
+        let key = |c: &Clip| Arc::as_ptr(c.warp.as_ref().map_or(&c.audio, |w| &w.source));
+        let have: Vec<*const Audio> = self.pool.iter().map(|p| key(&p.clip)).collect();
+        let new: Vec<PoolLoop> = self.collect_pool().into_iter().filter(|p| !have.contains(&key(&p.clip))).collect();
+        self.status = format!("Added {} loop{} to the pool", new.len(), if new.len() == 1 { "" } else { "s" });
+        self.pool.extend(new);
+    }
+
+    /// The Loop Pool side panel: each loop can be dragged onto a track (or below the last one
+    /// for a new track), landing on the grid where it's dropped.
+    pub(super) fn pool_section(&mut self, ui: &mut egui::Ui) {
+        if self.view != View::Arrangement {
+            ui.label(egui::RichText::new("Go back to the arrangement to drag loops from the pool.").color(MUTED));
+            return;
+        }
+        if self.pool.is_empty() {
+            ui.label(egui::RichText::new("Empty. Add the loops in your song, then drag them onto any track.").color(MUTED));
+        }
+        let bar = self.bar_frames();
+        let mut remove = None;
+        for (i, p) in self.pool.iter().enumerate() {
+            ui.horizontal(|ui| {
+                let bars = p.clip.audio.frames() as f64 / bar;
+                let text = format!("{}  ·  {} bar{}", p.clip.name, (bars * 10.0).round() / 10.0, if (bars - 1.0).abs() < 0.05 { "" } else { "s" });
+                let row = ui.dnd_drag_source(egui::Id::unique(("pool", i)), PoolDrag(i), |ui| {
+                    egui::Frame::new().fill(Color32::WHITE).stroke(Stroke::new(1.0, LINE)).corner_radius(4.0).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
+                        ui.set_width(230.0);
+                        ui.add(egui::Label::new(egui::RichText::new(text).color(INK)).truncate().selectable(false));
+                    });
+                });
+                row.response.on_hover_text("Drag onto a track");
+                if ui.small_button("×").on_hover_text("Take this loop out of the pool").clicked() {
+                    remove = Some(i);
+                }
+            });
+        }
+        if let Some(i) = remove {
+            self.pool.remove(i);
+        }
+        ui.add_space(8.0);
+        if ui.add_enabled(self.tracks.iter().any(|t| !t.clips.is_empty()), Button::new("Add Loops from Song")).clicked() {
+            self.gather_pool();
+        }
+    }
+
+    /// A pool loop dropped on the tracks: place it at `q` (snapped), on a new track below the last.
+    pub(super) fn drop_from_pool(&mut self, i: usize, q: Pos2) {
+        let (Some(p), Some((track, frame))) = (self.pool.get(i), self.drop_target_at(q)) else { return };
+        let mut clip = p.clip.clone();
+        clip.start = frame;
+        self.push_undo("Add Loop from Pool");
+        let t = track.unwrap_or_else(|| {
+            let mut t = Track::new(clip.name.clone());
+            t.color = self.tracks.len() % TRACK_COLORS.len();
+            self.tracks.push(t);
+            self.tracks.len() - 1
+        });
+        self.status = format!("Added {}", clip.name);
+        self.tracks[t].clips.push(clip);
+        self.sel_clip = Some((t, self.tracks[t].clips.len() - 1));
+        self.sel_extra.clear();
+        self.active = t;
+        self.dirty = true;
+        self.refresh_playback();
     }
 
     /// ◀ ▶: the previous or next variation of the current pool.

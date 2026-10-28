@@ -49,7 +49,8 @@ impl App {
             std::process::exit(2);
         }
         ctx.request_repaint();
-        if self.audio.is_none() || self.loading.is_some() {
+        // Wait for loading, and for scripted pointer input to play out, before the next step.
+        if self.audio.is_none() || self.loading.is_some() || !self.synth.is_empty() {
             self.automation = Some(auto);
             return;
         }
@@ -127,6 +128,25 @@ impl App {
                         // Give menus time to open before the next step.
                         let last = self.synth.last().unwrap().0;
                         self.synth.push((last + 8, egui::Event::PointerMoved(pos)));
+                    }
+                    // drag:x1|y1|x2|y2 presses at one point, moves to the other and lets go there;
+                    // draghold:… stops before letting go (to snapshot a drag in progress).
+                    "drag" | "draghold" => {
+                        let v: Vec<f32> = arg.split('|').map(|n| n.parse().unwrap_or(0.0)).collect();
+                        let (from, to) = (Pos2::new(v[0], v[1]), Pos2::new(v[2], v[3]));
+                        let button = egui::PointerButton::Primary;
+                        let mut at = self.synth.last().map_or(self.synth_frame, |l| l.0) + 1;
+                        self.synth.push((at, egui::Event::PointerMoved(from)));
+                        self.synth.push((at + 1, egui::Event::PointerButton { pos: from, button, pressed: true, modifiers: Modifiers::NONE }));
+                        at += 2;
+                        for i in 1..=12 {
+                            self.synth.push((at + i, egui::Event::PointerMoved(from + (to - from) * (i as f32 / 12.0))));
+                        }
+                        at += 14;
+                        if cmd == "drag" {
+                            self.synth.push((at, egui::Event::PointerButton { pos: to, button, pressed: false, modifiers: Modifiers::NONE }));
+                        }
+                        self.synth.push((at + 8, egui::Event::PointerMoved(to)));
                     }
                     "clips" => {
                         for (ti, t) in self.tracks.iter().enumerate() {

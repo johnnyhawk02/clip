@@ -176,7 +176,7 @@ impl App {
         });
     }
 
-    /// Right-hand side panel with the Info, Cues and Regions sections.
+    /// Right-hand side panel with the Info, Cues, Regions and Loop Pool sections.
     pub(super) fn side_panel(&mut self, ui: &mut egui::Ui) {
         let section = |ui: &mut egui::Ui, title: &str, first: bool| {
             if !first {
@@ -200,7 +200,12 @@ impl App {
         }
         if self.show_regions {
             section(ui, "REGIONS", first);
+            first = false;
             self.regions_section(ui);
+        }
+        if self.show_pool {
+            section(ui, "LOOP POOL", first);
+            self.pool_section(ui);
         }
     }
 

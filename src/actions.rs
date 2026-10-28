@@ -139,6 +139,7 @@ pub enum Action {
     PrevVariation,
     NextVariation,
     SwapSection,
+    ShowPool,
 }
 
 use Action::*;
@@ -157,7 +158,7 @@ pub const ALL: &[Action] = &[
     ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp, SliceClip, ReverseClip,
     MangleShuffle, MangleReverse, MangleSwap, MangleStutter, MangleRandomReverse, MangleDropOut, MangleBBCut, MangleAgain, DockPalette,
     MangleCutHouse, MangleCutHipHop, MangleCutDembow, MangleCutFootwork, MangleCutTrap, MangleCutBreakcore, MangleCutHalftime,
-    ExportStems, ExportAbleton, AutoArrange, PrevVariation, NextVariation, SwapSection,
+    ExportStems, ExportAbleton, AutoArrange, PrevVariation, NextVariation, SwapSection, ShowPool,
 ];
 
 pub enum Item {
@@ -273,7 +274,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Sub("Tracks", &[Do(OffsetTrack), Do(PrevTrack), Do(NextTrack), Separator, Do(MixDialog), Do(MixDown), Do(AutoGain)]),
             Sub("Tools", &[Do(ToolHand), Do(ToolZoom), Do(ToolPencil)]),
             Sub("Ruler Units", &[Do(RulerTime), Do(RulerSamples), Do(RulerTimecode)]),
-            Sub("Panels", &[Do(ShowControls), Do(ShowInfo), Do(ShowCues), Do(ShowRegions), Do(ShowSpectrum)]),
+            Sub("Panels", &[Do(ShowControls), Do(ShowInfo), Do(ShowCues), Do(ShowRegions), Do(ShowPool), Do(ShowSpectrum)]),
             Separator,
             Do(Record),
             Do(ExportSelection),
@@ -314,7 +315,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
+            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | ShowPool | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
     }
 
     pub fn label(self) -> &'static str {
@@ -444,6 +445,7 @@ impl Action {
             OffsetTrack => "Offset Track…",
             TrackColor => "Next Track Colour",
             ShowRegions => "Regions",
+            ShowPool => "Loop Pool",
             Dither => "Dither",
             CutGaps => "Cut Out Gaps…",
             EditClip => "Edit Clip",
@@ -510,6 +512,7 @@ impl Action {
             AddRegion => "CmdOrCtrl+Shift+R",
             ShowSpectrum => "CmdOrCtrl+6",
             ShowRegions => "CmdOrCtrl+5",
+            ShowPool => "CmdOrCtrl+7",
             Compressor => "CmdOrCtrl+Shift+C",
             PrevTrack => "Alt+CmdOrCtrl+Up",
             Record => "CmdOrCtrl+R",
@@ -595,6 +598,7 @@ impl Action {
             AutoArrange => "Build a 4-minute track from the loops in the song: 8 or 16 bar sections, one track per loop",
             PrevVariation => "The previous Auto Arrange variation",
             NextVariation => "Another Auto Arrange variation",
+            ShowPool => "The loops you can drag onto tracks",
             SwapSection => "Replace the selected clip with a random section of the same length from the loop pool",
             DuplicateClip => "Put a copy of the clip right after it",
             LoopClip => "Repeat the clip as you stretch its end",

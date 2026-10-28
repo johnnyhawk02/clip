@@ -403,6 +403,22 @@ impl App {
     }
 
     /// Where a file dropped at window point `q` would go: (track, or None for a new track; frame).
+    /// A loop being dragged in from the pool: show where it will land, and place it on release.
+    fn pool_drop(&mut self, ui: &egui::Ui, resp: &egui::Response) {
+        let Some(q) = ui.input(|i| i.pointer.latest_pos()) else { return };
+        if let Some(p) = resp.dnd_release_payload::<PoolDrag>() {
+            return self.drop_from_pool(p.0, q);
+        }
+        let (Some(p), Some((track, frame)), Some((lanes, lane_h))) = (resp.dnd_hover_payload::<PoolDrag>(), self.drop_target_at(q), self.arr_lanes) else { return };
+        let Some(len) = self.pool.get(p.0).map(|l| l.clip.len) else { return };
+        let x = |f: usize| lanes.left() + ((f as f64 - self.arr_view_start) / self.arr_view_len) as f32 * lanes.width();
+        let t = track.unwrap_or(self.tracks.len());
+        let top = lanes.top() + t as f32 * lane_h;
+        let r = Rect::from_min_max(Pos2::new(x(frame), top + 2.0), Pos2::new(x(frame + len), (top + lane_h - 2.0).min(lanes.bottom()))).intersect(lanes);
+        ui.painter().rect(r, 4.0, INK.gamma_multiply(0.12), Stroke::new(1.5, INK), egui::StrokeKind::Inside);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Copy);
+    }
+
     pub(super) fn drop_target_at(&self, q: Pos2) -> Option<(Option<usize>, usize)> {
         let (lanes, lane_h) = self.arr_lanes?;
         if !lanes.contains(q) {
@@ -773,6 +789,7 @@ impl App {
         let thumb_x = if max_start > 0.0 { (self.arr_view_start / max_start) as f32 * track_w } else { 0.0 };
         let thumb = Rect::from_min_size(Pos2::new(scroll.left() + thumb_x, scroll.top()), Vec2::new(thumb_w, scroll.height()));
         self.paint_arrangement(ui, &a, thumb, resp.hover_pos(), playing, play_pos);
+        self.pool_drop(ui, &resp);
         if !self.tracks.is_empty() {
             let header = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.left() + header_w, scroll.top()));
             self.track_headers(ui, header, self.tracks.len(), &lane);
