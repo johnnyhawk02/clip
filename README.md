@@ -11,6 +11,10 @@ job: chopping up loops, keeping the good bits and arranging them into a track.
   with a click.
 - Slice at Grid (⌘U) cuts the selected clips at every grid line (the grid size you pick, or
   every beat when the grid is Off or Auto), ready to drag around, duplicate (⌘D), loop and group.
+- Clip ▸ Mangle rearranges the selected clips in the slots they sit in (a single clip is sliced
+  at the grid first): Shuffle, Reverse Order, Swap Pairs, Stutter (some slices repeat the one
+  before), Random Reverse and Drop Out. Mangle Again (⌘Y) re-rolls the last one. Also on the
+  clip's right-click menu, along with Reverse.
 - The menus hold just that. The older sound-editor features (effects, insert, markers, recording,
   extra tools and panels, batch convert) are all still there, under the **More** menu.
 
