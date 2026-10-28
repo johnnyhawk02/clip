@@ -501,6 +501,8 @@ pub struct App {
     import_as_clip: bool,
     /// Where a dropped file goes: (track, or None for a new track; timeline frame).
     drop_target: Option<(Option<usize>, usize)>,
+    /// Further dropped files waiting to load, with where each goes.
+    drop_queue: std::collections::VecDeque<(PathBuf, (Option<usize>, usize))>,
     /// The arrangement's lane area and lane height, from the last frame (for drops).
     arr_lanes: Option<(Rect, f32)>,
     /// What the player is playing: the active track alone, or the mix of all tracks.
@@ -615,6 +617,7 @@ impl App {
             nest: Vec::new(),
             import_as_clip: false,
             drop_target: None,
+            drop_queue: Default::default(),
             arr_lanes: None,
             play_audio: None,
             path: None,
@@ -762,8 +765,13 @@ impl App {
                 Ok(a) if a.frames() > 0 => {
                     let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Clip".into());
                     let pos = match self.drop_target.take() {
-                        // Dropped below the tracks: a new track named after the file.
-                        Some((None, frame)) => {
+                        Some((Some(t), frame)) if t < self.tracks.len() => {
+                            self.set_active(t);
+                            self.arr_cursor = frame;
+                            self.add_clip(&name, Arc::new(a), "Import Clip")
+                        }
+                        // Dropped below the tracks (or past the last one): a new track named after the file.
+                        Some((_, frame)) => {
                             self.push_undo("Add Track");
                             self.tracks.push(Track::new(name.clone()));
                             self.active = self.tracks.len() - 1;
@@ -772,11 +780,6 @@ impl App {
                             // One undo step for both.
                             self.undo.pop();
                             pos
-                        }
-                        Some((Some(t), frame)) => {
-                            self.set_active(t);
-                            self.arr_cursor = frame;
-                            self.add_clip(&name, Arc::new(a), "Import Clip")
                         }
                         None => self.add_clip(&name, Arc::new(a), "Import Clip"),
                     };
@@ -4383,6 +4386,44 @@ impl App {
         self.arr_clamp();
     }
 
+    /// Files dropped on the window. Onto an open arrangement they become clips at the drop
+    /// point: the first on the track under the mouse and each further one on the next track
+    /// down (new tracks are made as needed); below the tracks, each gets a new track.
+    fn handle_drop(&mut self, files: Vec<PathBuf>, drop_pos: Option<Pos2>, ctx: &egui::Context) {
+        // A project file opens (replacing what's open) rather than becoming a clip.
+        if let Some(proj) = files.iter().find(|p| project::is_project(p)) {
+            return self.request_open(proj.clone(), ctx);
+        }
+        let mut files = files;
+        let arrangement_open = self.view == View::Arrangement && !self.tracks.is_empty();
+        if !arrangement_open {
+            // Nothing open yet: the first file opens, the rest go onto tracks of their own.
+            if files.is_empty() {
+                return;
+            }
+            let first = files.remove(0);
+            self.request_open(first, ctx);
+            self.drop_queue.extend(files.into_iter().map(|p| (p, (None, 0))));
+            return;
+        }
+        let (track, frame) = drop_pos.and_then(|q| self.drop_target_at(q)).unwrap_or((Some(self.active), self.arr_cursor));
+        for (k, p) in files.into_iter().enumerate() {
+            self.drop_queue.push_back((p, (track.map(|t| t + k), frame)));
+        }
+    }
+
+    /// Load the next queued dropped file once the previous one has finished.
+    fn next_queued_drop(&mut self, ctx: &egui::Context) {
+        if self.loading.is_some() || self.tracks.is_empty() {
+            return;
+        }
+        if let Some((p, target)) = self.drop_queue.pop_front() {
+            self.drop_target = Some(target);
+            self.import_as_clip = true;
+            self.start_load_as(p, ctx, true);
+        }
+    }
+
     /// Where a file dropped at window point `q` would go: (track, or None for a new track; frame).
     fn drop_target_at(&self, q: Pos2) -> Option<(Option<usize>, usize)> {
         let (lanes, lane_h) = self.arr_lanes?;
@@ -4825,22 +4866,14 @@ impl eframe::App for App {
 
         // Drag and drop.
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
-        for p in dropped {
-            if self.view == View::Arrangement && !self.tracks.is_empty() && self.loading.is_none() && !project::is_project(&p) {
-                // Dropping onto a track adds a clip there at the drop point; dropping on the
-                // empty space below the tracks makes a new track for it.
-                #[cfg(target_os = "macos")]
-                let drop_pos = ctx.input(|i| i.viewport().inner_rect).and_then(crate::menu::mouse_in_window);
-                #[cfg(not(target_os = "macos"))]
-                let drop_pos = ctx.input(|i| i.pointer.latest_pos());
-                self.drop_target = drop_pos.and_then(|q| self.drop_target_at(q));
-                self.import_as_clip = true;
-                self.start_load_as(p, &ctx, true);
-            } else {
-                self.request_open(p, &ctx);
-            }
-            break;
+        if !dropped.is_empty() {
+            #[cfg(target_os = "macos")]
+            let drop_pos = ctx.input(|i| i.viewport().inner_rect).and_then(crate::menu::mouse_in_window);
+            #[cfg(not(target_os = "macos"))]
+            let drop_pos = ctx.input(|i| i.pointer.latest_pos());
+            self.handle_drop(dropped, drop_pos, &ctx);
         }
+        self.next_queued_drop(&ctx);
 
         // Ask before quitting with unsaved edits.
         if ctx.input(|i| i.viewport().close_requested()) && self.dirty && !self.allow_close {
@@ -5133,12 +5166,11 @@ impl App {
                     "play" => self.toggle_play(),
                     "zoomsel" => self.zoom_to_selection(),
                     "drop" => {
-                        // drop:x|y|path — what dropping `path` at window point (x, y) does.
-                        let mut it = arg.splitn(3, '|');
-                        let (x, y, path) = (it.next().unwrap_or("0"), it.next().unwrap_or("0"), it.next().unwrap_or(""));
-                        self.drop_target = self.drop_target_at(Pos2::new(x.parse().unwrap_or(0.0), y.parse().unwrap_or(0.0)));
-                        self.import_as_clip = true;
-                        self.start_load_as(PathBuf::from(path), ctx, true);
+                        // drop:x|y|path|path… — what dropping the files at window point (x, y) does.
+                        let parts: Vec<&str> = arg.split('|').collect();
+                        let q = Pos2::new(parts[0].parse().unwrap_or(0.0), parts.get(1).and_then(|v| v.parse().ok()).unwrap_or(0.0));
+                        let files = parts.iter().skip(2).map(PathBuf::from).collect();
+                        self.handle_drop(files, Some(q), ctx);
                     }
                     "saveproj" => {
                         let r = self.write_project(Path::new(arg));
