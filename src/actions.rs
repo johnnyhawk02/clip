@@ -140,6 +140,7 @@ pub enum Action {
     NextVariation,
     SwapSection,
     ShowPool,
+    AddToPool,
 }
 
 use Action::*;
@@ -158,7 +159,7 @@ pub const ALL: &[Action] = &[
     ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp, SliceClip, ReverseClip,
     MangleShuffle, MangleReverse, MangleSwap, MangleStutter, MangleRandomReverse, MangleDropOut, MangleBBCut, MangleAgain, DockPalette,
     MangleCutHouse, MangleCutHipHop, MangleCutDembow, MangleCutFootwork, MangleCutTrap, MangleCutBreakcore, MangleCutHalftime,
-    ExportStems, ExportAbleton, AutoArrange, PrevVariation, NextVariation, SwapSection, ShowPool,
+    ExportStems, ExportAbleton, AutoArrange, PrevVariation, NextVariation, SwapSection, ShowPool, AddToPool,
 ];
 
 pub enum Item {
@@ -197,7 +198,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(SliceClip),
             Do(DuplicateClip),
             Do(ReverseClip),
-            Sub("Auto Arrange", &[Do(AutoArrange), Separator, Do(PrevVariation), Do(NextVariation), Separator, Do(SwapSection)]),
+            Sub("Auto Arrange", &[Do(AutoArrange), Separator, Do(PrevVariation), Do(NextVariation), Separator, Do(SwapSection), Do(AddToPool)]),
             Sub("Mangle", &[Do(MangleShuffle), Do(MangleReverse), Do(MangleSwap), Do(MangleStutter), Do(MangleRandomReverse), Do(MangleDropOut), Sub("BBCut", &[Do(MangleBBCut), Do(MangleCutHouse), Do(MangleCutHipHop), Do(MangleCutDembow), Do(MangleCutFootwork), Do(MangleCutTrap), Do(MangleCutBreakcore), Do(MangleCutHalftime)]), Separator, Do(MangleAgain)]),
             Separator,
             Do(LoopClip),
@@ -446,6 +447,7 @@ impl Action {
             TrackColor => "Next Track Colour",
             ShowRegions => "Regions",
             ShowPool => "Loop Pool",
+            AddToPool => "Add to Pool",
             Dither => "Dither",
             CutGaps => "Cut Out Gaps…",
             EditClip => "Edit Clip",
@@ -599,6 +601,7 @@ impl Action {
             PrevVariation => "The previous Auto Arrange variation",
             NextVariation => "Another Auto Arrange variation",
             ShowPool => "The loops you can drag onto tracks",
+            AddToPool => "Put the selected clips (grouped ones too) in the loop pool",
             SwapSection => "Replace the selected clip with a random section of the same length from the loop pool",
             DuplicateClip => "Put a copy of the clip right after it",
             LoopClip => "Repeat the clip as you stretch its end",

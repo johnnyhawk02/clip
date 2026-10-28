@@ -18,16 +18,22 @@ pub(super) struct PoolLoop {
 #[derive(Clone, Copy)]
 pub(super) struct PoolDrag(pub(super) usize);
 
+/// What makes two clips the same loop: the group they show, or the file they play.
+fn pool_key(c: &Clip) -> usize {
+    match &c.group {
+        Some(g) => Arc::as_ptr(g) as *const () as usize,
+        None => Arc::as_ptr(c.warp.as_ref().map_or(&c.audio, |w| &w.source)) as *const () as usize,
+    }
+}
+
 impl App {
-    /// The distinct loops in the song (copies and slices of one file count once), at full length.
+    /// The distinct loops and grouped clips in the song (copies and slices of one count once),
+    /// at full length.
     fn collect_pool(&self) -> Vec<PoolLoop> {
-        let mut seen: Vec<*const Audio> = Vec::new();
+        let mut seen: Vec<usize> = Vec::new();
         let mut pool = Vec::new();
         for c in self.tracks.iter().flat_map(|t| &t.clips) {
-            if c.group.is_some() {
-                continue;
-            }
-            let key = Arc::as_ptr(c.warp.as_ref().map_or(&c.audio, |w| &w.source));
+            let key = pool_key(c);
             if seen.contains(&key) {
                 continue;
             }
@@ -62,7 +68,7 @@ impl App {
     /// length from the pool, in the same place. Without a pool yet, the loops in the song are it.
     pub(super) fn swap_sections(&mut self) {
         let mut picked: Vec<(usize, usize)> = self.sel_clip.into_iter().chain(self.sel_extra.iter().copied()).collect();
-        picked.retain(|&(t, c)| self.tracks.get(t).is_some_and(|tr| tr.clips.get(c).is_some_and(|c| c.group.is_none())));
+        picked.retain(|&(t, c)| self.tracks.get(t).is_some_and(|tr| tr.clips.get(c).is_some()));
         if picked.is_empty() {
             return;
         }
@@ -116,11 +122,31 @@ impl App {
 
     /// Add the song's loops that aren't in the pool yet.
     pub(super) fn gather_pool(&mut self) {
-        let key = |c: &Clip| Arc::as_ptr(c.warp.as_ref().map_or(&c.audio, |w| &w.source));
-        let have: Vec<*const Audio> = self.pool.iter().map(|p| key(&p.clip)).collect();
-        let new: Vec<PoolLoop> = self.collect_pool().into_iter().filter(|p| !have.contains(&key(&p.clip))).collect();
+        let have: Vec<usize> = self.pool.iter().map(|p| pool_key(&p.clip)).collect();
+        let new: Vec<PoolLoop> = self.collect_pool().into_iter().filter(|p| !have.contains(&pool_key(&p.clip))).collect();
         self.status = format!("Added {} loop{} to the pool", new.len(), if new.len() == 1 { "" } else { "s" });
         self.pool.extend(new);
+    }
+
+    /// Clip ▸ Add to Pool: the selected clips (grouped ones too) as they are, trimmed or not.
+    pub(super) fn add_to_pool(&mut self) {
+        let mut added = 0;
+        for p in self.selected_clips() {
+            let Some(c) = self.clip(p) else { continue };
+            let mut clip = c.clone();
+            clip.start = 0;
+            let same = |q: &PoolLoop| pool_key(&q.clip) == pool_key(&clip) && q.clip.trim == clip.trim && q.clip.len == clip.len;
+            if !self.pool.iter().any(same) {
+                self.pool.push(PoolLoop { clip });
+                added += 1;
+            }
+        }
+        self.show_pool = true;
+        self.status = match added {
+            0 => "Already in the pool".into(),
+            1 => "Added to the pool".into(),
+            n => format!("Added {n} clips to the pool"),
+        };
     }
 
     /// The Loop Pool side panel: each loop can be dragged onto a track (or below the last one
@@ -131,13 +157,13 @@ impl App {
             return;
         }
         if self.pool.is_empty() {
-            ui.label(egui::RichText::new("Empty. Add the loops in your song, then drag them onto any track.").color(MUTED));
+            ui.label(egui::RichText::new("Empty. Add the loops in your song (or any clip, grouped ones too, with Clip ▸ Add to Pool), then drag them onto any track.").color(MUTED));
         }
         let bar = self.bar_frames();
         let mut remove = None;
         for (i, p) in self.pool.iter().enumerate() {
             ui.horizontal(|ui| {
-                let bars = p.clip.audio.frames() as f64 / bar;
+                let bars = p.clip.len as f64 / bar;
                 let text = format!("{}  ·  {} bar{}", p.clip.name, (bars * 10.0).round() / 10.0, if (bars - 1.0).abs() < 0.05 { "" } else { "s" });
                 let row = ui.dnd_drag_source(egui::Id::unique(("pool", i)), PoolDrag(i), |ui| {
                     egui::Frame::new().fill(Color32::WHITE).stroke(Stroke::new(1.0, LINE)).corner_radius(4.0).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {

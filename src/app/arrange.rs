@@ -168,6 +168,7 @@ impl App {
         chosen = chosen.or(pick(ui, "Split Here", Action::SplitClip));
         chosen = chosen.or(pick(ui, "Slice at Grid", Action::SliceClip));
         chosen = chosen.or(pick(ui, "Reverse", Action::ReverseClip));
+        chosen = chosen.or(pick(ui, "Add to Pool", Action::AddToPool));
         ui.menu_button("Mangle", |ui| {
             for (label, a) in [
                 ("Shuffle", Action::MangleShuffle),
