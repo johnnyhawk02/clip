@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sound Edit Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Monochrome like the app itself: white panels, black ink, grey rules. */
+:root {
+  --bg: #f5f5f3; --panel: #ffffff; --ink: #141414; --muted: #6b6b68; --line: #dcdcd9; --soft: #ececea;
+  --sans: "Inter", -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #141414; --panel: #1d1d1c; --ink: #ececea; --muted: #9b9b97; --line: #343432; --soft: #262625; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #141414; --panel: #1d1d1c; --ink: #ececea; --muted: #9b9b97; --line: #343432; --soft: #262625; color-scheme: dark }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.6; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 32px 64px;
+  display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 48px; }
+nav { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; display: grid; gap: 2px; font-size: 14px; }
+nav .brand { font-weight: 700; font-size: 16px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+nav a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 6px; border-left: 2px solid transparent; }
+nav a:hover { color: var(--ink); background: var(--soft); }
+nav a.on { color: var(--ink); font-weight: 600; border-left-color: var(--ink); border-radius: 0 6px 6px 0; }
+main { min-width: 0; display: grid; gap: 56px; }
+header h1 { font-size: 40px; line-height: 1.1; margin: 0 0 12px; letter-spacing: -0.025em; text-wrap: balance; }
+header p { margin: 0; color: var(--muted); font-size: 17px; max-width: 60ch; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.facts span { font-size: 12.5px; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 11px; color: var(--muted); }
+section { display: grid; gap: 16px; scroll-margin-top: 24px; }
+h2 { font-size: 26px; margin: 0; letter-spacing: -0.015em; text-wrap: balance; display: flex; align-items: baseline; gap: 12px; }
+h2 .n { font-family: var(--mono); font-size: 13px; color: var(--muted); font-weight: 400; }
+h3 { font-size: 17px; margin: 10px 0 0; }
+p, li { max-width: 68ch; }
+p { margin: 0; }
+ul { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; }
+kbd { font-family: var(--sans); font-size: 12.5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 6px; background: var(--panel); white-space: nowrap; }
+.path { font-weight: 500; white-space: nowrap; }
+figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+figure img { display: block; width: 100%; height: auto; border-radius: 6px; }
+figcaption { color: var(--muted); font-size: 13px; padding: 8px 4px 2px; }
+.steps { counter-reset: s; list-style: none; padding: 0; display: grid; gap: 10px; }
+.steps li { counter-increment: s; position: relative; padding-left: 38px; }
+.steps li::before { content: counter(s); position: absolute; left: 0; top: 1px; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: var(--bg); font-size: 12.5px; font-weight: 600; display: grid; place-items: center; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
+.card b { font-size: 14.5px; }
+.card span { color: var(--muted); font-size: 13.5px; }
+.tip { border-left: 3px solid var(--ink); background: var(--panel); padding: 10px 14px; border-radius: 0 8px 8px 0; font-size: 14px; max-width: 68ch; }
+.table { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; background: var(--soft); }
+tr:last-child td { border-bottom: 0; }
+td:first-child { white-space: nowrap; }
+.styles { display: flex; flex-wrap: wrap; gap: 6px; }
+.styles span { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 9px; font-size: 13px; }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 18px; }
+@media (max-width: 860px) {
+  .wrap { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 20px 48px; }
+  nav { position: static; display: flex; flex-wrap: wrap; gap: 6px; }
+  nav .brand { width: 100%; margin-bottom: 4px; }
+  nav a, nav a.on { border: 1px solid var(--line); border-radius: 999px; padding: 3px 11px; font-size: 13px; background: var(--panel); }
+  header h1 { font-size: 32px; }
+  main { gap: 44px; }
+}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+<nav id="nav">
+  <div class="brand"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M1 10h2M5 6v8M8 3v14M11 7v6M14 4v12M17 8v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Sound Edit</div>
+  <a href="#start">Getting started</a>
+  <a href="#arrangement">The arrangement</a>
+  <a href="#chop">Chopping loops</a>
+  <a href="#mangle">Mangle and BBCut</a>
+  <a href="#build">Building a track</a>
+  <a href="#tempo">Tempo and warping</a>
+  <a href="#groups">Loops and groups</a>
+  <a href="#editor">The clip editor</a>
+  <a href="#save">Saving and exporting</a>
+  <a href="#keys">Shortcuts</a>
+</nav>
+
+<main>
+<header>
+  <h1>Sound Edit</h1>
+  <p>A small Mac sound editor for one job: chopping up loops, keeping the good bits and arranging them into a track, with as little fiddling as possible.</p>
+  <div class="facts"><span>macOS</span><span>WAV · MP3 · FLAC · OGG · M4A · AIFF · CAF in</span><span>WAV · AIFF out</span><span>Exports to Ableton Live 12</span></div>
+</header>
+
+<section id="start">
+  <h2><span class="n">01</span>Getting started</h2>
+  <ol class="steps">
+    <li><b>Open the app</b> from Applications, or Spotlight "Sound Edit".</li>
+    <li><b>Drop loops on the window.</b> Each goes on its own track. A tempo in the file name, like "118bpm 16bar" or "124 BPM", sets the song tempo and stretches the loop to fit it.</li>
+    <li><b>Press Space</b> to play the whole song from the playhead. Click empty space to move the playhead.</li>
+    <li><b>Chop, move and arrange</b> with the tools below, then <span class="path">File ▸ Save Project</span> <kbd>⌘S</kbd> to keep everything in one file.</li>
+  </ol>
+  <div class="tip">Nothing you do touches your original files. Every edit can be undone with <kbd>⌘Z</kbd>.</div>
+</section>
+
+<section id="arrangement">
+  <h2><span class="n">02</span>The arrangement</h2>
+  <p>A song is a set of tracks, and audio sits on them as clips, much like Ableton's Arrangement view. The top bar sets the tempo, beats per bar, the grid, and whether things snap to it.</p>
+  <figure><img src="img/ctxclip.jpg" alt="The arrangement with one clip and its right-click menu open"><figcaption>Right-click a clip for everything you can do to it. Right-click a track's header or empty lane for track commands.</figcaption></figure>
+  <ul>
+    <li><b>Move</b> a clip by dragging it, along its track or onto another. Drag below the last track to make a new one. <kbd>⌥</kbd>-drag drags a copy.</li>
+    <li><b>Trim</b> by dragging either edge. The audio underneath is kept, so you can drag it back out.</li>
+    <li><b>Snapping:</b> moves and trims snap to the grid, other clips' edges and the playhead. Hold <kbd>⌘</kbd> to place freely.</li>
+    <li><b>Each track</b> has mute (M), solo (S), volume, pan and a colour swatch. <kbd>⌥⌘↑</kbd> <kbd>⌥⌘↓</kbd> step between tracks.</li>
+    <li><b>Copy, cut, paste</b> clips with <kbd>⌘C</kbd> <kbd>⌘X</kbd> <kbd>⌘V</kbd>. Paste goes on the selected track at the playhead. <kbd>⌘D</kbd> duplicates a clip right after itself, and <kbd>⌫</kbd> deletes it.</li>
+    <li><b>Dropping files</b> onto a track adds them at the drop point. Several files go on the tracks below, one each.</li>
+  </ul>
+</section>
+
+<section id="chop">
+  <h2><span class="n">03</span>Chopping loops</h2>
+  <div class="cards">
+    <div class="card"><b>Split Clip <kbd>⌘E</kbd></b><span>Cuts the clip under the pointer, at the pointer (snapped to the grid), or at the playhead when the pointer isn't over a clip.</span></div>
+    <div class="card"><b>Split tool <kbd>B</kbd></b><span>Click anywhere on a clip to cut it there. Press <kbd>S</kbd> to go back to the selection tool.</span></div>
+    <div class="card"><b>Slice at Grid <kbd>⌘U</kbd></b><span>Cuts the selected clips at every grid line, ready to drag around, duplicate, loop and group.</span></div>
+    <div class="card"><b>Reverse</b><span>Plays the selected clips backwards. On the clip's right-click menu.</span></div>
+  </div>
+  <figure><img src="img/slice.jpg" alt="A loop sliced into beat-length clips"><figcaption>A loop after Slice at Grid: every beat is now its own clip.</figcaption></figure>
+</section>
+
+<section id="mangle">
+  <h2><span class="n">04</span>Mangle and BBCut</h2>
+  <p>Mangle rearranges the selected clips in the slots they already sit in. A single clip is sliced at the grid first. The buttons are on the floating tool palette, and in <span class="path">Clip ▸ Mangle</span>.</p>
+  <div class="table"><table>
+    <tr><th>Mangle</th><th>What happens</th></tr>
+    <tr><td>Shuffle</td><td>The slices swap places at random.</td></tr>
+    <tr><td>Reverse</td><td>The slices play in reverse order.</td></tr>
+    <tr><td>Swap</td><td>Neighbouring pairs swap.</td></tr>
+    <tr><td>Stutter</td><td>Some slices repeat the one before.</td></tr>
+    <tr><td>Flip</td><td>Some slices play backwards.</td></tr>
+    <tr><td>Drop</td><td>Some slices go silent.</td></tr>
+    <tr><td>Again <kbd>⌘Y</kbd></td><td>Re-rolls the last mangle for a fresh variation.</td></tr>
+  </table></div>
+  <h3>BBCut</h3>
+  <p>Breakbeat cutting: the selection is re-cut into blocks, some jump to other parts of the loop, and some become stutter rolls. Each style has its own feel.</p>
+  <div class="styles"><span>Jungle</span><span>House</span><span>Hip-Hop</span><span>Dembow</span><span>Footwork</span><span>Trap</span><span>Breakcore</span><span>Halftime</span></div>
+  <figure><img src="img/bbcut.jpg" alt="A loop re-cut by BBCut into many short blocks and rolls"><figcaption>A loop after BBCut: blocks of eighths, some moved, some rolled.</figcaption></figure>
+  <h3>Mangling a stretch of time</h3>
+  <p>Drag across the ruler to set a loop range, which turns Loop on. Mangle then cuts the clips at the loop's edges, slices what's inside at the grid and mangles only that, on the track you're working on or the tracks of the selected clips. You hear it looping, and <kbd>⌘Y</kbd> gives another take.</p>
+</section>
+
+<section id="build">
+  <h2><span class="n">05</span>Building a track</h2>
+  <h3>The Loop Pool</h3>
+  <p>Open it with <kbd>⌘7</kbd> or <span class="path">View ▸ Panels ▸ Loop Pool</span>. It fills itself with the loops in your song, grouped clips included, all fitted to the song tempo.</p>
+  <figure><img src="img/pool3.jpg" alt="The Loop Pool panel with a loop being dragged onto a track"><figcaption>Dragging a one-bar hit from the pool: the outline shows where it will land, snapped to bar 7.</figcaption></figure>
+  <ul>
+    <li><b>Drag a loop</b> onto any track. It lands on the grid line under the pointer. Drop it below the last track for a new track.</li>
+    <li><b>Add to Pool</b> on a clip's right-click menu puts that exact clip in, trimmed or grouped.</li>
+    <li><b>×</b> takes a loop out. <b>Add Loops from Song</b> brings in any new ones.</li>
+  </ul>
+  <h3>Swap a section <kbd>R</kbd></h3>
+  <p>Click a clip and press <kbd>R</kbd>. It becomes a random section of the same length from the pool, in the same place. Press <kbd>R</kbd> again for another, or <kbd>⌘Z</kbd> to go back. Works on several selected clips at once.</p>
+  <h3>Auto Arrange</h3>
+  <p>Press <b>Auto Arrange</b> in the top bar. It builds about four minutes from the pool: each loop gets its own track and is cut into 8 or 16 bar sections, laid out with an intro, a build, a breakdown a little past halfway, a second peak and an outro.</p>
+  <figure><img src="img/swap1.jpg" alt="An auto-arranged song with three loop tracks"><figcaption>Variation 1 from three loops: 15 sections of 8 bars, 4.1 minutes.</figcaption></figure>
+  <ul>
+    <li><b>◀ ▶</b> flip through variations. Each number always gives the same layout, so you can go back to one you liked.</li>
+    <li><b>8 / 16 bars</b> changes the section length.</li>
+    <li>Loops shorter than a section repeat to fill it. Volume and pan stay with a track that already played that loop.</li>
+    <li>It replaces the whole song, and <kbd>⌘Z</kbd> brings it back.</li>
+  </ul>
+  <h3>Crossfades</h3>
+  <p>Overlap two clips on the same track and the overlap becomes a crossfade: the first fades out as the second fades in, keeping the level even. Drag further over for a longer fade. An X marks each one. A short clip lying entirely inside a longer one just plays on top.</p>
+  <figure><img src="img/xf2.jpg" alt="Two clips overlapping by one bar with an X over the overlap"><figcaption>Two copies of a loop overlapping by a bar, crossfading across it.</figcaption></figure>
+</section>
+
+<section id="tempo">
+  <h2><span class="n">06</span>Tempo and warping</h2>
+  <ul>
+    <li><b>Tempo from names:</b> a clip whose name gives its tempo ("Loop 118bpm 16bar", "Kick - 124 BPM", "Bpm130_Drums") is stretched to the song tempo, keeping its pitch. A bar count in the name gives the exact tempo.</li>
+    <li><b>Change the tempo</b> in the top bar and warped clips re-fit, staying on their beats.</li>
+    <li><b>Set Tempo from Clip</b> reads a loop's length as a whole number of bars and sets the song to match.</li>
+    <li><b>Warp to Tempo</b> switches warping on or off for the selected clips. <span class="path">Clip ▸ Warp Loops on Import</span> turns the automatic part off.</li>
+    <li><b>Grid:</b> Auto, 1 Bar, 1/2 down to 1/32, or Off. With the grid on, the ruler shows bars and beats. <kbd>⌘4</kbd> toggles snapping.</li>
+  </ul>
+</section>
+
+<section id="groups">
+  <h2><span class="n">07</span>Loops and groups</h2>
+  <ul>
+    <li><b>Loop Clip</b> <kbd>⌥⌘L</kbd> makes a clip repeat for as long as you drag its right edge out. Dotted lines show where it starts over.</li>
+    <li><b>Song loop:</b> drag in the ruler to draw a loop range, and turn it on or off with <kbd>⌘L</kbd> or the loop button.</li>
+    <li><b>Group into Clip</b> <kbd>⌘G</kbd>: shift-click clips (or <kbd>⌘A</kbd>) and they become one clip holding them all. Double-click it to open it as its own arrangement; the path bar or <kbd>⌘Return</kbd> goes back up. <kbd>⌥⌘G</kbd> ungroups.</li>
+    <li><b>Collapse to Audio</b> <kbd>⌘J</kbd> renders a group, looped or trimmed clip down to one plain clip that sounds the same.</li>
+  </ul>
+</section>
+
+<section id="editor">
+  <h2><span class="n">08</span>The clip editor</h2>
+  <p>Double-click a clip, or press <kbd>Return</kbd>, to edit its audio in the waveform editor. <b>◀ Arrangement</b> or <kbd>⌘Return</kbd> goes back.</p>
+  <figure><img src="img/editor.jpg" alt="The waveform editor showing a stereo loop"><figcaption>Editing one clip. Selections, effects and the pencil work on this clip only.</figcaption></figure>
+  <div class="table"><table>
+    <tr><th>Tool</th><th>Key</th><th>What it does</th></tr>
+    <tr><td>Selection</td><td><kbd>S</kbd></td><td>Drag to select, shift-click to extend, double-click selects between cues.</td></tr>
+    <tr><td>Hand</td><td><kbd>H</kbd></td><td>Drag to scroll. Holding Space does the same with any tool.</td></tr>
+    <tr><td>Zoom</td><td><kbd>Z</kbd></td><td>Click to zoom in, <kbd>⌥</kbd>-click to zoom out, drag a range to zoom to it.</td></tr>
+    <tr><td>Pencil</td><td><kbd>P</kbd></td><td>Redraw the waveform by hand, zoomed in close.</td></tr>
+    <tr><td>Split</td><td><kbd>B</kbd></td><td>Click a clip in the arrangement to cut it there.</td></tr>
+  </table></div>
+  <p>The older sound-editor features live under the <b>More</b> menu: effects (Normalize, fades, Reverb, Delay, Echo, EQ, Compressor, Noise Gate, Pitch, Tempo and more), Insert (silence, tones, noise, FM synthesis), cue points and regions, recording, Spectrum and Batch Convert.</p>
+</section>
+
+<section id="save">
+  <h2><span class="n">09</span>Saving and exporting</h2>
+  <div class="cards">
+    <div class="card"><b>Save Project <kbd>⌘S</kbd></b><span>One .sndproj file with every track, clip, group, loop, mixer setting and the audio itself. Double-click it in Finder to open.</span></div>
+    <div class="card"><b>Export Mix <kbd>⌥⌘S</kbd></b><span>The whole song as one WAV or AIFF, at 16-bit, 24-bit or 32-bit float.</span></div>
+    <div class="card"><b>Export Stems</b><span>One WAV per track, all starting at zero and the same length, so they line up in another DAW.</span></div>
+    <div class="card"><b>Export Ableton Live Set</b><span>A Live 12 project folder: tracks, names, colours, mixer, clip positions, loops and warping all carry over. Crossfades don't.</span></div>
+  </div>
+</section>
+
+<section id="keys">
+  <h2><span class="n">10</span>Shortcuts</h2>
+  <div class="table"><table>
+    <tr><th>Keys</th><th>Does</th></tr>
+    <tr><td><kbd>Space</kbd></td><td>Play / pause. <kbd>Esc</kbd> stops.</td></tr>
+    <tr><td><kbd>⌘E</kbd></td><td>Split clip</td></tr>
+    <tr><td><kbd>⌘U</kbd></td><td>Slice at grid</td></tr>
+    <tr><td><kbd>⌘D</kbd></td><td>Duplicate clip</td></tr>
+    <tr><td><kbd>⌘Y</kbd></td><td>Mangle again</td></tr>
+    <tr><td><kbd>R</kbd></td><td>Swap the selected clip for a random section from the pool</td></tr>
+    <tr><td><kbd>⌘7</kbd></td><td>Show or hide the Loop Pool</td></tr>
+    <tr><td><kbd>⌘G</kbd> / <kbd>⌥⌘G</kbd></td><td>Group / ungroup</td></tr>
+    <tr><td><kbd>⌘J</kbd></td><td>Collapse to audio</td></tr>
+    <tr><td><kbd>⌥⌘L</kbd></td><td>Loop clip</td></tr>
+    <tr><td><kbd>⌘L</kbd></td><td>Song loop on / off</td></tr>
+    <tr><td><kbd>⌘4</kbd></td><td>Snap to grid on / off</td></tr>
+    <tr><td><kbd>Return</kbd> / <kbd>⌘Return</kbd></td><td>Edit clip / back to the arrangement</td></tr>
+    <tr><td><kbd>S</kbd> <kbd>H</kbd> <kbd>Z</kbd> <kbd>P</kbd> <kbd>B</kbd></td><td>Selection, Hand, Zoom, Pencil, Split tools</td></tr>
+    <tr><td><kbd>F</kbd> or <kbd>⌘0</kbd></td><td>Zoom to fit</td></tr>
+    <tr><td><kbd>⌘=</kbd> / <kbd>⌘-</kbd></td><td>Zoom in / out (or pinch, ⌘-scroll)</td></tr>
+    <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Go to start / end</td></tr>
+    <tr><td><kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd></td><td>Undo / redo</td></tr>
+    <tr><td><kbd>⌘S</kbd> / <kbd>⌥⌘S</kbd></td><td>Save project / export mix</td></tr>
+  </table></div>
+</section>
+
+<footer>Sound Edit is written in Rust with egui. Source: <a href="https://github.com/johnnyhawk02/sound-edit" style="color:inherit">github.com/johnnyhawk02/sound-edit</a>.</footer>
+</main>
+</div>
+
+<script>
+// Highlight the section in view.
+(() => {
+  const links = [...document.querySelectorAll('#nav a')];
+  const byId = Object.fromEntries(links.map(a => [a.getAttribute('href').slice(1), a]));
+  const io = new IntersectionObserver(es => {
+    es.forEach(e => { if (e.isIntersecting) { links.forEach(l => l.classList.remove('on')); byId[e.target.id]?.classList.add('on'); } });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  document.querySelectorAll('main section').forEach(s => io.observe(s));
+})();
+</script>
+
+</body>
+</html>

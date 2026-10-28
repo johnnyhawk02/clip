@@ -3,6 +3,8 @@
 A simple desktop audio editor written in Rust (egui + symphonia + cpal + hound), built for one
 job: chopping up loops, keeping the good bits and arranging them into a track.
 
+**Guide:** https://johnnyhawk02.github.io/sound-edit/
+
 ## Chopping loops
 
 - Drop loops in; ones with a tempo in the name ("118bpm 16bar", "124 BPM") warp to the song tempo.
