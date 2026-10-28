@@ -356,10 +356,17 @@ impl App {
     }
 
     pub(super) fn delete_clip(&mut self) {
+        let mut picked: Vec<(usize, usize)> = self.selected_clips().into_iter().filter(|&p| self.clip(p).is_some()).collect();
         self.sel_extra.clear();
-        let Some((t, c)) = self.sel_clip.filter(|&p| self.clip(p).is_some()) else { return };
-        self.push_undo("Delete Clip");
-        self.tracks[t].clips.remove(c);
+        if picked.is_empty() {
+            return;
+        }
+        self.push_undo(if picked.len() > 1 { "Delete Clips" } else { "Delete Clip" });
+        // Highest index first, so the others keep their places.
+        picked.sort_unstable_by(|a, b| b.cmp(a));
+        for (t, c) in picked {
+            self.tracks[t].clips.remove(c);
+        }
         self.sel_clip = None;
         self.dirty = true;
         self.refresh_playback();

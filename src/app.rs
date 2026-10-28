@@ -157,6 +157,9 @@ pub struct App {
     arr_cursor: usize,
     sel_clip: Option<(usize, usize)>,
     clip_drag: Option<ClipDrag>,
+    /// A selection box being dragged from empty space: where it started, and the clips that
+    /// were already selected (kept when Shift is held).
+    marquee: Option<(Pos2, Vec<(usize, usize)>)>,
     /// Clips selected besides `sel_clip` (shift-click), for grouping.
     sel_extra: Vec<(usize, usize)>,
     /// Open groups, outermost first; empty at the top level (the song).
@@ -317,6 +320,7 @@ impl App {
             arr_cursor: 0,
             sel_clip: None,
             clip_drag: None,
+            marquee: None,
             sel_extra: Vec::new(),
             nest: Vec::new(),
             import_as_clip: false,

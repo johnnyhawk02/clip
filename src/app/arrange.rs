@@ -623,8 +623,36 @@ impl App {
                     self.sel_extra.clear();
                     self.sel_clip = Some((t, c));
                     self.active = t;
+                } else if q.y > lanes.top() {
+                    // Empty space: drag a box to select the clips it touches.
+                    let keep = if ui.input(|i| i.modifiers.shift) { self.selected_clips() } else { Vec::new() };
+                    self.marquee = Some((q, keep));
                 }
             }
+        }
+        if let (Some((from, keep)), true, Some(q)) = (self.marquee.clone(), resp.dragged(), resp.interact_pointer_pos()) {
+            let r = Rect::from_two_pos(from, q);
+            let mut picked = keep;
+            for (ti, t) in self.tracks.iter().enumerate() {
+                let l = lane(ti);
+                if l.bottom() < r.top() || l.top() > r.bottom() {
+                    continue;
+                }
+                for (ci, c) in t.clips.iter().enumerate() {
+                    let (x0, x1) = (a.f_to_x(c.start as f64, vs, vl), a.f_to_x(c.end() as f64, vs, vl));
+                    if x1 >= r.left() && x0 <= r.right() && !picked.contains(&(ti, ci)) {
+                        picked.push((ti, ci));
+                    }
+                }
+            }
+            self.sel_clip = picked.first().copied();
+            self.sel_extra = picked.iter().skip(1).copied().collect();
+            if let Some((t, _)) = self.sel_clip {
+                self.active = t;
+            }
+        }
+        if resp.drag_stopped() {
+            self.marquee = None;
         }
         if let (true, Some(q)) = (resp.dragged(), resp.interact_pointer_pos()) {
             let drag_grid = if self.snap { self.grid_frames(spp) } else { None };
@@ -796,6 +824,10 @@ impl App {
         let thumb = Rect::from_min_size(Pos2::new(scroll.left() + thumb_x, scroll.top()), Vec2::new(thumb_w, scroll.height()));
         self.paint_arrangement(ui, &a, thumb, resp.hover_pos(), playing, play_pos);
         self.pool_drop(ui, &resp);
+        if let (Some((from, _)), Some(q)) = (&self.marquee, resp.interact_pointer_pos()) {
+            let r = Rect::from_two_pos(*from, q).intersect(lanes);
+            ui.painter().rect(r, 0.0, INK.gamma_multiply(0.06), Stroke::new(1.0, INK.gamma_multiply(0.6)), egui::StrokeKind::Inside);
+        }
         if !self.tracks.is_empty() {
             let header = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.left() + header_w, lanes.bottom()));
             self.track_headers(ui, header, self.tracks.len(), &lane);

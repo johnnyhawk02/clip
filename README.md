@@ -53,6 +53,7 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
 - Drag a clip to move it along its track or onto another track (⌥-drag drags a copy instead; dragging below the last track makes a new track for it); drag its left or right edge to
   trim it (the audio underneath is kept, so you can drag the edge back out). Moves and trims snap
   to other clips' edges and the playhead; hold ⌘ to turn snapping off.
+- Drag a box from empty space to select every clip it touches (hold Shift to add to the selection); ⌫ deletes them all.
 - Click empty space to move the playhead. Space plays the whole arrangement from the playhead.
 - **Double-click a clip (or press Return) to edit it** in the waveform editor below, with every
   tool and effect. ◀ Arrangement or ⌘Return goes back.
