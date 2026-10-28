@@ -109,6 +109,7 @@ pub enum Action {
     SaveProjectAs,
     TempoFromClip,
     ToggleSnap,
+    ToolSplit,
 }
 
 use Action::*;
@@ -124,7 +125,7 @@ pub const ALL: &[Action] = &[
     PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions, Dither, CutGaps,
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
     GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
-    ToggleSnap,
+    ToggleSnap, ToolSplit,
 ];
 
 pub enum Item {
@@ -252,6 +253,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Sub("Ruler Units", &[Do(RulerTime), Do(RulerSamples), Do(RulerTimecode)]),
             Separator,
             Do(ToolSelect),
+            Do(ToolSplit),
             Do(ToolHand),
             Do(ToolZoom),
             Do(ToolPencil),
@@ -263,8 +265,9 @@ pub const WINDOW_MENU: &[Item] = &[Do(ShowTools), Do(ShowControls), Do(ShowInfo)
 
 /// Tools palette layout, two buttons per row; `None` is a gap between groups.
 pub const PALETTE: &[Option<[Action; 2]>] = &[
-    Some([ToolSelect, ToolHand]),
-    Some([ToolZoom, ToolPencil]),
+    Some([ToolSelect, ToolSplit]),
+    Some([ToolHand, ToolZoom]),
+    Some([ToolPencil, ZoomFit]),
     None,
     Some([Cut, Copy]),
     Some([Paste, Delete]),
@@ -274,7 +277,7 @@ pub const PALETTE: &[Option<[Action; 2]>] = &[
     Some([Normalize, Gain]),
     Some([Reverse, Echo]),
     None,
-    Some([Split, ZoomFit]),
+    Some([Split, ZoomSel]),
 ];
 
 impl Action {
@@ -287,7 +290,7 @@ impl Action {
     }
 
     pub fn is_tool(self) -> bool {
-        matches!(self, ToolSelect | ToolHand | ToolZoom | ToolPencil)
+        matches!(self, ToolSelect | ToolSplit | ToolHand | ToolZoom | ToolPencil)
     }
 
     /// Shown with a check mark in menus rather than as a plain command.
@@ -305,6 +308,7 @@ impl Action {
             SaveProjectAs => "Save Project As…",
             TempoFromClip => "Set Tempo from Clip",
             ToggleSnap => "Snap to Grid",
+            ToolSplit => "Split Tool",
             ExportSelection => "Export Selection…",
             FormatPcm8 => "8-bit PCM",
             FormatPcm16 => "16-bit PCM",
@@ -503,6 +507,7 @@ impl Action {
             ToolHand => "H",
             ToolZoom => "Z",
             ToolPencil => "P",
+            ToolSplit => "B",
             Record => "⌘R",
             AddCue => "⌘M",
             NewTrack => "⇧⌘T",
@@ -525,6 +530,7 @@ impl Action {
             ToolHand => "Drag to scroll through the sound",
             ToolZoom => "Click to zoom in, ⌥-click to zoom out, drag to zoom to a range",
             ToolPencil => "Draw the waveform by hand (zoom in close first)",
+            ToolSplit => "Click a clip in the arrangement to cut it there (snaps to the grid)",
             Trim => "Keep only the selection",
             Delete => "Remove the selection",
             Silence => "Replace the selection with silence",

@@ -196,6 +196,8 @@ const PENCIL_MAX_SPP: f64 = 64.0;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Tool {
     Select,
+    /// Arrangement only: click a clip to cut it in two.
+    Split,
     Hand,
     Zoom,
     Pencil,
@@ -1449,6 +1451,15 @@ impl App {
             self.status = "Put the playhead inside a clip to split it".into();
             return;
         };
+        self.split_clip_at((t, c), at);
+    }
+
+    /// Cut clip `(t, c)` in two at timeline frame `at`, selecting the right-hand piece.
+    fn split_clip_at(&mut self, (t, c): (usize, usize), at: usize) {
+        if !self.clip((t, c)).is_some_and(|cl| at > cl.start && at < cl.end()) {
+            return;
+        }
+        self.sel_extra.clear();
         self.push_undo("Split Clip");
         let left = &mut self.tracks[t].clips[c];
         let cut = at - left.start;
@@ -2320,6 +2331,7 @@ impl App {
                 Action::Export => doc && self.arrangement_frames() > 0,
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
                 Action::SplitClip => doc,
+                Action::ToolSelect | Action::ToolSplit => true,
                 Action::GroupClips | Action::TempoFromClip => has_clip,
                 Action::ToggleSnap => doc,
                 Action::Ungroup => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.group.is_some()),
@@ -2364,6 +2376,7 @@ impl App {
             Action::NextCue | Action::PrevCue => has && !self.cues.is_empty(),
             Action::ShowTools | Action::ShowControls | Action::ShowInfo => true,
             Action::ToolSelect | Action::ToolHand | Action::ToolZoom | Action::ToolPencil => true,
+            Action::ToolSplit => false,
             Action::Undo => !self.undo.is_empty(),
             Action::Redo => !self.redo.is_empty(),
             Action::Paste | Action::MixPaste => has && self.clipboard.is_some(),
@@ -2394,6 +2407,7 @@ impl App {
             Action::ToolHand => self.tool == Tool::Hand,
             Action::ToolZoom => self.tool == Tool::Zoom,
             Action::ToolPencil => self.tool == Tool::Pencil,
+            Action::ToolSplit => self.tool == Tool::Split,
             Action::ShowTools => self.show_tools,
             Action::ShowControls => self.show_controls,
             Action::ShowInfo => self.show_info,
@@ -2544,6 +2558,7 @@ impl App {
             Action::ToolHand => self.tool = Tool::Hand,
             Action::ToolZoom => self.tool = Tool::Zoom,
             Action::ToolPencil => self.tool = Tool::Pencil,
+            Action::ToolSplit => self.tool = Tool::Split,
             Action::ShowTools => self.show_tools = !self.show_tools,
             Action::ShowControls => self.show_controls = !self.show_controls,
             Action::ShowInfo => self.show_info = !self.show_info,
@@ -2672,6 +2687,7 @@ impl App {
             (none, Key::H, Action::ToolHand),
             (none, Key::Z, Action::ToolZoom),
             (none, Key::P, Action::ToolPencil),
+            (none, Key::B, Action::ToolSplit),
             (none, Key::Enter, Action::EditClip),
             (none, Key::OpenBracket, Action::PrevCue),
             (none, Key::CloseBracket, Action::NextCue),
@@ -3809,9 +3825,14 @@ impl App {
         // few pixels, and anchoring there would shift the start of the drag.
         let press = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos());
         // Holding Space switches to the Hand tool for as long as it is held.
-        let tool = if self.space_down { Tool::Hand } else { self.tool };
+        let tool = match (self.space_down, self.tool) {
+            (true, _) => Tool::Hand,
+            // The split tool is for the arrangement; in the editor it selects.
+            (false, Tool::Split) => Tool::Select,
+            (false, t) => t,
+        };
         match tool {
-            Tool::Select => {
+            Tool::Select | Tool::Split => {
                 // Cue flags in the ruler can be dragged along (⌥-drag duplicates), or clicked to jump there.
                 let flag_at = |q: Pos2, cues: &[Cue], vs: f64, vl: f64| {
                     (q.y <= ruler.top() + 14.0).then(|| {
@@ -4655,7 +4676,38 @@ impl App {
         };
         let (vs, vl) = (self.arr_view_start, self.arr_view_len);
         let hover_hit = resp.hover_pos().and_then(|q| hit(&self.tracks, q, vs, vl));
-        match (self.clip_drag.as_ref().map(|d| d.mode), hover_hit.map(|h| h.2)) {
+        if self.tool == Tool::Split {
+            // Split tool: a line shows where the cut will go; a click cuts the clip there.
+            let cmd = ui.input(|i| i.modifiers.command);
+            let at = |q: Pos2| {
+                let f = x_to_f(q.x, vs, vl);
+                (if cmd { f } else { self.snap_to_grid(f, spp) }) as usize
+            };
+            if let (Some(q), Some((t, c, _))) = (resp.hover_pos(), hover_hit) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+                let f = at(q);
+                let clip = &self.tracks[t].clips[c];
+                if f > clip.start && f < clip.end() {
+                    let x = f_to_x(f as f64, vs, vl);
+                    let l = lane(t);
+                    ui.painter().line_segment([Pos2::new(x, l.top() + 2.0), Pos2::new(x, l.bottom() - 2.0)], Stroke::new(1.5, INK));
+                }
+            }
+            if resp.clicked() {
+                if let Some(q) = resp.interact_pointer_pos() {
+                    if let Some((t, c, _)) = hit(&self.tracks, q, vs, vl) {
+                        let f = at(q);
+                        self.split_clip_at((t, c), f);
+                        self.active = t;
+                    } else {
+                        let f = at(q);
+                        self.arr_cursor = f;
+                        self.sel_clip = None;
+                    }
+                }
+            }
+        }
+        match (self.clip_drag.as_ref().map(|d| d.mode), hover_hit.filter(|_| self.tool != Tool::Split).map(|h| h.2)) {
             (Some(DragMode::Move), _) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing),
             (Some(_), _) | (None, Some(DragMode::TrimStart | DragMode::TrimEnd)) => ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal),
             (None, Some(DragMode::Move)) => {
@@ -4666,7 +4718,8 @@ impl App {
         }
 
         let press = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos());
-        if resp.drag_started() {
+        let split_tool = self.tool == Tool::Split;
+        if resp.drag_started() && !split_tool {
             if let Some(q) = press {
                 if let Some((t, mut c, mode)) = hit(&self.tracks, q, vs, vl) {
                     // ⌥-drag leaves the original in place and drags a copy (as in Ableton).
@@ -4778,7 +4831,9 @@ impl App {
             self.dirty = true;
             self.refresh_playback();
         }
-        if resp.double_clicked() {
+        if split_tool {
+            // Handled above.
+        } else if resp.double_clicked() {
             if let Some((t, c, _)) = resp.interact_pointer_pos().and_then(|q| hit(&self.tracks, q, vs, vl)) {
                 self.edit_clip((t, c));
                 return;
@@ -5500,6 +5555,11 @@ fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color32, playing:
         Action::ToolZoom => {
             p.circle_stroke(pt(-2.0, -2.0), 5.5, st);
             thick(2.0, 2.0, 7.5, 7.5, 3.0);
+        }
+        Action::ToolSplit => {
+            p.rect_stroke(Rect::from_min_max(pt(-9.0, -5.0), pt(-2.0, 5.0)), 2.0, st, egui::StrokeKind::Middle);
+            p.rect_stroke(Rect::from_min_max(pt(2.0, -5.0), pt(9.0, 5.0)), 2.0, st, egui::StrokeKind::Middle);
+            line(0.0, -9.0, 0.0, 9.0);
         }
         Action::ToolPencil => {
             thick(-3.5, 3.5, 6.0, -6.0, 4.5);

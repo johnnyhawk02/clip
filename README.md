@@ -64,6 +64,7 @@ Every command is in the menu bar: **File, Edit, Insert, Effects, Control, View, 
 | Hand | H | Drag to scroll through the sound |
 | Zoom | Z | Click to zoom in, ⌥-click to zoom out, drag a range to zoom to it |
 | Pencil | P | Redraw the waveform by hand (zoom in close first); each stroke is one undo step |
+| Split | B | In the arrangement, click a clip to cut it there (snaps to the grid; hold ⌘ to cut anywhere) |
 
 **Mouse and modifier keys:**
 
