@@ -49,6 +49,11 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   and turn Loop on or off with ⌘L or the loop button; playback then goes round that range. Insert ▸
   Set Loop to Selection in the arrangement sets it to the selected clips. Both are saved in the
   project.
+- **Right-click menus:** right-click a clip for Edit/Open, Cut, Copy, Duplicate, Delete, Split,
+  Loop, Group/Ungroup, Collapse to Audio and Set Tempo from Clip. Right-click a track (its header
+  or empty lane space) for New/Duplicate/Delete Track, Mute, Solo, Colour, Collapse Track to One
+  Clip and Import File as Clip. **Collapse** (Clip ▸ Collapse to Audio, ⌘J) renders a group,
+  looped or trimmed clip down to one plain audio clip that sounds the same.
 - **Clips within clips:** shift-click clips (or ⌘A for all) and choose Clip ▸ Group into Clip (⌘G).
   They become one group clip holding them, in the same places and keeping their tracks' settings.
   Double-click a group to open it as its own arrangement; the path bar (Song ▸ Group 1 ▸ …) or

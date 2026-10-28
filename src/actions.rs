@@ -111,6 +111,8 @@ pub enum Action {
     ToggleSnap,
     ToolSplit,
     LoopClip,
+    CollapseClip,
+    CollapseTrack,
 }
 
 use Action::*;
@@ -126,7 +128,7 @@ pub const ALL: &[Action] = &[
     PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions, Dither, CutGaps,
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
     GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
-    ToggleSnap, ToolSplit, LoopClip,
+    ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack,
 ];
 
 pub enum Item {
@@ -179,7 +181,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
     ),
     (
         "Clip",
-        &[Do(NewClip), Do(ImportClip), Separator, Do(EditClip), Do(BackToArrangement), Separator, Do(SplitClip), Do(DuplicateClip), Separator, Do(GroupClips), Do(Ungroup), Separator, Do(LoopClip), Do(TempoFromClip), Do(ToggleSnap)],
+        &[Do(NewClip), Do(ImportClip), Separator, Do(EditClip), Do(BackToArrangement), Separator, Do(SplitClip), Do(DuplicateClip), Separator, Do(GroupClips), Do(Ungroup), Do(CollapseClip), Separator, Do(LoopClip), Do(TempoFromClip), Do(ToggleSnap)],
     ),
     (
         "Insert",
@@ -230,6 +232,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Separator,
             Do(TrackColor),
             Do(OffsetTrack),
+            Do(CollapseTrack),
             Separator,
             Do(PrevTrack),
             Do(NextTrack),
@@ -311,6 +314,8 @@ impl Action {
             ToggleSnap => "Snap to Grid",
             ToolSplit => "Split Tool",
             LoopClip => "Loop Clip",
+            CollapseClip => "Collapse to Audio",
+            CollapseTrack => "Collapse Track to One Clip",
             ExportSelection => "Export Selection…",
             FormatPcm8 => "8-bit PCM",
             FormatPcm16 => "16-bit PCM",
@@ -449,6 +454,7 @@ impl Action {
             GroupClips => "CmdOrCtrl+G",
             ToggleSnap => "CmdOrCtrl+4",
             LoopClip => "CmdOrCtrl+Alt+L",
+            CollapseClip => "CmdOrCtrl+J",
             Ungroup => "CmdOrCtrl+Alt+G",
             ZoomFit => "CmdOrCtrl+0",
             ShowTools => "CmdOrCtrl+1",

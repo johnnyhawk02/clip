@@ -543,6 +543,8 @@ pub struct App {
     /// The arrangement's loop range (played round when Loop is on), and a ruler drag setting it.
     arr_loop: Option<Sel>,
     arr_loop_drag: Option<usize>,
+    /// Which track a right-click on empty lane space is for (None: the clip menu).
+    ctx_menu_track: Option<usize>,
     grid: usize,
     snap: bool,
     /// Further dropped files waiting to load, with where each goes.
@@ -665,6 +667,7 @@ impl App {
             beats_per_bar: 4,
             arr_loop: None,
             arr_loop_drag: None,
+            ctx_menu_track: None,
             grid: 1,
             snap: true,
             drop_queue: Default::default(),
@@ -1207,6 +1210,122 @@ impl App {
         self.dirty = true;
         self.refresh_playback();
         self.status = if on { "Clip loops — drag its right edge to repeat it more".into() } else { "Clip no longer loops".into() };
+    }
+
+    /// Collapse: render the selected clip (a group, a loop, a trimmed clip) down to one plain
+    /// audio clip in the same place.
+    fn collapse_clip(&mut self) {
+        let Some((t, c)) = self.sel_clip.filter(|&p| self.clip(p).is_some()) else { return };
+        self.push_undo("Collapse Clip");
+        let old = self.tracks[t].clips[c].clone();
+        let mut clip = Clip::new(old.name.clone(), Arc::new(old.visible()), old.start);
+        // Markers inside the visible part come along (loops and groups have none to keep).
+        if !old.looping {
+            let place = |f: usize| (f >= old.trim && f < old.trim + old.len).then(|| f - old.trim);
+            clip.cues = old.cues.iter().filter_map(|q| place(q.frame).map(|frame| Cue { frame, name: q.name.clone() })).collect();
+        }
+        self.tracks[t].clips[c] = clip;
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = format!("Collapsed {} to plain audio", old.name);
+    }
+
+    /// Collapse Track: render all of a track's clips into one audio clip.
+    fn collapse_track(&mut self, t: usize) {
+        let Some(track) = self.tracks.get(t).cloned() else { return };
+        let Some(start) = track.clips.iter().map(|c| c.start).min() else { return };
+        self.push_undo("Collapse Track");
+        let rendered = self.render_track(&track);
+        let audio = rendered.slice(start.min(rendered.frames()), rendered.frames());
+        let name = track.name.clone();
+        self.tracks[t].clips = vec![Clip::new(name.clone(), Arc::new(audio), start)];
+        self.sel_clip = Some((t, 0));
+        self.sel_extra.clear();
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = format!("Collapsed track {name} into one clip");
+    }
+
+    /// Right-click menu for a clip.
+    fn clip_menu(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let is_group = self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.group.is_some());
+        let looping = self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.looping);
+        let pick = |ui: &mut egui::Ui, label: &str, a: Action| {
+            if ui.button(label).clicked() {
+                ui.close();
+                Some(a)
+            } else {
+                None
+            }
+        };
+        let mut chosen = None;
+        chosen = chosen.or(pick(ui, if is_group { "Open Group" } else { "Edit Clip" }, Action::EditClip));
+        ui.separator();
+        chosen = chosen.or(pick(ui, "Cut", Action::Cut));
+        chosen = chosen.or(pick(ui, "Copy", Action::Copy));
+        chosen = chosen.or(pick(ui, "Duplicate", Action::DuplicateClip));
+        chosen = chosen.or(pick(ui, "Delete", Action::Delete));
+        ui.separator();
+        chosen = chosen.or(pick(ui, "Split at Playhead", Action::SplitClip));
+        chosen = chosen.or(pick(ui, if looping { "Stop Looping" } else { "Loop Clip" }, Action::LoopClip));
+        chosen = chosen.or(pick(ui, "Group", Action::GroupClips));
+        if is_group {
+            chosen = chosen.or(pick(ui, "Ungroup", Action::Ungroup));
+        }
+        chosen = chosen.or(pick(ui, "Collapse to Audio", Action::CollapseClip));
+        ui.separator();
+        chosen = chosen.or(pick(ui, "Set Tempo from Clip", Action::TempoFromClip));
+        if let Some(a) = chosen {
+            self.run(a, ctx);
+        }
+    }
+
+    /// Right-click menu for a track.
+    fn track_menu(&mut self, ui: &mut egui::Ui, t: usize, ctx: &egui::Context) {
+        self.set_active(t);
+        let Some(track) = self.tracks.get(t) else { return };
+        let (mute, solo, has_clips) = (track.mute, track.solo, !track.clips.is_empty());
+        let mut chosen = None;
+        let mut collapse = false;
+        let item = |ui: &mut egui::Ui, label: &str, enabled: bool| {
+            let clicked = ui.add_enabled(enabled, Button::new(label)).clicked();
+            if clicked {
+                ui.close();
+            }
+            clicked
+        };
+        if item(ui, "New Track", true) {
+            chosen = Some(Action::NewTrack);
+        }
+        if item(ui, "Duplicate Track", true) {
+            chosen = Some(Action::DuplicateTrack);
+        }
+        if item(ui, "Delete Track", self.tracks.len() > 1) {
+            chosen = Some(Action::DeleteTrack);
+        }
+        ui.separator();
+        if item(ui, if mute { "Unmute" } else { "Mute" }, true) {
+            chosen = Some(Action::MuteTrack);
+        }
+        if item(ui, if solo { "Unsolo" } else { "Solo" }, true) {
+            chosen = Some(Action::SoloTrack);
+        }
+        if item(ui, "Next Colour", true) {
+            chosen = Some(Action::TrackColor);
+        }
+        ui.separator();
+        if item(ui, "Collapse Track to One Clip", has_clips) {
+            collapse = true;
+        }
+        if item(ui, "Import File as Clip…", true) {
+            chosen = Some(Action::ImportClip);
+        }
+        if let Some(a) = chosen {
+            self.run(a, ctx);
+        }
+        if collapse {
+            self.collapse_track(t);
+        }
     }
 
     /// Timeline span covered by the selected clips.
@@ -2424,7 +2543,8 @@ impl App {
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
                 Action::SplitClip => doc,
                 Action::ToolSelect | Action::ToolSplit => true,
-                Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop => has_clip,
+                Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop | Action::CollapseClip => has_clip,
+                Action::CollapseTrack => self.tracks.get(self.active).is_some_and(|t| !t.clips.is_empty()),
                 Action::ClearLoop => self.arr_loop.is_some(),
                 Action::ToggleSnap => doc,
                 Action::Ungroup => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.group.is_some()),
@@ -2445,6 +2565,7 @@ impl App {
             Action::SaveProject | Action::SaveProjectAs => return doc,
             Action::EditClip | Action::SplitClip | Action::DuplicateClip | Action::NewClip | Action::ImportClip => return false,
             Action::GroupClips | Action::Ungroup | Action::TempoFromClip | Action::ToggleSnap | Action::LoopClip => return false,
+            Action::CollapseClip | Action::CollapseTrack => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
             Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack => return false,
             _ => {}
@@ -2708,6 +2829,8 @@ impl App {
             Action::GroupClips => self.group_clips(),
             Action::TempoFromClip => self.tempo_from_clip(),
             Action::LoopClip => self.toggle_clip_loop(),
+            Action::CollapseClip => self.collapse_clip(),
+            Action::CollapseTrack => self.collapse_track(self.active),
             Action::ToggleSnap => self.snap = !self.snap,
             Action::SaveProject => {
                 self.save_project(false);
@@ -4475,6 +4598,8 @@ impl App {
             if bg.clicked() {
                 activate = Some(ti);
             }
+            let ctx = ui.ctx().clone();
+            bg.context_menu(|ui| self.track_menu(ui, ti, &ctx));
             let inner = r.shrink2(Vec2::new(10.0, 6.0));
             ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
@@ -4978,6 +5103,34 @@ impl App {
             self.dirty = true;
             self.refresh_playback();
         }
+        // Right-click: select what's under the pointer, then show its menu.
+        if resp.secondary_clicked() {
+            if let Some(q) = resp.interact_pointer_pos() {
+                match hit(&self.tracks, q, vs, vl) {
+                    Some((t, c, _)) => {
+                        if !self.selected_clips().contains(&(t, c)) {
+                            self.sel_clip = Some((t, c));
+                            self.sel_extra.clear();
+                        }
+                        self.active = t;
+                        self.ctx_menu_track = None;
+                    }
+                    None => {
+                        self.sel_clip = None;
+                        let t = (((q.y - lanes.top()) / lane_h).max(0.0) as usize).min(self.tracks.len().saturating_sub(1));
+                        self.ctx_menu_track = Some(t);
+                    }
+                }
+            }
+        }
+        let ctx = ui.ctx().clone();
+        resp.context_menu(|ui| {
+            match self.ctx_menu_track {
+                Some(t) => self.track_menu(ui, t, &ctx),
+                None if self.sel_clip.is_some() => self.clip_menu(ui, &ctx),
+                None => {}
+            }
+        });
         if split_tool {
             // Handled above.
         } else if resp.double_clicked() {
