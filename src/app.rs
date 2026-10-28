@@ -87,6 +87,8 @@ struct ClipDrag {
     /// Pointer position minus clip start when the drag began (for moves).
     grab: i64,
     orig: Clip,
+    /// A track made by dragging the clip below the others (removed again if the clip leaves it).
+    new_track: Option<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -4681,7 +4683,7 @@ impl App {
                     }
                     let orig = self.tracks[t].clips[c].clone();
                     let grab = x_to_f(q.x, vs, vl) as i64 - orig.start as i64;
-                    self.clip_drag = Some(ClipDrag { track: t, clip: c, mode, grab, orig });
+                    self.clip_drag = Some(ClipDrag { track: t, clip: c, mode, grab, orig, new_track: None });
                     self.sel_extra.clear();
                     self.sel_clip = Some((t, c));
                     self.active = t;
@@ -4728,10 +4730,26 @@ impl App {
                         // With the grid on, the clip's start lands on the grid; otherwise use
                         // whichever edge snapped closer.
                         let start = if grid.is_some() && !no_snap { s1 } else if (s1 - raw).abs() <= (s2 - raw).abs() && s1 != raw { s1 } else if s2 != raw { s2 } else { raw };
-                        let target = (((q.y - lanes.top()) / lane_h).max(0.0) as usize).min(self.tracks.len() - 1);
+                        let row = ((q.y - lanes.top()) / lane_h).max(0.0) as usize;
+                        // Below the last track: give the clip a new track of its own (as in Ableton).
+                        let target = match d.new_track {
+                            Some(nt) if row >= nt => nt,
+                            None if row >= self.tracks.len() && q.y < lanes.bottom() => {
+                                let n = (1..).find(|i| !self.tracks.iter().any(|t| t.name == format!("Track {i}"))).unwrap();
+                                self.tracks.push(Track::new(format!("Track {n}")));
+                                d.new_track = Some(self.tracks.len() - 1);
+                                self.tracks.len() - 1
+                            }
+                            _ => row.min(self.tracks.len() - 1),
+                        };
                         let mut clip = self.tracks[d.track].clips.remove(d.clip);
                         clip.start = start.max(0.0) as usize;
                         self.tracks[target].clips.push(clip);
+                        // Dragged back up out of the track it made: take that track away again.
+                        if let Some(nt) = d.new_track.filter(|&nt| nt != target && self.tracks[nt].clips.is_empty() && nt == self.tracks.len() - 1) {
+                            self.tracks.remove(nt);
+                            d.new_track = None;
+                        }
                         d.track = target;
                         d.clip = self.tracks[target].clips.len() - 1;
                         self.sel_clip = Some((d.track, d.clip));
