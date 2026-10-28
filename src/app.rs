@@ -156,8 +156,65 @@ enum Mangle {
     Stutter,
     RandomReverse,
     DropOut,
-    /// Breakbeat cutting in the style of Nick Collins' BBCut.
-    BBCut,
+    /// Breakbeat cutting in the style of Nick Collins' BBCut, in one of several rhythms.
+    Cut(CutStyle),
+}
+
+/// Rhythms the BBCut-style cutter knows.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum CutStyle {
+    Jungle,
+    House,
+    HipHop,
+    Dembow,
+    Footwork,
+    Trap,
+    Breakcore,
+    Halftime,
+}
+
+/// How a cut style behaves. Lengths are in units of `unit` beats.
+struct CutRules {
+    unit: f64,
+    /// Block sizes with their weights (when there's no fixed pattern).
+    sizes: &'static [(usize, f64)],
+    /// Block sizes repeated through each bar instead (e.g. 3+3+2).
+    pattern: &'static [usize],
+    /// Chance a block plays another part of the loop.
+    jump: f64,
+    /// Chance a block becomes a roll; with `fills`, only a bar's last block can.
+    roll: f64,
+    fills: bool,
+    /// First repeat lengths to pick from, how each stage of the roll shrinks (1 = steady), shortest repeat.
+    roll_pieces: &'static [f64],
+    roll_ratio: f64,
+    min_piece: f64,
+    /// Chance a block plays backwards.
+    reverse: f64,
+}
+
+impl CutStyle {
+    fn rules(self) -> CutRules {
+        let base = CutRules { unit: 0.5, sizes: &[], pattern: &[], jump: 0.3, roll: 0.2, fills: false, roll_pieces: &[1.0], roll_ratio: 0.5, min_piece: 0.25, reverse: 0.0 };
+        match self {
+            // Eighths in 3+3+2-ish blocks, jumps and accelerating rolls.
+            CutStyle::Jungle => CutRules { sizes: &[(3, 0.6), (2, 0.3), (4, 0.1)], jump: 0.4, roll: 0.3, roll_pieces: &[1.0, 0.5], ..base },
+            // Straight quarter-note blocks, few jumps, a roll as a fill at the end of a bar.
+            CutStyle::House => CutRules { pattern: &[2], jump: 0.15, roll: 0.5, fills: true, roll_pieces: &[0.5], ..base },
+            // Beat and two-beat chops shuffled around, the odd repeated chop.
+            CutStyle::HipHop => CutRules { sizes: &[(2, 0.5), (4, 0.4), (1, 0.1)], jump: 0.5, roll: 0.1, roll_pieces: &[1.0], roll_ratio: 1.0, min_piece: 1.0, reverse: 0.05, ..base },
+            // Sixteenths in the 3+3+2 tresillo of reggaeton.
+            CutStyle::Dembow => CutRules { unit: 0.25, pattern: &[3, 3, 2], jump: 0.2, roll: 0.15, roll_pieces: &[1.0], min_piece: 0.5, ..base },
+            // Sixteenths in threes against the four, busy rolls.
+            CutStyle::Footwork => CutRules { unit: 0.25, pattern: &[3, 3, 3, 3, 2, 2], jump: 0.35, roll: 0.35, roll_pieces: &[1.0], min_piece: 0.5, ..base },
+            // Sixteenth blocks with steady triplet rolls, like trap hats.
+            CutStyle::Trap => CutRules { unit: 0.25, sizes: &[(4, 0.5), (2, 0.3), (8, 0.2)], jump: 0.25, roll: 0.45, roll_pieces: &[2.0 / 3.0, 1.0 / 3.0], roll_ratio: 1.0, min_piece: 1.0 / 3.0, ..base },
+            // Everything, everywhere: small blocks, lots of jumps, rolls and reversals.
+            CutStyle::Breakcore => CutRules { unit: 0.25, sizes: &[(1, 0.3), (2, 0.35), (3, 0.2), (4, 0.15)], jump: 0.7, roll: 0.45, min_piece: 0.25, reverse: 0.15, ..base },
+            // Long half-time blocks, sparse fills.
+            CutStyle::Halftime => CutRules { sizes: &[(4, 0.6), (2, 0.3), (6, 0.1)], jump: 0.3, roll: 0.4, fills: true, reverse: 0.05, ..base },
+        }
+    }
 }
 
 /// One level up from the arrangement being shown: the parent's tracks, and which of its clips
@@ -1457,10 +1514,23 @@ impl App {
                 ("Stutter", Action::MangleStutter),
                 ("Random Reverse", Action::MangleRandomReverse),
                 ("Drop Out", Action::MangleDropOut),
-                ("BBCut", Action::MangleBBCut),
             ] {
                 chosen = chosen.or(pick(ui, label, a));
             }
+            ui.menu_button("BBCut", |ui| {
+                for (label, a) in [
+                    ("Jungle", Action::MangleBBCut),
+                    ("House", Action::MangleCutHouse),
+                    ("Hip-Hop", Action::MangleCutHipHop),
+                    ("Dembow", Action::MangleCutDembow),
+                    ("Footwork", Action::MangleCutFootwork),
+                    ("Trap", Action::MangleCutTrap),
+                    ("Breakcore", Action::MangleCutBreakcore),
+                    ("Halftime", Action::MangleCutHalftime),
+                ] {
+                    chosen = chosen.or(pick(ui, label, a));
+                }
+            });
         });
         chosen = chosen.or(pick(ui, if looping { "Stop Looping" } else { "Loop Clip" }, Action::LoopClip));
         chosen = chosen.or(pick(ui, if warped { "Original Speed" } else { "Warp to Tempo" }, Action::WarpClip));
@@ -1938,9 +2008,10 @@ impl App {
     /// Mangle ▸ BBCut: re-cut the selection (per track) as a breakbeat cutter does. Each bar is
     /// split into blocks of eighths (mostly 3+3+2), each block plays either its own spot or another
     /// spot of the loop, and some blocks become stutter rolls of shorter and shorter repeats.
-    fn bbcut(&mut self, sel: Vec<(usize, usize)>) {
+    fn bbcut(&mut self, sel: Vec<(usize, usize)>, style: CutStyle) {
         self.push_undo("Mangle");
-        self.last_mangle = Some(Mangle::BBCut);
+        self.last_mangle = Some(Mangle::Cut(style));
+        let rules = style.rules();
         let mut rng = self.mangle_seed;
         let mut rand = move || {
             rng ^= rng >> 12;
@@ -1948,8 +2019,9 @@ impl App {
             rng ^= rng >> 27;
             (rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64
         };
-        let unit = self.beat_frames() / 2.0;
-        let bar_units = (self.beats_per_bar as usize * 2).max(2);
+        let unit = self.beat_frames() * rules.unit;
+        let bar_units = ((self.beats_per_bar as f64 / rules.unit).round() as usize).max(2);
+        let min_size = rules.pattern.iter().chain(rules.sizes.iter().map(|s| &s.0)).copied().min().unwrap_or(1);
         let mut tracks: Vec<usize> = sel.iter().map(|p| p.0).collect();
         tracks.dedup();
         let mut new_sel = Vec::new();
@@ -1959,60 +2031,74 @@ impl App {
             let lo = picked.iter().map(|c| c.start).min().unwrap_or(0);
             let hi = picked.iter().map(|c| c.end()).max().unwrap_or(0);
             let name = picked.first().map_or("Cut".to_string(), |c| c.name.clone());
-            // The selection as one piece of audio, which every cut reads from.
+            // The selection as one piece of audio (and backwards), which every cut reads from.
             let mut tmp = Track::new("tmp");
-            tmp.clips = picked.into_iter().map(|mut c| {
-                c.start -= lo;
-                c
-            }).collect();
+            tmp.clips = picked
+                .into_iter()
+                .map(|mut c| {
+                    c.start -= lo;
+                    c
+                })
+                .collect();
             let src = self.render_track(&tmp);
-            let len = hi - lo;
-            let total_units = ((len as f64 / unit).round() as usize).max(1);
             if src.frames() == 0 {
                 continue;
             }
+            let total_units = (((hi - lo) as f64 / unit).round() as usize).max(1);
+            let rev = Arc::new(Audio { rate: src.rate, channels: src.channels.iter().map(|c| c.iter().rev().copied().collect()).collect() });
             let src = Arc::new(src);
-            let peaks = Arc::new(Peaks::build(&src));
+            let (peaks, rev_peaks) = (Arc::new(Peaks::build(&src)), Arc::new(Peaks::build(&rev)));
             let frame = |u: f64| (u * unit).round() as usize;
-            // Plan the cuts: (position in units, length in units, source position in units).
-            let mut cuts: Vec<(f64, f64, f64)> = Vec::new();
+            // Plan the cuts: (position, length, source position, backwards), in units.
+            let mut cuts: Vec<(f64, f64, f64, bool)> = Vec::new();
             let mut bar = 0;
             while bar * bar_units < total_units {
                 let bar_end = ((bar + 1) * bar_units).min(total_units);
                 let mut pos = bar * bar_units;
+                let mut k = 0;
                 while pos < bar_end {
                     let left = bar_end - pos;
-                    let r = rand();
-                    let mut size = if r < 0.6 { 3 } else if r < 0.9 { 2 } else { 4 };
-                    // Keep the classic 3+3+2: don't leave a lone eighth at the end of the bar.
-                    if size >= left || left - size == 1 {
-                        size = if left <= 4 { left } else { 2 };
+                    let mut size = if !rules.pattern.is_empty() {
+                        rules.pattern[k % rules.pattern.len()]
+                    } else {
+                        let total: f64 = rules.sizes.iter().map(|s| s.1).sum();
+                        let mut r = rand() * total;
+                        rules.sizes.iter().find(|s| {
+                            r -= s.1;
+                            r <= 0.0
+                        }).map_or(rules.sizes[0].0, |s| s.0)
+                    };
+                    // Don't leave a scrap smaller than the smallest block at the end of the bar.
+                    if size >= left || left - size < min_size {
+                        size = left;
                     }
-                    // Mostly play this spot of the loop; sometimes jump to another.
-                    let from = if rand() < 0.6 || total_units <= size {
+                    k += 1;
+                    let last = pos + size >= bar_end;
+                    let from = if rand() >= rules.jump || total_units <= size {
                         pos
                     } else {
                         (rand() * (total_units - size + 1) as f64) as usize
                     };
-                    if rand() < 0.3 && size >= 2 {
-                        // A roll: repeats of the block's start, each half as long as the last.
+                    let backwards = rand() < rules.reverse;
+                    if (!rules.fills || last) && rand() < rules.roll && size >= 1 {
+                        // A roll: repeats of the block's start, shrinking stage by stage.
                         let mut p = pos as f64;
                         let end = (pos + size) as f64;
-                        let mut piece = if rand() < 0.5 { 1.0 } else { 0.5 };
+                        let mut piece = rules.roll_pieces[(rand() * rules.roll_pieces.len() as f64) as usize % rules.roll_pieces.len()];
                         while p < end - 1e-9 {
-                            let reps = ((end - p) / piece / 2.0).ceil().max(1.0) as usize;
+                            let reps = if rules.roll_ratio >= 1.0 { usize::MAX } else { ((end - p) / piece / 2.0).ceil().max(1.0) as usize };
                             for _ in 0..reps {
                                 if p >= end - 1e-9 {
                                     break;
                                 }
                                 let l = piece.min(end - p);
-                                cuts.push((p, l, from as f64));
+                                cuts.push((p, l, from as f64, backwards));
                                 p += l;
                             }
-                            piece = (piece / 2.0).max(0.25);
+                            piece = (piece * rules.roll_ratio).max(rules.min_piece);
                         }
                     } else {
-                        cuts.push((pos as f64, size as f64, from as f64));
+                        cuts.push((pos as f64, size as f64, from as f64, backwards));
                     }
                     pos += size;
                 }
@@ -2024,15 +2110,18 @@ impl App {
             for i in desc {
                 self.tracks[t].clips.remove(i);
             }
-            for (p, l, from) in cuts {
+            let n_src = src.frames();
+            for (p, l, from, backwards) in cuts {
                 let start = lo + frame(p);
-                let trim = frame(from).min(src.frames().saturating_sub(1));
-                let n = (frame(p + l).saturating_sub(frame(p))).min(src.frames() - trim).min(hi.saturating_sub(start));
+                let f0 = frame(from).min(n_src.saturating_sub(1));
+                let n = frame(p + l).saturating_sub(frame(p)).min(n_src - f0).min(hi.saturating_sub(start));
                 if n == 0 {
                     continue;
                 }
-                let mut c = Clip::new(name.clone(), src.clone(), start);
-                c.peaks = peaks.clone();
+                // Backwards: the same stretch of audio, read from the reversed copy.
+                let (audio, pk, trim) = if backwards { (rev.clone(), rev_peaks.clone(), n_src - (f0 + n)) } else { (src.clone(), peaks.clone(), f0) };
+                let mut c = Clip::new(name.clone(), audio, start);
+                c.peaks = pk;
                 c.trim = trim;
                 c.len = n;
                 self.tracks[t].clips.push(c);
@@ -2044,7 +2133,7 @@ impl App {
         self.sel_extra = new_sel.iter().skip(1).copied().collect();
         self.dirty = true;
         self.refresh_playback();
-        self.status = format!("BBCut: {} cuts (⌘Y cuts again)", new_sel.len());
+        self.status = format!("BBCut {style:?}: {} cuts (⌘Y cuts again)", new_sel.len());
     }
 
     /// Clip ▸ Mangle: rearrange the selected clips in the slots they sit in (a single clip is
@@ -2054,8 +2143,8 @@ impl App {
         if sel.is_empty() {
             return;
         }
-        if how == Mangle::BBCut {
-            return self.bbcut(sel);
+        if let Mangle::Cut(style) = how {
+            return self.bbcut(sel, style);
         }
         self.push_undo("Mangle");
         if sel.len() == 1 {
@@ -2134,7 +2223,7 @@ impl App {
                         }
                     }
                 }
-                Mangle::BBCut => {}
+                Mangle::Cut(_) => {}
                 Mangle::DropOut => {
                     let mut drop: Vec<bool> = (0..n).map(|_| rand() < 0.25).collect();
                     if n > 1 && !drop.contains(&true) {
@@ -3195,6 +3284,7 @@ impl App {
                 Action::ToolSelect | Action::ToolSplit => true,
                 Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop | Action::CollapseClip | Action::WarpClip | Action::SliceClip | Action::ReverseClip => has_clip,
                 Action::MangleShuffle | Action::MangleReverse | Action::MangleSwap | Action::MangleStutter | Action::MangleRandomReverse | Action::MangleDropOut | Action::MangleBBCut => has_clip,
+                Action::MangleCutHouse | Action::MangleCutHipHop | Action::MangleCutDembow | Action::MangleCutFootwork | Action::MangleCutTrap | Action::MangleCutBreakcore | Action::MangleCutHalftime => has_clip,
                 Action::MangleAgain => has_clip && self.last_mangle.is_some(),
                 Action::AutoWarp => true,
                 Action::CollapseTrack => self.tracks.get(self.active).is_some_and(|t| !t.clips.is_empty()),
@@ -3220,6 +3310,7 @@ impl App {
             Action::GroupClips | Action::Ungroup | Action::TempoFromClip | Action::ToggleSnap | Action::LoopClip => return false,
             Action::CollapseClip | Action::CollapseTrack | Action::WarpClip | Action::SliceClip | Action::ReverseClip => return false,
             Action::MangleShuffle | Action::MangleReverse | Action::MangleSwap | Action::MangleStutter | Action::MangleRandomReverse | Action::MangleDropOut | Action::MangleBBCut | Action::MangleAgain => return false,
+            Action::MangleCutHouse | Action::MangleCutHipHop | Action::MangleCutDembow | Action::MangleCutFootwork | Action::MangleCutTrap | Action::MangleCutBreakcore | Action::MangleCutHalftime => return false,
             Action::AutoWarp => return true,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
             Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack => return false,
@@ -3499,7 +3590,14 @@ impl App {
             Action::MangleStutter => self.mangle(Mangle::Stutter),
             Action::MangleRandomReverse => self.mangle(Mangle::RandomReverse),
             Action::MangleDropOut => self.mangle(Mangle::DropOut),
-            Action::MangleBBCut => self.mangle(Mangle::BBCut),
+            Action::MangleBBCut => self.mangle(Mangle::Cut(CutStyle::Jungle)),
+            Action::MangleCutHouse => self.mangle(Mangle::Cut(CutStyle::House)),
+            Action::MangleCutHipHop => self.mangle(Mangle::Cut(CutStyle::HipHop)),
+            Action::MangleCutDembow => self.mangle(Mangle::Cut(CutStyle::Dembow)),
+            Action::MangleCutFootwork => self.mangle(Mangle::Cut(CutStyle::Footwork)),
+            Action::MangleCutTrap => self.mangle(Mangle::Cut(CutStyle::Trap)),
+            Action::MangleCutBreakcore => self.mangle(Mangle::Cut(CutStyle::Breakcore)),
+            Action::MangleCutHalftime => self.mangle(Mangle::Cut(CutStyle::Halftime)),
             Action::MangleAgain => {
                 if let Some(m) = self.last_mangle {
                     self.mangle(m);
