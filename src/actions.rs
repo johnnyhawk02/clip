@@ -52,6 +52,7 @@ pub enum Action {
     ZoomSel,
     ZoomFit,
     ZoomBack,
+    Crossfeed,
     NarrowGrid,
     WidenGrid,
     ToolSelect,
@@ -153,7 +154,7 @@ pub const ALL: &[Action] = &[
     Cut, Copy, Paste, MixPaste, Delete, SelectAll, SelectNone, Trim, Silence, InsertSilence,
     InsertTone, InsertNoise, InsertDtmf, FadeIn, FadeOut, Normalize, Gain, Reverse, Echo, Reverb, Flanger,
     Smooth, NoiseGate, Pitch, Tempo, Speed, ToMono, Split, PlayPause, Stop, Loop, GoStart, GoEnd,
-    ZoomIn, ZoomOut, ZoomSel, ZoomFit, ZoomBack, NarrowGrid, WidenGrid, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
+    ZoomIn, ZoomOut, ZoomSel, ZoomFit, ZoomBack, Crossfeed, NarrowGrid, WidenGrid, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
     ShowControls, ShowInfo, Convert, Equalizer, Envelope, Bender, Record, AddCue, NextCue, PrevCue,
     ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, SoloTrack, NextTrack,
     PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions, Dither, CutGaps,
@@ -236,7 +237,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(CollapseTrack),
         ],
     ),
-    ("Control", &[Do(PlayPause), Do(Stop), Do(Loop), Separator, Do(GoStart), Do(GoEnd)]),
+    ("Control", &[Do(PlayPause), Do(Stop), Do(Loop), Separator, Do(GoStart), Do(GoEnd), Separator, Do(Crossfeed)]),
     ("View", &[Do(ZoomIn), Do(ZoomOut), Do(ZoomSel), Do(ZoomBack), Do(ZoomFit), Separator, Do(ToolSelect), Do(ToolSplit)]),
     // Everything from the sound-editor days, out of the way.
     (
@@ -321,7 +322,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | ShowPool | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
+            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | ShowPool | Crossfeed | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
     }
 
     pub fn label(self) -> &'static str {
@@ -407,6 +408,7 @@ impl Action {
             ZoomSel => "Zoom to Selection",
             ZoomFit => "Show Entire Sound",
             ZoomBack => "Zoom Back",
+            Crossfeed => "Headphone Crossfeed",
             NarrowGrid => "Narrow Grid",
             WidenGrid => "Widen Grid",
             ToolSelect => "Selection Tool",
@@ -612,6 +614,7 @@ impl Action {
             Normalize | Gain | Reverse | Echo => "Applies to the selection, or the whole sound if nothing is selected",
             Split => "Save each separate sound as sound01.wav, sound02.wav…",
             ZoomFit => "Show the whole sound",
+            Crossfeed => "On headphones, hear the mix as if from speakers (your CanOpener setting). Playback only, never exports",
             ZoomBack => "Back to the zoom before Zoom to Selection",
             NarrowGrid => "A finer grid",
             WidenGrid => "A coarser grid",

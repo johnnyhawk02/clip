@@ -4,6 +4,7 @@ mod ableton;
 mod actions;
 mod app;
 mod audio;
+mod crossfeed;
 mod effects;
 mod menu;
 mod player;

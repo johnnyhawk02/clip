@@ -248,6 +248,8 @@ pub struct App {
     show_pool: bool,
     /// The view before Zoom to Selection, for Zoom Back (in the arrangement or the editor).
     zoom_back: Option<(bool, f64, f64)>,
+    /// Headphone crossfeed on playback, remembered between runs.
+    crossfeed: bool,
     ruler: RulerUnits,
     show_spectrum: bool,
     spectrum_3d: bool,
@@ -287,10 +289,17 @@ pub struct App {
     place_until: HashMap<&'static str, u64>,
 }
 
+/// A file whose presence means Headphone Crossfeed was left on.
+fn crossfeed_pref() -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    home.join("Library/Application Support/Sound Edit/crossfeed-on")
+}
+
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>) -> App {
         clean_style(&cc.egui_ctx);
         let player = Player::new();
+        player.set_crossfeed(crossfeed_pref().exists());
         let status = match &player.error {
             Some(e) => format!("Audio output unavailable: {e}"),
             None => "Drop an audio file here, or press ⌘O to open one.".into(),
@@ -374,6 +383,7 @@ impl App {
             show_regions: false,
             show_pool: false,
             zoom_back: None,
+            crossfeed: crossfeed_pref().exists(),
             ruler: RulerUnits::Time,
             show_spectrum: false,
             spectrum_3d: false,
@@ -894,7 +904,7 @@ impl App {
                 Action::New | Action::Open | Action::Quit | Action::BatchConvert | Action::Record | Action::NewClip | Action::ImportClip => true,
                 Action::SaveProject | Action::SaveProjectAs => doc,
                 Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Dither | Action::AutoGain => true,
-                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool => true,
+                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed => true,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
                 Action::Export | Action::ExportStems | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
@@ -947,7 +957,7 @@ impl App {
         let not_empty = self.frames() > 0;
         match a {
             Action::New | Action::Open | Action::Quit => true,
-            Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop => true,
+            Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop | Action::Crossfeed => true,
             Action::ShowCues | Action::Record => true,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack | Action::SoloTrack => has,
             Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack | Action::MixDialog => has && self.tracks.len() > 1,
@@ -1007,6 +1017,7 @@ impl App {
             Action::ShowSpectrum => self.show_spectrum,
             Action::ShowRegions => self.show_regions,
             Action::ShowPool => self.show_pool,
+            Action::Crossfeed => self.crossfeed,
             Action::ToggleSnap => self.snap,
             Action::AutoWarp => self.auto_warp,
             Action::WarpClip => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.warp.is_some()),
@@ -1237,6 +1248,17 @@ impl App {
             Action::CollapseClip => self.collapse_clip(),
             Action::CollapseTrack => self.collapse_track(self.active),
             Action::ToggleSnap => self.snap = !self.snap,
+            Action::Crossfeed => {
+                self.crossfeed = !self.crossfeed;
+                self.player.set_crossfeed(self.crossfeed);
+                let pref = crossfeed_pref();
+                let _ = if self.crossfeed {
+                    std::fs::create_dir_all(pref.parent().unwrap()).and_then(|_| std::fs::write(&pref, b""))
+                } else {
+                    std::fs::remove_file(&pref)
+                };
+                self.status = if self.crossfeed { "Headphone crossfeed on (playback only)".into() } else { "Headphone crossfeed off".into() };
+            }
             Action::NarrowGrid | Action::WidenGrid => {
                 // Steps through 1 Bar … 1/32; from Off or Auto it starts at 1/4.
                 self.grid = match (self.grid, a == Action::NarrowGrid) {

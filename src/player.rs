@@ -7,6 +7,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
 
 use crate::audio::Audio;
+use crate::crossfeed::Crossfeed;
 
 pub struct Shared {
     pub audio: Arc<Audio>,
@@ -16,6 +17,8 @@ pub struct Shared {
     pub end: usize,
     pub playing: bool,
     pub looping: bool,
+    /// Headphone crossfeed on what's heard.
+    pub crossfeed: bool,
 }
 
 pub struct Player {
@@ -33,6 +36,7 @@ impl Player {
             end: 0,
             playing: false,
             looping: false,
+            crossfeed: false,
         }));
         match build_stream(shared.clone()) {
             Ok(stream) => {
@@ -76,6 +80,10 @@ impl Player {
         self.shared.lock().unwrap().looping = looping;
     }
 
+    pub fn set_crossfeed(&self, on: bool) {
+        self.shared.lock().unwrap().crossfeed = on;
+    }
+
     pub fn is_playing(&self) -> bool {
         self.shared.lock().unwrap().playing
     }
@@ -113,6 +121,7 @@ where
 {
     let out_ch = config.channels as usize;
     let out_rate = config.sample_rate as f64;
+    let mut xfeed = Crossfeed::new(out_rate);
     device
         .build_output_stream(
             config,
@@ -123,8 +132,10 @@ where
                     return;
                 };
                 let step = s.audio.rate as f64 / out_rate;
+                let crossfeed = s.crossfeed && out_ch >= 2;
                 for frame in data.chunks_mut(out_ch) {
                     if !s.playing {
+                        xfeed.reset();
                         frame.fill(T::from_sample(0.0));
                         continue;
                     }
@@ -144,12 +155,20 @@ where
                     let last = audio.frames().saturating_sub(1);
                     let i1 = (i0 + 1).min(last);
                     let n_src = audio.num_channels();
-                    for (c, out) in frame.iter_mut().enumerate() {
-                        let v = if n_src == 0 || i0 > last {
+                    let sample = |c: usize| {
+                        if n_src == 0 || i0 > last {
                             0.0
                         } else {
                             let ch = &audio.channels[c.min(n_src - 1)];
                             ch[i0] * (1.0 - t) + ch[i1] * t
+                        }
+                    };
+                    let heard = if crossfeed { Some(xfeed.process(sample(0), sample(1))) } else { None };
+                    for (c, out) in frame.iter_mut().enumerate() {
+                        let v = match (heard, c) {
+                            (Some((l, _)), 0) => l,
+                            (Some((_, r)), 1) => r,
+                            _ => sample(c),
                         };
                         *out = T::from_sample(v.clamp(-1.0, 1.0));
                     }
