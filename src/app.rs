@@ -1404,6 +1404,7 @@ impl App {
         ui.separator();
         chosen = chosen.or(pick(ui, "Split Here", Action::SplitClip));
         chosen = chosen.or(pick(ui, "Slice at Grid", Action::SliceClip));
+        chosen = chosen.or(pick(ui, "Reverse", Action::ReverseClip));
         chosen = chosen.or(pick(ui, if looping { "Stop Looping" } else { "Loop Clip" }, Action::LoopClip));
         chosen = chosen.or(pick(ui, if warped { "Original Speed" } else { "Warp to Tempo" }, Action::WarpClip));
         chosen = chosen.or(pick(ui, "Group", Action::GroupClips));
@@ -1812,6 +1813,45 @@ impl App {
             return;
         };
         self.split_clip_at((t, c), at);
+    }
+
+    /// Clip ▸ Reverse Clip: play the selected clips backwards. The audio underneath is reversed
+    /// too, so trimmed edges can still be dragged back out (a loop or group becomes plain audio).
+    fn reverse_clips(&mut self) {
+        let sel = self.selected_clips();
+        if sel.is_empty() {
+            return;
+        }
+        self.push_undo("Reverse Clip");
+        let rev = |a: &Audio| Audio { rate: a.rate, channels: a.channels.iter().map(|c| c.iter().rev().copied().collect()).collect() };
+        for (t, c) in sel {
+            let Some(clip) = self.tracks.get_mut(t).and_then(|t| t.clips.get_mut(c)) else { continue };
+            if clip.looping || clip.group.is_some() {
+                let mut plain = Clip::new(clip.name.clone(), Arc::new(rev(&clip.visible())), clip.start);
+                plain.warp = None;
+                *clip = plain;
+                continue;
+            }
+            let n = clip.audio.frames();
+            let end = (clip.trim + clip.len).min(n);
+            clip.audio = Arc::new(rev(&clip.audio));
+            clip.peaks = Arc::new(Peaks::build(&clip.audio));
+            if let Some(w) = clip.warp.as_mut() {
+                w.source = Arc::new(rev(&w.source));
+            }
+            clip.trim = n - end;
+            let m = |f: usize| n - f.min(n);
+            clip.loop_points = clip.loop_points.map(|(s, e)| (m(e), m(s)));
+            for q in &mut clip.cues {
+                q.frame = m(q.frame);
+            }
+            for g in &mut clip.regions {
+                (g.start, g.end) = (m(g.end), m(g.start));
+            }
+        }
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = "Reversed".into();
     }
 
     /// Clip ▸ Slice at Grid: cut the selected clips at every grid line inside them (every beat
@@ -2872,7 +2912,7 @@ impl App {
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
                 Action::SplitClip => doc,
                 Action::ToolSelect | Action::ToolSplit => true,
-                Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop | Action::CollapseClip | Action::WarpClip | Action::SliceClip => has_clip,
+                Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop | Action::CollapseClip | Action::WarpClip | Action::SliceClip | Action::ReverseClip => has_clip,
                 Action::AutoWarp => true,
                 Action::CollapseTrack => self.tracks.get(self.active).is_some_and(|t| !t.clips.is_empty()),
                 Action::ClearLoop => self.arr_loop.is_some(),
@@ -2895,7 +2935,7 @@ impl App {
             Action::SaveProject | Action::SaveProjectAs => return doc,
             Action::EditClip | Action::SplitClip | Action::DuplicateClip | Action::NewClip | Action::ImportClip => return false,
             Action::GroupClips | Action::Ungroup | Action::TempoFromClip | Action::ToggleSnap | Action::LoopClip => return false,
-            Action::CollapseClip | Action::CollapseTrack | Action::WarpClip | Action::SliceClip => return false,
+            Action::CollapseClip | Action::CollapseTrack | Action::WarpClip | Action::SliceClip | Action::ReverseClip => return false,
             Action::AutoWarp => return true,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
             Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack => return false,
@@ -3168,6 +3208,7 @@ impl App {
             Action::AutoWarp => self.auto_warp = !self.auto_warp,
             Action::WarpClip => self.toggle_warp(),
             Action::SliceClip => self.slice_clip(),
+            Action::ReverseClip => self.reverse_clips(),
             Action::SaveProject => {
                 self.save_project(false);
             }

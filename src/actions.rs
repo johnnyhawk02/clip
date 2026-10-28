@@ -114,6 +114,7 @@ pub enum Action {
     WarpClip,
     AutoWarp,
     SliceClip,
+    ReverseClip,
     CollapseClip,
     CollapseTrack,
     ExportStems,
@@ -133,7 +134,7 @@ pub const ALL: &[Action] = &[
     PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions, Dither, CutGaps,
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
     GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
-    ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp, SliceClip,
+    ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp, SliceClip, ReverseClip,
     ExportStems, ExportAbleton,
 ];
 
@@ -172,6 +173,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(SplitClip),
             Do(SliceClip),
             Do(DuplicateClip),
+            Do(ReverseClip),
             Separator,
             Do(LoopClip),
             Do(WarpClip),
@@ -304,6 +306,7 @@ impl Action {
             LoopClip => "Loop Clip",
             WarpClip => "Warp to Tempo",
             SliceClip => "Slice at Grid",
+            ReverseClip => "Reverse Clip",
             AutoWarp => "Warp Loops on Import",
             CollapseClip => "Collapse to Audio",
             CollapseTrack => "Collapse Track to One Clip",
