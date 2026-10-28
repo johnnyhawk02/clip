@@ -770,6 +770,9 @@ pub struct App {
     /// The mangler's random state, and what it did last (for Mangle Again).
     mangle_seed: u64,
     last_mangle: Option<Mangle>,
+    /// Automation: pointer events to feed in, each on its frame (counted in `synth_frame`).
+    synth: Vec<(u32, egui::Event)>,
+    synth_frame: u32,
     /// What the player is playing: the active track alone, or the mix of all tracks.
     play_audio: Option<Arc<Audio>>,
     path: Option<PathBuf>,
@@ -896,6 +899,8 @@ impl App {
             arr_hover: None,
             mangle_seed: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1,
             last_mangle: None,
+            synth: Vec::new(),
+            synth_frame: 0,
             play_audio: None,
             path: None,
             project_path: None,
@@ -6251,8 +6256,22 @@ impl App {
 }
 
 impl eframe::App for App {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if self.synth.is_empty() {
+            return;
+        }
+        self.synth_frame += 1;
+        let now = self.synth_frame;
+        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.synth).into_iter().partition(|(f, _)| *f <= now);
+        self.synth = later;
+        raw_input.events.extend(due.into_iter().map(|(_, e)| e));
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if !self.synth.is_empty() {
+            ctx.request_repaint();
+        }
         self.poll_loading();
         // Warped clips follow the tempo once it's been set (not on every step of a drag).
         if self.view == View::Arrangement && !ui.ctx().input(|i| i.pointer.any_down()) && ui.ctx().memory(|m| m.focused().is_none()) {
@@ -6562,6 +6581,22 @@ impl App {
                     }
                     "spectrum3d" => self.spectrum_3d = true,
                     "tempo" => self.tempo = arg.parse().unwrap_or(self.tempo),
+                    // rclick:x|y and hover:x|y — pointer events at window point (x, y), a few frames apart.
+                    "rclick" | "click" | "hover" => {
+                        let (x, y) = arg.split_once('|').unwrap_or(("0", "0"));
+                        let pos = Pos2::new(x.parse().unwrap_or(0.0), y.parse().unwrap_or(0.0));
+                        let at = self.synth.last().map_or(self.synth_frame, |l| l.0) + 1;
+                        self.synth.push((at, egui::Event::PointerMoved(pos)));
+                        if cmd != "hover" {
+                            let button = if cmd == "rclick" { egui::PointerButton::Secondary } else { egui::PointerButton::Primary };
+                            for (i, pressed) in [(1, true), (2, false)] {
+                                self.synth.push((at + i, egui::Event::PointerButton { pos, button, pressed, modifiers: Modifiers::NONE }));
+                            }
+                        }
+                        // Give menus time to open before the next step.
+                        let last = self.synth.last().unwrap().0;
+                        self.synth.push((last + 8, egui::Event::PointerMoved(pos)));
+                    }
                     "clips" => {
                         for (ti, t) in self.tracks.iter().enumerate() {
                             for c in &t.clips {
@@ -6617,7 +6652,7 @@ impl App {
         if auto.dump_menu && auto.frames_after_load == 10 {
             crate::menu::dump_main_menu();
         }
-        if auto.frames_after_load >= 30 && ctx.input(|i| i.time) > 2.0 && !auto.requested {
+        if auto.frames_after_load >= 30 && ctx.input(|i| i.time) > 2.0 && !auto.requested && self.synth.is_empty() {
             auto.requested = true;
             match auto.snapshot.clone() {
                 Some(path) => {
