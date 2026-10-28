@@ -4247,7 +4247,7 @@ impl App {
                         }
                     }
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Double-click a clip to open it · drag to move · drag edges to trim · shift-click to select several").color(MUTED));
+                    ui.label(egui::RichText::new("Double-click a clip to open it · drag to move (⌥-drag copies) · drag edges to trim · shift-click to select several").color(MUTED));
                     if let Some(levels) = go_up {
                         for _ in 0..levels {
                             self.leave_group();
@@ -4342,15 +4342,29 @@ impl App {
         match (self.clip_drag.as_ref().map(|d| d.mode), hover_hit.map(|h| h.2)) {
             (Some(DragMode::Move), _) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing),
             (Some(_), _) | (None, Some(DragMode::TrimStart | DragMode::TrimEnd)) => ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal),
-            (None, Some(DragMode::Move)) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
+            (None, Some(DragMode::Move)) => {
+                let alt = ui.input(|i| i.modifiers.alt);
+                ui.ctx().set_cursor_icon(if alt { egui::CursorIcon::Copy } else { egui::CursorIcon::Grab });
+            }
             _ => {}
         }
 
         let press = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos());
         if resp.drag_started() {
             if let Some(q) = press {
-                if let Some((t, c, mode)) = hit(&self.tracks, q, vs, vl) {
-                    self.push_undo(if mode == DragMode::Move { "Move Clip" } else { "Trim Clip" });
+                if let Some((t, mut c, mode)) = hit(&self.tracks, q, vs, vl) {
+                    // ⌥-drag leaves the original in place and drags a copy (as in Ableton).
+                    let copy = mode == DragMode::Move && ui.input(|i| i.modifiers.alt);
+                    self.push_undo(match (mode, copy) {
+                        (_, true) => "Duplicate Clip",
+                        (DragMode::Move, _) => "Move Clip",
+                        _ => "Trim Clip",
+                    });
+                    if copy {
+                        let dup = self.tracks[t].clips[c].clone();
+                        self.tracks[t].clips.push(dup);
+                        c = self.tracks[t].clips.len() - 1;
+                    }
                     let orig = self.tracks[t].clips[c].clone();
                     let grab = x_to_f(q.x, vs, vl) as i64 - orig.start as i64;
                     self.clip_drag = Some(ClipDrag { track: t, clip: c, mode, grab, orig });
