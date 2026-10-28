@@ -97,6 +97,12 @@ pub enum Action {
     Dither,
     CutGaps,
     AutoGain,
+    EditClip,
+    BackToArrangement,
+    SplitClip,
+    DuplicateClip,
+    NewClip,
+    ImportClip,
 }
 
 use Action::*;
@@ -110,7 +116,7 @@ pub const ALL: &[Action] = &[
     ShowControls, ShowInfo, Convert, Equalizer, Envelope, Bender, Record, AddCue, NextCue, PrevCue,
     ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, SoloTrack, NextTrack,
     PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions, Dither, CutGaps,
-    AutoGain,
+    AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
 ];
 
 pub enum Item {
@@ -158,6 +164,10 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(Trim),
             Do(Silence),
         ],
+    ),
+    (
+        "Clip",
+        &[Do(NewClip), Do(ImportClip), Separator, Do(EditClip), Do(BackToArrangement), Separator, Do(SplitClip), Do(DuplicateClip)],
     ),
     (
         "Insert",
@@ -371,6 +381,12 @@ impl Action {
             ShowRegions => "Regions",
             Dither => "Dither",
             CutGaps => "Cut Out Gaps…",
+            EditClip => "Edit Clip",
+            BackToArrangement => "Back to Arrangement",
+            SplitClip => "Split Clip at Playhead",
+            DuplicateClip => "Duplicate Clip",
+            NewClip => "New Clip",
+            ImportClip => "Import File as Clip…",
             AutoGain => "Auto Gain (Prevent Clipping)",
         }
     }
@@ -390,7 +406,7 @@ impl Action {
             Paste => "CmdOrCtrl+V",
             MixPaste => "CmdOrCtrl+Alt+V",
             SelectAll => "CmdOrCtrl+A",
-            SelectNone => "CmdOrCtrl+D",
+            SelectNone => "CmdOrCtrl+Shift+A",
             Trim => "CmdOrCtrl+T",
             InsertSilence => "CmdOrCtrl+Shift+I",
             Normalize => "CmdOrCtrl+Shift+N",
@@ -400,7 +416,12 @@ impl Action {
             Loop => "CmdOrCtrl+L",
             ZoomIn => "CmdOrCtrl+Equal",
             ZoomOut => "CmdOrCtrl+Minus",
-            ZoomSel => "CmdOrCtrl+E",
+            ZoomSel => "CmdOrCtrl+Shift+E",
+            SplitClip => "CmdOrCtrl+E",
+            DuplicateClip => "CmdOrCtrl+D",
+            BackToArrangement => "CmdOrCtrl+Enter",
+            NewClip => "CmdOrCtrl+Alt+N",
+            ImportClip => "CmdOrCtrl+Alt+O",
             ZoomFit => "CmdOrCtrl+0",
             ShowTools => "CmdOrCtrl+1",
             ShowControls => "CmdOrCtrl+2",
@@ -436,7 +457,7 @@ impl Action {
             MixPaste => "⌥⌘V",
             Delete => "⌫",
             SelectAll => "⌘A",
-            SelectNone => "⌘D / Esc",
+            SelectNone => "⇧⌘A / Esc",
             Trim => "⌘T",
             Normalize => "⇧⌘N",
             Gain => "⇧⌘G",
@@ -449,7 +470,11 @@ impl Action {
             GoEnd => "End",
             ZoomIn => "⌘=",
             ZoomOut => "⌘-",
-            ZoomSel => "⌘E",
+            ZoomSel => "⇧⌘E",
+            SplitClip => "⌘E",
+            DuplicateClip => "⌘D",
+            BackToArrangement => "⌘Return",
+            EditClip => "Return or double-click",
             ZoomFit => "⌘0",
             ToolSelect => "S",
             ToolHand => "H",

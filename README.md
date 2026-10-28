@@ -14,6 +14,23 @@ Try the files in `samples/`.
 
 ## Using it
 
+**Arrangement and clips (like Ableton's Arrangement view).** A sound is an arrangement of tracks,
+and audio sits on them as clips. Opening a file gives one track with one clip.
+
+- Drag a clip to move it along its track or onto another track; drag its left or right edge to
+  trim it (the audio underneath is kept, so you can drag the edge back out). Moves and trims snap
+  to other clips' edges and the playhead; hold ⌘ to turn snapping off.
+- Click empty space to move the playhead. Space plays the whole arrangement from the playhead.
+- **Double-click a clip (or press Return) to edit it** in the waveform editor below, with every
+  tool and effect. ◀ Arrangement or ⌘Return goes back.
+- Clip menu: New Clip, Import File as Clip (at the playhead), Edit Clip, Split Clip at Playhead
+  (⌘E), Duplicate Clip (⌘D, placed right after). ⌫ deletes the selected clip; ⌘C / ⌘X / ⌘V copy,
+  cut and paste clips (paste goes on the selected track at the playhead). Dropping a file onto
+  the arrangement adds it as a clip.
+- Export writes the mix of all tracks. Cues, regions and loops belong to each clip.
+- Shortcut changes: Select None is now ⇧⌘A and Zoom to Selection is ⇧⌘E.
+
+
 A clean black, white and grey layout: tools on the left, the waveform in the middle, the transport
 bar (play controls, time counter, level meters) along the bottom, and an Info / Cues side panel on
 the right. Window ▸ Tools / Controls / Info / Cues (⌘1 / ⌘2 / ⌘I / ⌘3) shows or hides each part.
