@@ -156,6 +156,8 @@ enum Mangle {
     Stutter,
     RandomReverse,
     DropOut,
+    /// Breakbeat cutting in the style of Nick Collins' BBCut.
+    BBCut,
 }
 
 /// One level up from the arrangement being shown: the parent's tracks, and which of its clips
@@ -1455,6 +1457,7 @@ impl App {
                 ("Stutter", Action::MangleStutter),
                 ("Random Reverse", Action::MangleRandomReverse),
                 ("Drop Out", Action::MangleDropOut),
+                ("BBCut", Action::MangleBBCut),
             ] {
                 chosen = chosen.or(pick(ui, label, a));
             }
@@ -1932,12 +1935,127 @@ impl App {
         }
     }
 
+    /// Mangle ▸ BBCut: re-cut the selection (per track) as a breakbeat cutter does. Each bar is
+    /// split into blocks of eighths (mostly 3+3+2), each block plays either its own spot or another
+    /// spot of the loop, and some blocks become stutter rolls of shorter and shorter repeats.
+    fn bbcut(&mut self, sel: Vec<(usize, usize)>) {
+        self.push_undo("Mangle");
+        self.last_mangle = Some(Mangle::BBCut);
+        let mut rng = self.mangle_seed;
+        let mut rand = move || {
+            rng ^= rng >> 12;
+            rng ^= rng << 25;
+            rng ^= rng >> 27;
+            (rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let unit = self.beat_frames() / 2.0;
+        let bar_units = (self.beats_per_bar as usize * 2).max(2);
+        let mut tracks: Vec<usize> = sel.iter().map(|p| p.0).collect();
+        tracks.dedup();
+        let mut new_sel = Vec::new();
+        for t in tracks {
+            let idx: Vec<usize> = sel.iter().filter(|p| p.0 == t).map(|p| p.1).collect();
+            let picked: Vec<Clip> = idx.iter().map(|&i| self.tracks[t].clips[i].clone()).collect();
+            let lo = picked.iter().map(|c| c.start).min().unwrap_or(0);
+            let hi = picked.iter().map(|c| c.end()).max().unwrap_or(0);
+            let name = picked.first().map_or("Cut".to_string(), |c| c.name.clone());
+            // The selection as one piece of audio, which every cut reads from.
+            let mut tmp = Track::new("tmp");
+            tmp.clips = picked.into_iter().map(|mut c| {
+                c.start -= lo;
+                c
+            }).collect();
+            let src = self.render_track(&tmp);
+            let len = hi - lo;
+            let total_units = ((len as f64 / unit).round() as usize).max(1);
+            if src.frames() == 0 {
+                continue;
+            }
+            let src = Arc::new(src);
+            let peaks = Arc::new(Peaks::build(&src));
+            let frame = |u: f64| (u * unit).round() as usize;
+            // Plan the cuts: (position in units, length in units, source position in units).
+            let mut cuts: Vec<(f64, f64, f64)> = Vec::new();
+            let mut bar = 0;
+            while bar * bar_units < total_units {
+                let bar_end = ((bar + 1) * bar_units).min(total_units);
+                let mut pos = bar * bar_units;
+                while pos < bar_end {
+                    let left = bar_end - pos;
+                    let r = rand();
+                    let mut size = if r < 0.6 { 3 } else if r < 0.9 { 2 } else { 4 };
+                    // Keep the classic 3+3+2: don't leave a lone eighth at the end of the bar.
+                    if size >= left || left - size == 1 {
+                        size = if left <= 4 { left } else { 2 };
+                    }
+                    // Mostly play this spot of the loop; sometimes jump to another.
+                    let from = if rand() < 0.6 || total_units <= size {
+                        pos
+                    } else {
+                        (rand() * (total_units - size + 1) as f64) as usize
+                    };
+                    if rand() < 0.3 && size >= 2 {
+                        // A roll: repeats of the block's start, each half as long as the last.
+                        let mut p = pos as f64;
+                        let end = (pos + size) as f64;
+                        let mut piece = if rand() < 0.5 { 1.0 } else { 0.5 };
+                        while p < end - 1e-9 {
+                            let reps = ((end - p) / piece / 2.0).ceil().max(1.0) as usize;
+                            for _ in 0..reps {
+                                if p >= end - 1e-9 {
+                                    break;
+                                }
+                                let l = piece.min(end - p);
+                                cuts.push((p, l, from as f64));
+                                p += l;
+                            }
+                            piece = (piece / 2.0).max(0.25);
+                        }
+                    } else {
+                        cuts.push((pos as f64, size as f64, from as f64));
+                    }
+                    pos += size;
+                }
+                bar += 1;
+            }
+            // Swap the selection for the cuts.
+            let mut desc = idx.clone();
+            desc.sort_unstable_by(|a, b| b.cmp(a));
+            for i in desc {
+                self.tracks[t].clips.remove(i);
+            }
+            for (p, l, from) in cuts {
+                let start = lo + frame(p);
+                let trim = frame(from).min(src.frames().saturating_sub(1));
+                let n = (frame(p + l).saturating_sub(frame(p))).min(src.frames() - trim).min(hi.saturating_sub(start));
+                if n == 0 {
+                    continue;
+                }
+                let mut c = Clip::new(name.clone(), src.clone(), start);
+                c.peaks = peaks.clone();
+                c.trim = trim;
+                c.len = n;
+                self.tracks[t].clips.push(c);
+                new_sel.push((t, self.tracks[t].clips.len() - 1));
+            }
+        }
+        self.mangle_seed = self.mangle_seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407) | 1;
+        self.sel_clip = new_sel.first().copied();
+        self.sel_extra = new_sel.iter().skip(1).copied().collect();
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = format!("BBCut: {} cuts (⌘Y cuts again)", new_sel.len());
+    }
+
     /// Clip ▸ Mangle: rearrange the selected clips in the slots they sit in (a single clip is
     /// sliced at the grid first). Each track's clips are mangled among themselves.
     fn mangle(&mut self, how: Mangle) {
         let mut sel = self.selected_clips();
         if sel.is_empty() {
             return;
+        }
+        if how == Mangle::BBCut {
+            return self.bbcut(sel);
         }
         self.push_undo("Mangle");
         if sel.len() == 1 {
@@ -2016,6 +2134,7 @@ impl App {
                         }
                     }
                 }
+                Mangle::BBCut => {}
                 Mangle::DropOut => {
                     let mut drop: Vec<bool> = (0..n).map(|_| rand() < 0.25).collect();
                     if n > 1 && !drop.contains(&true) {
@@ -3075,7 +3194,7 @@ impl App {
                 Action::SplitClip => doc,
                 Action::ToolSelect | Action::ToolSplit => true,
                 Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop | Action::CollapseClip | Action::WarpClip | Action::SliceClip | Action::ReverseClip => has_clip,
-                Action::MangleShuffle | Action::MangleReverse | Action::MangleSwap | Action::MangleStutter | Action::MangleRandomReverse | Action::MangleDropOut => has_clip,
+                Action::MangleShuffle | Action::MangleReverse | Action::MangleSwap | Action::MangleStutter | Action::MangleRandomReverse | Action::MangleDropOut | Action::MangleBBCut => has_clip,
                 Action::MangleAgain => has_clip && self.last_mangle.is_some(),
                 Action::AutoWarp => true,
                 Action::CollapseTrack => self.tracks.get(self.active).is_some_and(|t| !t.clips.is_empty()),
@@ -3100,7 +3219,7 @@ impl App {
             Action::EditClip | Action::SplitClip | Action::DuplicateClip | Action::NewClip | Action::ImportClip => return false,
             Action::GroupClips | Action::Ungroup | Action::TempoFromClip | Action::ToggleSnap | Action::LoopClip => return false,
             Action::CollapseClip | Action::CollapseTrack | Action::WarpClip | Action::SliceClip | Action::ReverseClip => return false,
-            Action::MangleShuffle | Action::MangleReverse | Action::MangleSwap | Action::MangleStutter | Action::MangleRandomReverse | Action::MangleDropOut | Action::MangleAgain => return false,
+            Action::MangleShuffle | Action::MangleReverse | Action::MangleSwap | Action::MangleStutter | Action::MangleRandomReverse | Action::MangleDropOut | Action::MangleBBCut | Action::MangleAgain => return false,
             Action::AutoWarp => return true,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
             Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack => return false,
@@ -3380,6 +3499,7 @@ impl App {
             Action::MangleStutter => self.mangle(Mangle::Stutter),
             Action::MangleRandomReverse => self.mangle(Mangle::RandomReverse),
             Action::MangleDropOut => self.mangle(Mangle::DropOut),
+            Action::MangleBBCut => self.mangle(Mangle::BBCut),
             Action::MangleAgain => {
                 if let Some(m) = self.last_mangle {
                     self.mangle(m);

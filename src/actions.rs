@@ -121,6 +121,7 @@ pub enum Action {
     MangleStutter,
     MangleRandomReverse,
     MangleDropOut,
+    MangleBBCut,
     MangleAgain,
     CollapseClip,
     CollapseTrack,
@@ -142,7 +143,7 @@ pub const ALL: &[Action] = &[
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
     GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
     ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp, SliceClip, ReverseClip,
-    MangleShuffle, MangleReverse, MangleSwap, MangleStutter, MangleRandomReverse, MangleDropOut, MangleAgain,
+    MangleShuffle, MangleReverse, MangleSwap, MangleStutter, MangleRandomReverse, MangleDropOut, MangleBBCut, MangleAgain,
     ExportStems, ExportAbleton,
 ];
 
@@ -182,7 +183,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(SliceClip),
             Do(DuplicateClip),
             Do(ReverseClip),
-            Sub("Mangle", &[Do(MangleShuffle), Do(MangleReverse), Do(MangleSwap), Do(MangleStutter), Do(MangleRandomReverse), Do(MangleDropOut), Separator, Do(MangleAgain)]),
+            Sub("Mangle", &[Do(MangleShuffle), Do(MangleReverse), Do(MangleSwap), Do(MangleStutter), Do(MangleRandomReverse), Do(MangleDropOut), Do(MangleBBCut), Separator, Do(MangleAgain)]),
             Separator,
             Do(LoopClip),
             Do(WarpClip),
@@ -322,6 +323,7 @@ impl Action {
             MangleStutter => "Stutter",
             MangleRandomReverse => "Random Reverse",
             MangleDropOut => "Drop Out",
+            MangleBBCut => "BBCut",
             MangleAgain => "Mangle Again",
             AutoWarp => "Warp Loops on Import",
             CollapseClip => "Collapse to Audio",

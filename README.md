@@ -13,7 +13,7 @@ job: chopping up loops, keeping the good bits and arranging them into a track.
   every beat when the grid is Off or Auto), ready to drag around, duplicate (⌘D), loop and group.
 - Clip ▸ Mangle rearranges the selected clips in the slots they sit in (a single clip is sliced
   at the grid first): Shuffle, Reverse Order, Swap Pairs, Stutter (some slices repeat the one
-  before), Random Reverse and Drop Out. Mangle Again (⌘Y) re-rolls the last one. Also on the
+  before), Random Reverse, Drop Out, and BBCut (breakbeat cutting in the style of Nick Collins' BBCut: 3+3+2 blocks of eighths, jumps to other parts of the loop, and accelerating stutter rolls). Mangle Again (⌘Y) re-rolls the last one. Also on the
   clip's right-click menu, along with Reverse.
 - The menus hold just that. The older sound-editor features (effects, insert, markers, recording,
   extra tools and panels, batch convert) are all still there, under the **More** menu.
