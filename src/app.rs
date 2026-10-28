@@ -121,6 +121,10 @@ const TRACK_COLORS: [Color32; 6] = [
     Color32::from_rgb(115, 75, 145),
 ];
 
+/// Grid divisions for the arrangement: label and length in beats (0 = off, -1 = automatic).
+const GRID: [(&str, f64); 8] =
+    [("Off", 0.0), ("Auto", -1.0), ("1 Bar", -2.0), ("1/2", 2.0), ("1/4", 1.0), ("1/8", 0.5), ("1/16", 0.25), ("1/32", 0.125)];
+
 /// Height of the time ruler: tick labels and cues, the regions band, then loop and tick marks.
 const RULER_H: f32 = 30.0;
 
@@ -501,6 +505,11 @@ pub struct App {
     import_as_clip: bool,
     /// Where a dropped file goes: (track, or None for a new track; timeline frame).
     drop_target: Option<(Option<usize>, usize)>,
+    /// Song tempo and beats per bar (x/4), the grid division (index into GRID) and snapping.
+    tempo: f64,
+    beats_per_bar: u32,
+    grid: usize,
+    snap: bool,
     /// Further dropped files waiting to load, with where each goes.
     drop_queue: std::collections::VecDeque<(PathBuf, (Option<usize>, usize))>,
     /// The arrangement's lane area and lane height, from the last frame (for drops).
@@ -617,6 +626,10 @@ impl App {
             nest: Vec::new(),
             import_as_clip: false,
             drop_target: None,
+            tempo: 120.0,
+            beats_per_bar: 4,
+            grid: 1,
+            snap: true,
             drop_queue: Default::default(),
             arr_lanes: None,
             play_audio: None,
@@ -1214,6 +1227,10 @@ impl App {
         let data = tracks_data(&tracks, &mut pool);
         let file = ProjectFile {
             version: 1,
+            tempo: self.tempo,
+            beats_per_bar: self.beats_per_bar,
+            grid: self.grid,
+            snap: self.snap,
             rate: self.rate(),
             tracks: data,
             audio: pool.iter().map(|a| project::AudioData { rate: a.rate, channels: a.num_channels(), frames: a.frames() }).collect(),
@@ -1232,6 +1249,7 @@ impl App {
         };
         let audio: Vec<Arc<Audio>> = audio.into_iter().map(Arc::new).collect();
         let rate = file.rate;
+        (self.tempo, self.beats_per_bar, self.grid, self.snap) = (file.tempo, file.beats_per_bar.max(1), file.grid.min(GRID.len() - 1), file.snap);
         fn build(app: &App, data: &[TrackData], audio: &[Arc<Audio>], rate: u32) -> Vec<Track> {
             data.iter()
                 .map(|t| {
@@ -2300,7 +2318,8 @@ impl App {
                 Action::Export => doc && self.arrangement_frames() > 0,
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
                 Action::SplitClip => doc,
-                Action::GroupClips => has_clip,
+                Action::GroupClips | Action::TempoFromClip => has_clip,
+                Action::ToggleSnap => doc,
                 Action::Ungroup => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.group.is_some()),
                 Action::SelectAll => doc,
                 Action::BackToArrangement => !self.nest.is_empty(),
@@ -2318,7 +2337,7 @@ impl App {
             Action::BackToArrangement => return true,
             Action::SaveProject | Action::SaveProjectAs => return doc,
             Action::EditClip | Action::SplitClip | Action::DuplicateClip | Action::NewClip | Action::ImportClip => return false,
-            Action::GroupClips | Action::Ungroup => return false,
+            Action::GroupClips | Action::Ungroup | Action::TempoFromClip | Action::ToggleSnap => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
             Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack => return false,
             _ => {}
@@ -2384,6 +2403,7 @@ impl App {
             Action::RulerTimecode => self.ruler == RulerUnits::Timecode,
             Action::ShowSpectrum => self.show_spectrum,
             Action::ShowRegions => self.show_regions,
+            Action::ToggleSnap => self.snap,
             Action::Dither => audio::DITHER.load(std::sync::atomic::Ordering::Relaxed),
             Action::AutoGain => self.auto_gain,
             Action::SoloTrack => self.tracks.get(self.active).is_some_and(|t| t.solo),
@@ -2548,6 +2568,8 @@ impl App {
             Action::DuplicateClip => self.duplicate_clip(),
             Action::NewClip => self.new_clip(),
             Action::GroupClips => self.group_clips(),
+            Action::TempoFromClip => self.tempo_from_clip(),
+            Action::ToggleSnap => self.snap = !self.snap,
             Action::SaveProject => {
                 self.save_project(false);
             }
@@ -2898,8 +2920,11 @@ impl App {
                 key(ui, "Length");
                 ui.label(self.fmt_pos(length));
                 ui.end_row();
+                key(ui, "Tempo");
+                ui.label(format!("{:.2} BPM, {}/4", self.tempo, self.beats_per_bar));
+                ui.end_row();
                 key(ui, "Playhead");
-                ui.label(self.fmt_pos(self.arr_cursor));
+                ui.label(format!("{}  ({})", self.fmt_pos(self.arr_cursor), self.fmt_bars(self.arr_cursor)));
                 ui.end_row();
                 if let Some(((t, _), c)) = &sel {
                     key(ui, "Clip");
@@ -4424,13 +4449,81 @@ impl App {
         }
     }
 
+    // ---------- tempo grid ----------
+
+    fn beat_frames(&self) -> f64 {
+        self.rate() as f64 * 60.0 / self.tempo.max(1.0)
+    }
+
+    fn bar_frames(&self) -> f64 {
+        self.beat_frames() * self.beats_per_bar as f64
+    }
+
+    /// The grid spacing in frames at the current zoom (`spp` = frames per pixel), if the grid is on.
+    fn grid_frames(&self, spp: f64) -> Option<f64> {
+        let beat = self.beat_frames();
+        match GRID[self.grid.min(GRID.len() - 1)].1 {
+            0.0 => None,
+            -2.0 => Some(self.bar_frames()),
+            -1.0 => {
+                // Automatic: the finest division that still leaves about 14 pixels between lines.
+                let options = [self.bar_frames() * 4.0, self.bar_frames() * 2.0, self.bar_frames(), beat * 2.0, beat, beat / 2.0, beat / 4.0, beat / 8.0];
+                options.iter().rev().copied().find(|g| g / spp >= 14.0).or(Some(options[0]))
+            }
+            b => Some(beat * b),
+        }
+    }
+
+    /// Snap a timeline position to the grid (when snapping is on).
+    fn snap_to_grid(&self, f: f64, spp: f64) -> f64 {
+        match (self.snap, self.grid_frames(spp)) {
+            (true, Some(g)) => ((f / g).round() * g).max(0.0),
+            _ => f,
+        }
+    }
+
+    /// Position as bar.beat.sixteenth (1-based), for the arrangement ruler and readouts.
+    fn fmt_bars(&self, f: usize) -> String {
+        let beats = f as f64 / self.beat_frames();
+        let bar = (beats / self.beats_per_bar as f64).floor() as u64 + 1;
+        let beat = (beats % self.beats_per_bar as f64).floor() as u64 + 1;
+        let sixteenth = ((beats.fract()) * 4.0).floor() as u64 + 1;
+        format!("{bar}.{beat}.{sixteenth}")
+    }
+
+    /// Clip ▸ Set Tempo from Clip: treat the selected clip as a loop of a whole number of bars
+    /// and pick the tempo (nearest 120 BPM, between 70 and 180) that fits it exactly.
+    fn tempo_from_clip(&mut self) {
+        let Some(c) = self.sel_clip.and_then(|p| self.clip(p)) else { return };
+        let secs = c.len as f64 / self.rate() as f64;
+        if secs <= 0.0 {
+            return;
+        }
+        let bpb = self.beats_per_bar as f64;
+        let best = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0]
+            .iter()
+            .map(|bars| (bars, 60.0 * bpb * bars / secs))
+            .filter(|(_, bpm)| (70.0..=180.0).contains(bpm))
+            .min_by(|a, b| (a.1 - 120.0).abs().total_cmp(&(b.1 - 120.0).abs()));
+        match best {
+            Some((bars, bpm)) => {
+                self.push_undo("Set Tempo");
+                self.tempo = (bpm * 100.0).round() / 100.0;
+                self.dirty = true;
+                self.status = format!("Tempo set to {:.2} BPM ({} bar{} loop)", self.tempo, bars, if *bars == 1.0 { "" } else { "s" });
+            }
+            None => self.status = "That clip's length doesn't fit a tempo between 70 and 180 BPM".into(),
+        }
+    }
+
     /// Where a file dropped at window point `q` would go: (track, or None for a new track; frame).
     fn drop_target_at(&self, q: Pos2) -> Option<(Option<usize>, usize)> {
         let (lanes, lane_h) = self.arr_lanes?;
         if !lanes.contains(q) {
             return None;
         }
-        let frame = (self.arr_view_start + ((q.x - lanes.left()) / lanes.width()) as f64 * self.arr_view_len).max(0.0) as usize;
+        let raw = (self.arr_view_start + ((q.x - lanes.left()) / lanes.width()) as f64 * self.arr_view_len).max(0.0);
+        let frame = self.snap_to_grid(raw, self.arr_view_len / lanes.width() as f64) as usize;
         let t = ((q.y - lanes.top()) / lane_h) as usize;
         Some((if t < self.tracks.len() { Some(t) } else { None }, frame))
     }
@@ -4457,8 +4550,18 @@ impl App {
                             go_up = Some(depth - i);
                         }
                     }
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Double-click a clip to open it · drag to move (⌥-drag copies) · drag edges to trim · shift-click to select several").color(MUTED));
+                    ui.add_space(16.0);
+                    ui.separator();
+                    ui.add(egui::DragValue::new(&mut self.tempo).range(20.0..=400.0).speed(0.1).fixed_decimals(2).suffix(" BPM"))
+                        .on_hover_text("Song tempo — drag or type");
+                    ui.add(egui::DragValue::new(&mut self.beats_per_bar).range(1..=16).suffix(" / 4")).on_hover_text("Beats per bar");
+                    ui.label(egui::RichText::new("Grid").color(MUTED));
+                    egui::ComboBox::from_id_salt("grid").width(80.0).selected_text(GRID[self.grid].0).show_ui(ui, |ui| {
+                        for (i, (label, _)) in GRID.iter().enumerate() {
+                            ui.selectable_value(&mut self.grid, i, *label);
+                        }
+                    });
+                    ui.checkbox(&mut self.snap, "Snap").on_hover_text("Snap moves, trims and the playhead to the grid (hold ⌘ to bypass)");
                     if let Some(levels) = go_up {
                         for _ in 0..levels {
                             self.leave_group();
@@ -4586,6 +4689,7 @@ impl App {
             }
         }
         if let (true, Some(q)) = (resp.dragged(), resp.interact_pointer_pos()) {
+            let drag_grid = if self.snap { self.grid_frames(spp) } else { None };
             if let Some(d) = self.clip_drag.as_mut() {
                 let f = x_to_f(q.x, vs, vl);
                 // Snap to other clips' edges and the playhead within 8 pixels (⌘ turns it off).
@@ -4602,11 +4706,17 @@ impl App {
                     }))
                     .chain(std::iter::once(0.0))
                     .collect();
+                let grid = drag_grid;
                 let snap = |x: f64| -> f64 {
                     if no_snap {
                         return x;
                     }
-                    edges.iter().copied().filter(|e| (e - x).abs() < snap_px).min_by(|a, b| (a - x).abs().total_cmp(&(b - x).abs())).unwrap_or(x)
+                    let edge = edges.iter().copied().filter(|e| (e - x).abs() < snap_px).min_by(|a, b| (a - x).abs().total_cmp(&(b - x).abs()));
+                    match (edge, grid) {
+                        (Some(e), _) => e,
+                        (None, Some(g)) => ((x / g).round() * g).max(0.0),
+                        _ => x,
+                    }
                 };
                 let o = &d.orig;
                 match d.mode {
@@ -4615,7 +4725,9 @@ impl App {
                         // Snap whichever edge (start or end) is closer to something.
                         let s1 = snap(raw);
                         let s2 = snap(raw + o.len as f64) - o.len as f64;
-                        let start = if (s1 - raw).abs() <= (s2 - raw).abs() && s1 != raw { s1 } else if s2 != raw { s2 } else { raw };
+                        // With the grid on, the clip's start lands on the grid; otherwise use
+                        // whichever edge snapped closer.
+                        let start = if grid.is_some() && !no_snap { s1 } else if (s1 - raw).abs() <= (s2 - raw).abs() && s1 != raw { s1 } else if s2 != raw { s2 } else { raw };
                         let target = (((q.y - lanes.top()) / lane_h).max(0.0) as usize).min(self.tracks.len() - 1);
                         let mut clip = self.tracks[d.track].clips.remove(d.clip);
                         clip.start = start.max(0.0) as usize;
@@ -4677,7 +4789,9 @@ impl App {
                         // Clicking empty space moves the playhead (and picks that track).
                         self.sel_clip = None;
                         self.sel_extra.clear();
-                        self.arr_cursor = x_to_f(q.x, vs, vl) as usize;
+                        let f = x_to_f(q.x, vs, vl);
+                        let f = if ui.input(|i| i.modifiers.command) { f } else { self.snap_to_grid(f, spp) };
+                        self.arr_cursor = f as usize;
                         self.play_origin = self.arr_cursor;
                         if q.y > lanes.top() {
                             self.set_active((((q.y - lanes.top()) / lane_h) as usize).min(n_tracks - 1));
@@ -4722,15 +4836,44 @@ impl App {
         painter.rect_filled(lanes, 0.0, Color32::WHITE);
         painter.rect_filled(ruler, 0.0, PANEL);
         painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0, LINE));
-        // Ruler ticks.
-        let secs_per_px = vl / rate / lanes.width() as f64;
+        // Ruler: bars and beats when the grid is on, otherwise time.
+        if let Some(g) = self.grid_frames(spp) {
+            let bar = self.bar_frames();
+            let beat = self.beat_frames();
+            // Label every bar, or every 2/4/8… bars when zoomed out.
+            let mut label_every = 1u64;
+            while bar * label_every as f64 / spp < 40.0 && label_every < 4096 {
+                label_every *= 2;
+            }
+            let mut k = (vs / g).floor() as i64;
+            loop {
+                let f = k as f64 * g;
+                if f > vs + vl {
+                    break;
+                }
+                let x = f_to_x(f, vs, vl);
+                if x >= lanes.left() {
+                    let on_bar = (f / bar).fract().abs() < 1e-6 || (f / bar).fract() > 1.0 - 1e-6;
+                    let on_beat = (f / beat).fract().abs() < 1e-6 || (f / beat).fract() > 1.0 - 1e-6;
+                    let (h, line) = if on_bar { (9.0, 228) } else if on_beat { (5.0, 240) } else { (3.0, 246) };
+                    painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, MUTED));
+                    painter.line_segment([Pos2::new(x, lanes.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.0, Color32::from_gray(line)));
+                    let bar_no = (f / bar).round() as u64;
+                    if on_bar && bar_no % label_every == 0 {
+                        painter.text(Pos2::new(x + 3.0, ruler.top() + 2.0), Align2::LEFT_TOP, (bar_no + 1).to_string(), FontId::proportional(11.0), MUTED);
+                    }
+                }
+                k += 1;
+            }
+        }
+        let secs_per_px = if self.grid_frames(spp).is_some() { f64::INFINITY } else { vl / rate / lanes.width() as f64 };
         let nice = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0];
         let step = *nice.iter().find(|&&s| s / secs_per_px >= 90.0).unwrap_or(&1200.0);
         let minor = step / 5.0;
         let mut k = (vs / rate / minor).floor() as i64;
         loop {
             let t = k as f64 * minor;
-            if t > (vs + vl) / rate {
+            if t > (vs + vl) / rate || !secs_per_px.is_finite() {
                 break;
             }
             let x = f_to_x(t * rate, vs, vl);
@@ -4785,7 +4928,9 @@ impl App {
         let thumb = Rect::from_min_size(Pos2::new(scroll.left() + thumb_x, scroll.top()), Vec2::new(thumb_w, scroll.height()));
         painter.rect_filled(thumb.shrink2(Vec2::new(1.0, 4.0)), 4.0, Color32::from_gray(185));
         if let Some(q) = resp.hover_pos() {
-            painter.text(Pos2::new(lanes.right() - 6.0, ruler.top() + 2.0), Align2::RIGHT_TOP, self.fmt_pos(x_to_f(q.x, vs, vl) as usize), FontId::monospace(11.0), MUTED);
+            let f = x_to_f(q.x, vs, vl) as usize;
+            let text = if self.grid_frames(spp).is_some() { format!("{}  {}", self.fmt_bars(f), self.fmt_pos(f)) } else { self.fmt_pos(f) };
+            painter.text(Pos2::new(lanes.right() - 6.0, ruler.top() + 2.0), Align2::RIGHT_TOP, text, FontId::monospace(11.0), MUTED);
         }
         if !self.tracks.is_empty() {
             self.track_headers(ui, header, self.tracks.len(), &lane);

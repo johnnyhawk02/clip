@@ -15,9 +15,30 @@ const MAGIC: &[u8; 8] = b"SNDPROJ1";
 #[derive(Serialize, Deserialize)]
 pub struct ProjectFile {
     pub version: u32,
+    #[serde(default = "default_tempo")]
+    pub tempo: f64,
+    #[serde(default = "default_bpb")]
+    pub beats_per_bar: u32,
+    #[serde(default = "default_grid")]
+    pub grid: usize,
+    #[serde(default = "default_snap")]
+    pub snap: bool,
     pub rate: u32,
     pub tracks: Vec<TrackData>,
     pub audio: Vec<AudioData>,
+}
+
+fn default_tempo() -> f64 {
+    120.0
+}
+fn default_bpb() -> u32 {
+    4
+}
+fn default_grid() -> usize {
+    1
+}
+fn default_snap() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize)]
@@ -110,6 +131,10 @@ mod tests {
         let a = Audio { rate: 1000, channels: vec![vec![0.5, -0.25, 1.0], vec![0.0, 0.1, -1.0]] };
         let p = ProjectFile {
             version: 1,
+            tempo: 128.0,
+            beats_per_bar: 4,
+            grid: 4,
+            snap: true,
             rate: 1000,
             tracks: vec![TrackData {
                 name: "T".into(),

@@ -107,6 +107,8 @@ pub enum Action {
     Ungroup,
     SaveProject,
     SaveProjectAs,
+    TempoFromClip,
+    ToggleSnap,
 }
 
 use Action::*;
@@ -121,7 +123,8 @@ pub const ALL: &[Action] = &[
     ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, SoloTrack, NextTrack,
     PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions, Dither, CutGaps,
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
-    GroupClips, Ungroup, SaveProject, SaveProjectAs,
+    GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
+    ToggleSnap,
 ];
 
 pub enum Item {
@@ -174,7 +177,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
     ),
     (
         "Clip",
-        &[Do(NewClip), Do(ImportClip), Separator, Do(EditClip), Do(BackToArrangement), Separator, Do(SplitClip), Do(DuplicateClip), Separator, Do(GroupClips), Do(Ungroup)],
+        &[Do(NewClip), Do(ImportClip), Separator, Do(EditClip), Do(BackToArrangement), Separator, Do(SplitClip), Do(DuplicateClip), Separator, Do(GroupClips), Do(Ungroup), Separator, Do(TempoFromClip), Do(ToggleSnap)],
     ),
     (
         "Insert",
@@ -290,7 +293,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | Dither | AutoGain | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
+            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | Dither | AutoGain | ToggleSnap | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
     }
 
     pub fn label(self) -> &'static str {
@@ -300,6 +303,8 @@ impl Action {
             Export => "Export Mix…",
             SaveProject => "Save Project",
             SaveProjectAs => "Save Project As…",
+            TempoFromClip => "Set Tempo from Clip",
+            ToggleSnap => "Snap to Grid",
             ExportSelection => "Export Selection…",
             FormatPcm8 => "8-bit PCM",
             FormatPcm16 => "16-bit PCM",
@@ -436,6 +441,7 @@ impl Action {
             NewClip => "CmdOrCtrl+Alt+N",
             ImportClip => "CmdOrCtrl+Alt+O",
             GroupClips => "CmdOrCtrl+G",
+            ToggleSnap => "CmdOrCtrl+4",
             Ungroup => "CmdOrCtrl+Alt+G",
             ZoomFit => "CmdOrCtrl+0",
             ShowTools => "CmdOrCtrl+1",
@@ -447,7 +453,7 @@ impl Action {
             NextTrack => "Alt+CmdOrCtrl+Down",
             SetLoop => "CmdOrCtrl+Shift+L",
             AddRegion => "CmdOrCtrl+Shift+R",
-            ShowSpectrum => "CmdOrCtrl+4",
+            ShowSpectrum => "CmdOrCtrl+6",
             ShowRegions => "CmdOrCtrl+5",
             Compressor => "CmdOrCtrl+Shift+C",
             PrevTrack => "Alt+CmdOrCtrl+Up",

@@ -35,6 +35,12 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   makes a new track for it. Dropping several files puts each on its own track (the first on
   the track under the mouse, the rest on the tracks below, making new ones as needed), all at
   the drop point.
+- **Tempo and grid:** the bar above the arrangement sets the song tempo (BPM), beats per bar
+  and the grid (Auto, 1 Bar, 1/2 … 1/32, or Off). With the grid on, the ruler shows bars and
+  beats; moves, trims, clicks on the playhead and drops snap to the grid (Clip ▸ Snap to Grid,
+  ⌘4, toggles it; hold ⌘ while dragging to bypass). Clip ▸ Set Tempo from Clip reads a loop's
+  length as a whole number of bars and sets the tempo to match (e.g. an 8-second 4-bar loop
+  → 120 BPM). Tempo, grid and snap are saved in the project. (Spectrum moved to ⌘6.)
 - **Clips within clips:** shift-click clips (or ⌘A for all) and choose Clip ▸ Group into Clip (⌘G).
   They become one group clip holding them, in the same places and keeping their tracks' settings.
   Double-click a group to open it as its own arrangement; the path bar (Song ▸ Group 1 ▸ …) or
