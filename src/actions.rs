@@ -135,6 +135,9 @@ pub enum Action {
     CollapseTrack,
     ExportStems,
     ExportAbleton,
+    AutoArrange,
+    PrevVariation,
+    NextVariation,
 }
 
 use Action::*;
@@ -153,7 +156,7 @@ pub const ALL: &[Action] = &[
     ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp, SliceClip, ReverseClip,
     MangleShuffle, MangleReverse, MangleSwap, MangleStutter, MangleRandomReverse, MangleDropOut, MangleBBCut, MangleAgain, DockPalette,
     MangleCutHouse, MangleCutHipHop, MangleCutDembow, MangleCutFootwork, MangleCutTrap, MangleCutBreakcore, MangleCutHalftime,
-    ExportStems, ExportAbleton,
+    ExportStems, ExportAbleton, AutoArrange, PrevVariation, NextVariation,
 ];
 
 pub enum Item {
@@ -192,6 +195,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(SliceClip),
             Do(DuplicateClip),
             Do(ReverseClip),
+            Sub("Auto Arrange", &[Do(AutoArrange), Separator, Do(PrevVariation), Do(NextVariation)]),
             Sub("Mangle", &[Do(MangleShuffle), Do(MangleReverse), Do(MangleSwap), Do(MangleStutter), Do(MangleRandomReverse), Do(MangleDropOut), Sub("BBCut", &[Do(MangleBBCut), Do(MangleCutHouse), Do(MangleCutHipHop), Do(MangleCutDembow), Do(MangleCutFootwork), Do(MangleCutTrap), Do(MangleCutBreakcore), Do(MangleCutHalftime)]), Separator, Do(MangleAgain)]),
             Separator,
             Do(LoopClip),
@@ -325,6 +329,9 @@ impl Action {
             LoopClip => "Loop Clip",
             WarpClip => "Warp to Tempo",
             SliceClip => "Slice at Grid",
+            AutoArrange => "Auto Arrange",
+            PrevVariation => "Previous Variation",
+            NextVariation => "Next Variation",
             ReverseClip => "Reverse Clip",
             MangleShuffle => "Shuffle",
             MangleReverse => "Reverse Order",
@@ -582,6 +589,9 @@ impl Action {
             Split => "Save each separate sound as sound01.wav, sound02.wav…",
             ZoomFit => "Show the whole sound",
             SliceClip => "Cut the selected clip at every grid line (bars, beats…), ready to rearrange",
+            AutoArrange => "Build a 4-minute track from the loops in the song: 8 or 16 bar sections, one track per loop",
+            PrevVariation => "The previous Auto Arrange variation",
+            NextVariation => "Another Auto Arrange variation",
             DuplicateClip => "Put a copy of the clip right after it",
             LoopClip => "Repeat the clip as you stretch its end",
             WarpClip => "Stretch the clip to the song tempo",

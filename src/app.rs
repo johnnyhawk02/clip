@@ -28,6 +28,7 @@ mod files;
 mod panels;
 mod look;
 mod automation;
+mod autoarrange;
 
 use self::clip::*;
 use self::chop::*;
@@ -35,6 +36,7 @@ use self::dialogs::*;
 use self::files::*;
 use self::look::*;
 use self::automation::Automation;
+use self::autoarrange::PoolLoop;
 
 type Sel = (usize, usize);
 
@@ -181,6 +183,10 @@ pub struct App {
     arr_hover: Option<(usize, usize, usize)>,
     /// The mangler's random state, and what it did last (for Mangle Again).
     mangle_seed: u64,
+    /// Auto Arrange: the loops it draws from, which variation is showing, and the section length.
+    pool: Vec<PoolLoop>,
+    variation: u32,
+    section_bars: u32,
     last_mangle: Option<Mangle>,
     /// Automation: pointer events to feed in, each on its frame (counted in `synth_frame`).
     synth: Vec<(u32, egui::Event)>,
@@ -311,6 +317,9 @@ impl App {
             drop_queue: Default::default(),
             arr_lanes: None,
             arr_hover: None,
+            pool: Vec::new(),
+            variation: 1,
+            section_bars: 8,
             mangle_seed: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1,
             last_mangle: None,
             synth: Vec::new(),
@@ -888,6 +897,9 @@ impl App {
                 Action::MangleCutHouse | Action::MangleCutHipHop | Action::MangleCutDembow | Action::MangleCutFootwork | Action::MangleCutTrap | Action::MangleCutBreakcore | Action::MangleCutHalftime => has_clip || self.loop_span().is_some(),
                 Action::MangleAgain => (has_clip || self.loop_span().is_some()) && self.last_mangle.is_some(),
                 Action::AutoWarp => true,
+                Action::AutoArrange => self.nest.is_empty() && self.tracks.iter().any(|t| !t.clips.is_empty()),
+                Action::PrevVariation => self.nest.is_empty() && !self.pool.is_empty() && self.variation > 1,
+                Action::NextVariation => self.nest.is_empty() && !self.pool.is_empty(),
                 Action::CollapseTrack => self.tracks.get(self.active).is_some_and(|t| !t.clips.is_empty()),
                 Action::ClearLoop => self.arr_loop.is_some(),
                 Action::ToggleSnap => doc,
@@ -913,6 +925,7 @@ impl App {
             Action::MangleShuffle | Action::MangleReverse | Action::MangleSwap | Action::MangleStutter | Action::MangleRandomReverse | Action::MangleDropOut | Action::MangleBBCut | Action::MangleAgain => return false,
             Action::MangleCutHouse | Action::MangleCutHipHop | Action::MangleCutDembow | Action::MangleCutFootwork | Action::MangleCutTrap | Action::MangleCutBreakcore | Action::MangleCutHalftime => return false,
             Action::AutoWarp => return true,
+            Action::AutoArrange | Action::PrevVariation | Action::NextVariation => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
             Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack => return false,
             _ => {}
@@ -1186,6 +1199,9 @@ impl App {
             Action::AutoWarp => self.auto_warp = !self.auto_warp,
             Action::WarpClip => self.toggle_warp(),
             Action::SliceClip => self.slice_clip(),
+            Action::AutoArrange => self.auto_arrange(),
+            Action::PrevVariation => self.step_variation(false),
+            Action::NextVariation => self.step_variation(true),
             Action::ReverseClip => self.reverse_clips(),
             Action::MangleShuffle => self.mangle(Mangle::Shuffle),
             Action::MangleReverse => self.mangle(Mangle::ReverseOrder),

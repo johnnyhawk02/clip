@@ -448,6 +448,28 @@ impl App {
                         }
                     });
                     ui.checkbox(&mut self.snap, "Snap").on_hover_text("Snap moves, trims and the playhead to the grid (hold ⌘ to bypass)");
+                    ui.separator();
+                    let can_arrange = self.nest.is_empty() && self.tracks.iter().any(|t| !t.clips.is_empty());
+                    if ui.add_enabled(can_arrange, Button::new("Auto Arrange")).on_hover_text("Build a 4-minute track from the loops in the song").clicked() {
+                        self.auto_arrange();
+                    }
+                    if !self.pool.is_empty() && self.nest.is_empty() {
+                        if ui.add_enabled(self.variation > 1, Button::new("◀")).on_hover_text("Previous variation").clicked() {
+                            self.step_variation(false);
+                        }
+                        ui.label(egui::RichText::new(self.variation.to_string()).color(INK));
+                        if ui.button("▶").on_hover_text("Next variation").clicked() {
+                            self.step_variation(true);
+                        }
+                        let before = self.section_bars;
+                        egui::ComboBox::from_id_salt("sections").width(80.0).selected_text(format!("{} bars", self.section_bars)).show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.section_bars, 8, "8 bars");
+                            ui.selectable_value(&mut self.section_bars, 16, "16 bars");
+                        });
+                        if self.section_bars != before {
+                            self.build_arrangement();
+                        }
+                    }
                     if let Some(levels) = go_up {
                         for _ in 0..levels {
                             self.leave_group();
