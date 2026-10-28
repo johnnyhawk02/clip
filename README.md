@@ -26,7 +26,8 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
 - Clip menu: New Clip, Import File as Clip (at the playhead), Edit Clip, Split Clip at Playhead
   (⌘E), Duplicate Clip (⌘D, placed right after). ⌫ deletes the selected clip; ⌘C / ⌘X / ⌘V copy,
   cut and paste clips (paste goes on the selected track at the playhead). Dropping a file onto
-  the arrangement adds it as a clip.
+  a track adds it there at the drop point; dropping it on the empty space below the tracks
+  makes a new track for it.
 - **Clips within clips:** shift-click clips (or ⌘A for all) and choose Clip ▸ Group into Clip (⌘G).
   They become one group clip holding them, in the same places and keeping their tracks' settings.
   Double-click a group to open it as its own arrangement; the path bar (Song ▸ Group 1 ▸ …) or

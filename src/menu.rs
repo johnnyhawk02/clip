@@ -161,3 +161,17 @@ pub fn dump_main_menu() {
         None => eprintln!("no main menu"),
     }
 }
+
+/// Where the mouse is, in the window's own coordinates (points from its top-left). File drops
+/// don't carry a position, so the arrangement asks AppKit directly when a file is dropped.
+#[cfg(target_os = "macos")]
+pub fn mouse_in_window(window_inner: eframe::egui::Rect) -> Option<eframe::egui::Pos2> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSEvent, NSScreen};
+    let mtm = MainThreadMarker::new()?;
+    let p = NSEvent::mouseLocation();
+    // AppKit measures from the bottom of the main screen; egui from the top.
+    let screen_h = NSScreen::screens(mtm).firstObject()?.frame().size.height;
+    let top = screen_h - p.y;
+    Some(eframe::egui::pos2(p.x as f32 - window_inner.min.x, top as f32 - window_inner.min.y))
+}

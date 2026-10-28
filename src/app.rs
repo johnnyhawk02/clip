@@ -498,6 +498,10 @@ pub struct App {
     nest: Vec<NestFrame>,
     /// The file being loaded becomes a clip at the playhead (not a new track).
     import_as_clip: bool,
+    /// Where a dropped file goes: (track, or None for a new track; timeline frame).
+    drop_target: Option<(Option<usize>, usize)>,
+    /// The arrangement's lane area and lane height, from the last frame (for drops).
+    arr_lanes: Option<(Rect, f32)>,
     /// What the player is playing: the active track alone, or the mix of all tracks.
     play_audio: Option<Arc<Audio>>,
     path: Option<PathBuf>,
@@ -607,6 +611,8 @@ impl App {
             sel_extra: Vec::new(),
             nest: Vec::new(),
             import_as_clip: false,
+            drop_target: None,
+            arr_lanes: None,
             play_audio: None,
             path: None,
             dirty: false,
@@ -748,11 +754,29 @@ impl App {
             match result {
                 Ok(a) if a.frames() > 0 => {
                     let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Clip".into());
-                    let pos = self.add_clip(&name, Arc::new(a), "Import Clip");
+                    let pos = match self.drop_target.take() {
+                        // Dropped below the tracks: a new track named after the file.
+                        Some((None, frame)) => {
+                            self.push_undo("Add Track");
+                            self.tracks.push(Track::new(name.clone()));
+                            self.active = self.tracks.len() - 1;
+                            self.arr_cursor = frame;
+                            let pos = self.add_clip(&name, Arc::new(a), "Import Clip");
+                            // One undo step for both.
+                            self.undo.pop();
+                            pos
+                        }
+                        Some((Some(t), frame)) => {
+                            self.set_active(t);
+                            self.arr_cursor = frame;
+                            self.add_clip(&name, Arc::new(a), "Import Clip")
+                        }
+                        None => self.add_clip(&name, Arc::new(a), "Import Clip"),
+                    };
                     let m = audio::read_wav_markers(&path);
                     let c = &mut self.tracks[pos.0].clips[pos.1];
                     (c.cues, c.regions, c.loop_points) = (m.cues, m.regions, m.loop_points);
-                    self.status = format!("Added {} as a clip at the playhead", file_name(&path));
+                    self.status = format!("Added {} as a clip", file_name(&path));
                 }
                 Ok(_) => self.status = format!("{} contains no audio", file_name(&path)),
                 Err(e) => self.status = format!("Couldn't open {}: {e}", file_name(&path)),
@@ -4189,6 +4213,17 @@ impl App {
         self.arr_clamp();
     }
 
+    /// Where a file dropped at window point `q` would go: (track, or None for a new track; frame).
+    fn drop_target_at(&self, q: Pos2) -> Option<(Option<usize>, usize)> {
+        let (lanes, lane_h) = self.arr_lanes?;
+        if !lanes.contains(q) {
+            return None;
+        }
+        let frame = (self.arr_view_start + ((q.x - lanes.left()) / lanes.width()) as f64 * self.arr_view_len).max(0.0) as usize;
+        let t = ((q.y - lanes.top()) / lane_h) as usize;
+        Some((if t < self.tracks.len() { Some(t) } else { None }, frame))
+    }
+
     /// Strip above the main view: where you are, and the way back from the editor.
     fn view_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
@@ -4253,6 +4288,7 @@ impl App {
         let n_tracks = self.tracks.len().max(1);
         let lane_h = (lanes.height() / n_tracks as f32).min(120.0);
         let lane = move |i: usize| Rect::from_min_size(Pos2::new(lanes.left(), lanes.top() + i as f32 * lane_h), Vec2::new(lanes.width(), lane_h));
+        self.arr_lanes = Some((lanes, lane_h));
         let rate = self.rate() as f64;
         let spp = self.arr_view_len / lanes.width() as f64;
 
@@ -4608,7 +4644,13 @@ impl eframe::App for App {
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
         for p in dropped {
             if self.view == View::Arrangement && !self.tracks.is_empty() && self.loading.is_none() {
-                // Dropping onto an open arrangement adds clips at the playhead.
+                // Dropping onto a track adds a clip there at the drop point; dropping on the
+                // empty space below the tracks makes a new track for it.
+                #[cfg(target_os = "macos")]
+                let drop_pos = ctx.input(|i| i.viewport().inner_rect).and_then(crate::menu::mouse_in_window);
+                #[cfg(not(target_os = "macos"))]
+                let drop_pos = ctx.input(|i| i.pointer.latest_pos());
+                self.drop_target = drop_pos.and_then(|q| self.drop_target_at(q));
                 self.import_as_clip = true;
                 self.start_load_as(p, &ctx, true);
             } else {
@@ -4697,8 +4739,35 @@ impl eframe::App for App {
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             let screen = ctx.content_rect();
             let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("drop")));
-            painter.rect_filled(screen, 0.0, Color32::from_black_alpha(140));
-            painter.text(screen.center(), Align2::CENTER_CENTER, "Drop to open", FontId::proportional(28.0), Color32::WHITE);
+            #[cfg(target_os = "macos")]
+            let hover = ctx.input(|i| i.viewport().inner_rect).and_then(crate::menu::mouse_in_window);
+            #[cfg(not(target_os = "macos"))]
+            let hover = ctx.input(|i| i.pointer.latest_pos());
+            if let (true, Some(q), Some((lanes, lane_h))) = (self.view == View::Arrangement && !self.tracks.is_empty(), hover, self.arr_lanes) {
+                // Show where the drop will land: the track under the mouse, or a new track.
+                ctx.request_repaint();
+                match self.drop_target_at(q) {
+                    Some((Some(t), _)) => {
+                        let r = Rect::from_min_size(Pos2::new(lanes.left(), lanes.top() + t as f32 * lane_h), Vec2::new(lanes.width(), lane_h));
+                        painter.rect_filled(r, 0.0, Color32::from_black_alpha(25));
+                        painter.rect_stroke(r.shrink(2.0), 4.0, Stroke::new(2.0, INK), egui::StrokeKind::Inside);
+                    }
+                    Some((None, _)) => {
+                        let top = lanes.top() + self.tracks.len() as f32 * lane_h;
+                        let r = Rect::from_min_size(Pos2::new(lanes.left(), top), Vec2::new(lanes.width(), lane_h.min(lanes.bottom() - top)));
+                        painter.rect_stroke(r.shrink(4.0), 4.0, Stroke::new(2.0, INK), egui::StrokeKind::Inside);
+                        painter.text(r.center(), Align2::CENTER_CENTER, "New track", FontId::proportional(16.0), INK);
+                    }
+                    None => {}
+                }
+                if lanes.contains(q) {
+                    painter.line_segment([Pos2::new(q.x, lanes.top()), Pos2::new(q.x, lanes.bottom())], Stroke::new(1.5, INK));
+                }
+                self.status = "Drop on a track to add a clip there, or below the tracks for a new track".into();
+            } else {
+                painter.rect_filled(screen, 0.0, Color32::from_black_alpha(140));
+                painter.text(screen.center(), Align2::CENTER_CENTER, "Drop to open", FontId::proportional(24.0), Color32::WHITE);
+            }
         }
 
         self.dialog_window(&ctx);
@@ -4880,6 +4949,14 @@ impl App {
                     "redo" => self.redo(),
                     "play" => self.toggle_play(),
                     "zoomsel" => self.zoom_to_selection(),
+                    "drop" => {
+                        // drop:x|y|path — what dropping `path` at window point (x, y) does.
+                        let mut it = arg.splitn(3, '|');
+                        let (x, y, path) = (it.next().unwrap_or("0"), it.next().unwrap_or("0"), it.next().unwrap_or(""));
+                        self.drop_target = self.drop_target_at(Pos2::new(x.parse().unwrap_or(0.0), y.parse().unwrap_or(0.0)));
+                        self.import_as_clip = true;
+                        self.start_load_as(PathBuf::from(path), ctx, true);
+                    }
                     "playhead" => self.arr_cursor = (arg.parse::<f64>().unwrap_or(0.0) * rate) as usize,
                     "export" => {
                         let a = if self.view == View::Arrangement { Arc::new(self.mixdown()) } else { self.audio.clone().unwrap() };
