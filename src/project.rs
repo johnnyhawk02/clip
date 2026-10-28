@@ -23,6 +23,10 @@ pub struct ProjectFile {
     pub grid: usize,
     #[serde(default = "default_snap")]
     pub snap: bool,
+    #[serde(default)]
+    pub arr_loop: Option<(usize, usize)>,
+    #[serde(default)]
+    pub looping: bool,
     pub rate: u32,
     pub tracks: Vec<TrackData>,
     pub audio: Vec<AudioData>,
@@ -70,6 +74,8 @@ pub struct ClipData {
     pub cues: Vec<(usize, String)>,
     pub regions: Vec<(usize, usize, String)>,
     pub loop_points: Option<(usize, usize)>,
+    #[serde(default)]
+    pub looping: bool,
     pub group: Option<Vec<TrackData>>,
 }
 
@@ -135,6 +141,8 @@ mod tests {
             beats_per_bar: 4,
             grid: 4,
             snap: true,
+            arr_loop: Some((0, 3)),
+            looping: true,
             rate: 1000,
             tracks: vec![TrackData {
                 name: "T".into(),
@@ -152,6 +160,7 @@ mod tests {
                     cues: vec![(1, "x".into())],
                     regions: vec![],
                     loop_points: Some((0, 2)),
+                    looping: true,
                     group: None,
                 }],
             }],

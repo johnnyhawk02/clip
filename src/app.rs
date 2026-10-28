@@ -40,6 +40,9 @@ struct Clip {
     /// A group clip holds its own tracks of clips; `audio` is then their rendered mix. Copies
     /// share this until one is opened and changed, so they stay independent.
     group: Option<Arc<Vec<Track>>>,
+    /// Repeat the clip's loop section (its loop points, or the whole audio) for as long as the
+    /// clip is stretched out, independently of other clips.
+    looping: bool,
 }
 
 /// One level up from the arrangement being shown: the parent's tracks, and which of its clips
@@ -58,7 +61,7 @@ impl Clip {
     fn new(name: impl Into<String>, audio: Arc<Audio>, start: usize) -> Clip {
         let peaks = Arc::new(Peaks::build(&audio));
         let len = audio.frames();
-        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None }
+        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None, looping: false }
     }
 
     fn end(&self) -> usize {
@@ -67,8 +70,33 @@ impl Clip {
 
     /// The part of the audio the clip plays.
     fn visible(&self) -> Audio {
-        let end = (self.trim + self.len).min(self.audio.frames());
-        self.audio.slice(self.trim.min(end), end)
+        if !self.looping {
+            let end = (self.trim + self.len).min(self.audio.frames());
+            return self.audio.slice(self.trim.min(end), end);
+        }
+        Audio {
+            rate: self.audio.rate,
+            channels: self.audio.channels.iter().map(|c| (0..self.len).map(|i| c[self.source(i)]).collect()).collect(),
+        }
+    }
+
+    /// The section a looping clip repeats: its loop points if it has them, else all of it.
+    fn loop_range(&self) -> (usize, usize) {
+        let n = self.audio.frames();
+        self.loop_points.map(|(s, e)| (s.min(n), e.min(n))).filter(|(s, e)| e > s).unwrap_or((0, n))
+    }
+
+    /// The audio frame heard `i` frames into the clip.
+    fn source(&self, i: usize) -> usize {
+        let p = self.trim + i;
+        let n = self.audio.frames().max(1);
+        if self.looping {
+            let (ls, le) = self.loop_range();
+            if p >= le && le > ls {
+                return ls + (p - le) % (le - ls);
+            }
+        }
+        p.min(n - 1)
     }
 }
 
@@ -512,6 +540,9 @@ pub struct App {
     /// Song tempo and beats per bar (x/4), the grid division (index into GRID) and snapping.
     tempo: f64,
     beats_per_bar: u32,
+    /// The arrangement's loop range (played round when Loop is on), and a ruler drag setting it.
+    arr_loop: Option<Sel>,
+    arr_loop_drag: Option<usize>,
     grid: usize,
     snap: bool,
     /// Further dropped files waiting to load, with where each goes.
@@ -632,6 +663,8 @@ impl App {
             drop_target: None,
             tempo: 120.0,
             beats_per_bar: 4,
+            arr_loop: None,
+            arr_loop_drag: None,
             grid: 1,
             snap: true,
             drop_queue: Default::default(),
@@ -886,8 +919,13 @@ impl App {
             if let Some(c) = self.tracks.get_mut(track).and_then(|t| t.clips.get_mut(clip)) {
                 c.audio = a.clone();
                 c.peaks = peaks;
-                c.trim = 0;
-                c.len = a.frames();
+                if c.looping {
+                    // A looping clip keeps its length on the timeline; it repeats the new audio.
+                    c.trim = c.trim.min(a.frames().saturating_sub(1));
+                } else {
+                    c.trim = 0;
+                    c.len = a.frames();
+                }
             }
         }
         let n = a.frames();
@@ -1067,7 +1105,11 @@ impl App {
         }
         self.player.stop();
         // Editing works on what the clip shows: bake its trim in first.
-        let visible = if clip.trim > 0 || clip.len < clip.audio.frames() { Arc::new(clip.visible()) } else { clip.audio.clone() };
+        let visible = if clip.looping || (clip.trim == 0 && clip.len >= clip.audio.frames()) {
+            clip.audio.clone()
+        } else {
+            Arc::new(clip.visible())
+        };
         self.view = View::Editor { track: t, clip: c };
         self.active = t;
         self.sel_clip = Some((t, c));
@@ -1139,6 +1181,40 @@ impl App {
         self.sel_clip = None;
         self.dirty = true;
         self.refresh_playback();
+    }
+
+    /// Clip ▸ Loop Clip: turn looping on or off for the selected clips. Turning it on also
+    /// doubles a clip's length so the repeat is heard straight away.
+    fn toggle_clip_loop(&mut self) {
+        let sel = self.selected_clips();
+        if sel.is_empty() {
+            return;
+        }
+        let on = !self.clip(sel[0]).is_some_and(|c| c.looping);
+        self.push_undo(if on { "Loop Clip" } else { "Unloop Clip" });
+        for (t, c) in sel {
+            let clip = &mut self.tracks[t].clips[c];
+            clip.looping = on;
+            if on {
+                let (ls, le) = clip.loop_range();
+                if clip.len <= le.saturating_sub(clip.trim) {
+                    clip.len = le.saturating_sub(clip.trim) + (le - ls);
+                }
+            } else {
+                clip.len = clip.len.min(clip.audio.frames().saturating_sub(clip.trim)).max(1);
+            }
+        }
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = if on { "Clip loops — drag its right edge to repeat it more".into() } else { "Clip no longer loops".into() };
+    }
+
+    /// Timeline span covered by the selected clips.
+    fn selected_span(&self) -> Option<Sel> {
+        let sel = self.selected_clips();
+        let s = sel.iter().filter_map(|&p| self.clip(p)).map(|c| c.start).min()?;
+        let e = sel.iter().filter_map(|&p| self.clip(p)).map(|c| c.end()).max()?;
+        (e > s).then_some((s, e))
     }
 
     /// All selected clips: the main one plus any shift-clicked ones.
@@ -1226,6 +1302,7 @@ impl App {
                             cues: c.cues.iter().map(|q| (q.frame, q.name.clone())).collect(),
                             regions: c.regions.iter().map(|r| (r.start, r.end, r.name.clone())).collect(),
                             loop_points: c.loop_points,
+                            looping: c.looping,
                             group: c.group.as_ref().map(|g| tracks_data(g, pool)),
                         })
                         .collect(),
@@ -1239,6 +1316,8 @@ impl App {
             beats_per_bar: self.beats_per_bar,
             grid: self.grid,
             snap: self.snap,
+            arr_loop: self.arr_loop,
+            looping: self.looping,
             rate: self.rate(),
             tracks: data,
             audio: pool.iter().map(|a| project::AudioData { rate: a.rate, channels: a.num_channels(), frames: a.frames() }).collect(),
@@ -1258,6 +1337,7 @@ impl App {
         let audio: Vec<Arc<Audio>> = audio.into_iter().map(Arc::new).collect();
         let rate = file.rate;
         (self.tempo, self.beats_per_bar, self.grid, self.snap) = (file.tempo, file.beats_per_bar.max(1), file.grid.min(GRID.len() - 1), file.snap);
+        (self.arr_loop, self.looping) = (file.arr_loop, file.looping);
         fn build(app: &App, data: &[TrackData], audio: &[Arc<Audio>], rate: u32) -> Vec<Track> {
             data.iter()
                 .map(|t| {
@@ -1275,6 +1355,8 @@ impl App {
                         clip.cues = c.cues.iter().map(|(f, n)| Cue { frame: *f, name: n.clone() }).collect();
                         clip.regions = c.regions.iter().map(|(s, e, n)| Region { start: *s, end: *e, name: n.clone() }).collect();
                         clip.loop_points = c.loop_points;
+                        clip.looping = c.looping;
+                        clip.len = if c.looping { c.len } else { clip.len };
                         track.clips.push(clip);
                     }
                     track
@@ -1668,7 +1750,7 @@ impl App {
         match self.view {
             View::Editor { track, clip } => match self.clip((track, clip)).cloned() {
                 Some(c) => {
-                    let audio = if c.trim > 0 || c.len < c.audio.frames() { Arc::new(c.visible()) } else { c.audio };
+                    let audio = if c.looping || (c.trim == 0 && c.len >= c.audio.frames()) { c.audio.clone() } else { Arc::new(c.visible()) };
                     self.set_audio(audio);
                 }
                 // The clip being edited no longer exists in the restored state.
@@ -2250,6 +2332,12 @@ impl App {
             if self.arr_cursor >= end {
                 self.arr_cursor = 0;
             }
+            if let (true, Some((ls, le))) = (self.looping, self.arr_loop) {
+                // Loop on: play the loop range round and round.
+                self.play_origin = ls;
+                self.player.play(ls, le, true);
+                return;
+            }
             self.play_origin = self.arr_cursor;
             self.player.play(self.arr_cursor, end, false);
             return;
@@ -2336,7 +2424,8 @@ impl App {
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
                 Action::SplitClip => doc,
                 Action::ToolSelect | Action::ToolSplit => true,
-                Action::GroupClips | Action::TempoFromClip => has_clip,
+                Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop => has_clip,
+                Action::ClearLoop => self.arr_loop.is_some(),
                 Action::ToggleSnap => doc,
                 Action::Ungroup => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.group.is_some()),
                 Action::SelectAll => doc,
@@ -2355,7 +2444,7 @@ impl App {
             Action::BackToArrangement => return true,
             Action::SaveProject | Action::SaveProjectAs => return doc,
             Action::EditClip | Action::SplitClip | Action::DuplicateClip | Action::NewClip | Action::ImportClip => return false,
-            Action::GroupClips | Action::Ungroup | Action::TempoFromClip | Action::ToggleSnap => return false,
+            Action::GroupClips | Action::Ungroup | Action::TempoFromClip | Action::ToggleSnap | Action::LoopClip => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
             Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack => return false,
             _ => {}
@@ -2424,6 +2513,7 @@ impl App {
             Action::ShowSpectrum => self.show_spectrum,
             Action::ShowRegions => self.show_regions,
             Action::ToggleSnap => self.snap,
+            Action::LoopClip => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.looping),
             Action::Dither => audio::DITHER.load(std::sync::atomic::Ordering::Relaxed),
             Action::AutoGain => self.auto_gain,
             Action::SoloTrack => self.tracks.get(self.active).is_some_and(|t| t.solo),
@@ -2475,6 +2565,33 @@ impl App {
                 }
                 Action::GoEnd => {
                     self.arr_cursor = self.arrangement_frames();
+                    return;
+                }
+                Action::Loop => {
+                    if self.arr_loop.is_none() {
+                        self.arr_loop = self.selected_span().or(Some((self.arr_cursor, self.arr_cursor + (self.bar_frames() * 4.0) as usize)));
+                    }
+                    self.looping = !self.looping;
+                    if self.player.is_playing() {
+                        self.toggle_play();
+                        self.toggle_play();
+                    }
+                    return;
+                }
+                Action::SetLoop => {
+                    if let Some(span) = self.selected_span() {
+                        self.push_undo("Set Loop");
+                        self.arr_loop = Some(span);
+                        self.looping = true;
+                        self.dirty = true;
+                    }
+                    return;
+                }
+                Action::ClearLoop => {
+                    self.push_undo("Clear Loop");
+                    self.arr_loop = None;
+                    self.looping = false;
+                    self.dirty = true;
                     return;
                 }
                 Action::SelectAll => {
@@ -2590,6 +2707,7 @@ impl App {
             Action::NewClip => self.new_clip(),
             Action::GroupClips => self.group_clips(),
             Action::TempoFromClip => self.tempo_from_clip(),
+            Action::LoopClip => self.toggle_clip_loop(),
             Action::ToggleSnap => self.snap = !self.snap,
             Action::SaveProject => {
                 self.save_project(false);
@@ -4723,7 +4841,27 @@ impl App {
 
         let press = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos());
         let split_tool = self.tool == Tool::Split;
-        if resp.drag_started() && !split_tool {
+        // Dragging in the ruler draws the arrangement's loop range (and turns Loop on).
+        let ruler_drag = press.is_some_and(|q| q.y < ruler.bottom());
+        if resp.drag_started() && ruler_drag {
+            let f = x_to_f(press.unwrap().x, vs, vl);
+            self.arr_loop_drag = Some(self.snap_to_grid(f, spp) as usize);
+        }
+        if let (Some(a), true, Some(q)) = (self.arr_loop_drag, resp.dragged(), resp.interact_pointer_pos()) {
+            let b = self.snap_to_grid(x_to_f(q.x, vs, vl), spp) as usize;
+            if b != a {
+                self.arr_loop = Some((a.min(b), a.max(b)));
+                self.looping = true;
+            }
+        }
+        if resp.drag_stopped() && self.arr_loop_drag.take().is_some() {
+            self.dirty = true;
+            if self.player.is_playing() {
+                self.toggle_play();
+                self.toggle_play();
+            }
+        }
+        if resp.drag_started() && !split_tool && !ruler_drag {
             if let Some(q) = press {
                 if let Some((t, mut c, mode)) = hit(&self.tracks, q, vs, vl) {
                     // ⌥-drag leaves the original in place and drags a copy (as in Ableton).
@@ -4749,6 +4887,7 @@ impl App {
         }
         if let (true, Some(q)) = (resp.dragged(), resp.interact_pointer_pos()) {
             let drag_grid = if self.snap { self.grid_frames(spp) } else { None };
+            let drag_rate = self.rate() as usize;
             if let Some(d) = self.clip_drag.as_mut() {
                 let f = x_to_f(q.x, vs, vl);
                 // Snap to other clips' edges and the playhead within 8 pixels (⌘ turns it off).
@@ -4824,7 +4963,11 @@ impl App {
                         c.len = (o.len as i64 - delta) as usize;
                     }
                     DragMode::TrimEnd => {
-                        let max_end = (o.start + o.audio.frames() - o.trim) as f64;
+                        let max_end = if o.looping {
+                            (o.start + drag_rate * 3600) as f64
+                        } else {
+                            (o.start + o.audio.frames() - o.trim) as f64
+                        };
                         let end = snap(f).clamp((o.start + 32) as f64, max_end);
                         self.tracks[d.track].clips[d.clip].len = end as usize - o.start;
                     }
@@ -4963,6 +5106,17 @@ impl App {
                 }
             }
             k += 1;
+        }
+        // Arrangement loop: a brace along the top of the ruler (black when Loop is on).
+        if let Some((ls, le)) = self.arr_loop {
+            let (x0, x1) = (f_to_x(ls as f64, vs, vl).max(lanes.left()), f_to_x(le as f64, vs, vl).min(lanes.right()));
+            if x1 > x0 {
+                let col = if self.looping { INK } else { Color32::from_gray(175) };
+                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, ruler.top() + 1.0), Pos2::new(x1, ruler.top() + 5.0)), 1.0, col);
+                if self.looping {
+                    painter.rect_filled(Rect::from_min_max(Pos2::new(x0, lanes.top()), Pos2::new(x1, lanes.bottom())), 0.0, Color32::from_black_alpha(8));
+                }
+            }
         }
         // Lanes and clips.
         let any_solo = self.tracks.iter().any(|t| t.solo);
@@ -5482,8 +5636,11 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
         let fpp = c.len as f64 / body.width().max(1.0) as f64;
         let mut x = x0;
         while x < x1 {
-            let f0 = c.trim + ((x - body.left()) as f64 * fpp) as usize;
-            let f1 = (c.trim + ((x + 1.0 - body.left()) as f64 * fpp) as usize).max(f0 + 1).min(c.audio.frames());
+            let i0 = ((x - body.left()) as f64 * fpp) as usize;
+            let i1 = (((x + 1.0 - body.left()) as f64 * fpp) as usize).max(i0 + 1);
+            let f0 = c.source(i0);
+            let f1 = c.source(i1 - 1).max(f0) + 1;
+            let f1 = f1.min(c.audio.frames());
             if f0 >= f1 {
                 break;
             }
@@ -5507,6 +5664,26 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
             let y1 = (mid - lo.clamp(-1.0, 1.0) * amp).max(y0 + 1.0);
             p.line_segment([Pos2::new(x + 0.5, y0), Pos2::new(x + 0.5, y1)], Stroke::new(1.0, wave_col));
             x += 1.0;
+        }
+    }
+    if c.looping {
+        // Dotted lines where the loop starts over.
+        let (ls, le) = c.loop_range();
+        let period = (le - ls).max(1);
+        let mut i = le.saturating_sub(c.trim);
+        let fpp = c.len as f64 / r.width().max(1.0) as f64;
+        while i < c.len && (period as f64 / fpp) > 3.0 {
+            let x = r.left() + (i as f64 / fpp) as f32;
+            if x > r.left() + 1.0 {
+                p.add(egui::Shape::dashed_line(&[Pos2::new(x, title.bottom()), Pos2::new(x, r.bottom())], Stroke::new(1.0, Color32::from_gray(120)), 2.0, 3.0));
+            }
+            i += period;
+        }
+        // Loop mark in the title strip, at the right.
+        if r.width() > 40.0 {
+            let ctr = Pos2::new(r.right().min(clip_to.right()) - 10.0, title.center().y);
+            p.circle_stroke(ctr, 3.5, Stroke::new(1.2, INK));
+            p.add(egui::Shape::convex_polygon(vec![ctr + Vec2::new(1.5, -5.5), ctr + Vec2::new(4.5, -3.5), ctr + Vec2::new(1.0, -1.5)], INK, Stroke::NONE));
         }
     }
     let stroke = if selected { Stroke::new(2.0, INK) } else { Stroke::new(1.0, color.lerp_to_gamma(Color32::WHITE, 0.3)) };
@@ -5818,5 +5995,26 @@ fn fmt_tick(t: f64, step: f64) -> String {
         format!("{m}:{s:05.2}")
     } else {
         format!("{m}:{s:06.3}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn looping_clip_repeats_its_loop_section() {
+        let a = Arc::new(Audio { rate: 10, channels: vec![(0..10).map(|i| i as f32).collect()] });
+        let mut c = Clip::new("c", a, 0);
+        c.looping = true;
+        c.loop_points = Some((4, 8));
+        c.len = 16;
+        let v = c.visible();
+        // Plays 0..8, then repeats 4..8.
+        assert_eq!(v.channels[0], vec![0., 1., 2., 3., 4., 5., 6., 7., 4., 5., 6., 7., 4., 5., 6., 7.]);
+        // A split-off right half keeps looping from where it is.
+        c.trim = 10;
+        c.len = 3;
+        assert_eq!(c.visible().channels[0], vec![6., 7., 4.]);
     }
 }

@@ -42,6 +42,13 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   ⌘4, toggles it; hold ⌘ while dragging to bypass). Clip ▸ Set Tempo from Clip reads a loop's
   length as a whole number of bars and sets the tempo to match (e.g. an 8-second 4-bar loop
   → 120 BPM). Tempo, grid and snap are saved in the project. (Spectrum moved to ⌘6.)
+- **Loops:** Clip ▸ Loop Clip (⌥⌘L) makes a clip repeat its loop section — its loop points
+  (set in the clip editor with Insert ▸ Set Loop to Selection) or the whole clip — for as long as
+  you drag its right edge out. Each clip loops on its own; dotted lines show where it starts over.
+  For the arrangement, drag in the ruler to draw a loop range (a brace along the top of the ruler)
+  and turn Loop on or off with ⌘L or the loop button; playback then goes round that range. Insert ▸
+  Set Loop to Selection in the arrangement sets it to the selected clips. Both are saved in the
+  project.
 - **Clips within clips:** shift-click clips (or ⌘A for all) and choose Clip ▸ Group into Clip (⌘G).
   They become one group clip holding them, in the same places and keeping their tracks' settings.
   Double-click a group to open it as its own arrangement; the path bar (Song ▸ Group 1 ▸ …) or

@@ -110,6 +110,7 @@ pub enum Action {
     TempoFromClip,
     ToggleSnap,
     ToolSplit,
+    LoopClip,
 }
 
 use Action::*;
@@ -125,7 +126,7 @@ pub const ALL: &[Action] = &[
     PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions, Dither, CutGaps,
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
     GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
-    ToggleSnap, ToolSplit,
+    ToggleSnap, ToolSplit, LoopClip,
 ];
 
 pub enum Item {
@@ -178,7 +179,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
     ),
     (
         "Clip",
-        &[Do(NewClip), Do(ImportClip), Separator, Do(EditClip), Do(BackToArrangement), Separator, Do(SplitClip), Do(DuplicateClip), Separator, Do(GroupClips), Do(Ungroup), Separator, Do(TempoFromClip), Do(ToggleSnap)],
+        &[Do(NewClip), Do(ImportClip), Separator, Do(EditClip), Do(BackToArrangement), Separator, Do(SplitClip), Do(DuplicateClip), Separator, Do(GroupClips), Do(Ungroup), Separator, Do(LoopClip), Do(TempoFromClip), Do(ToggleSnap)],
     ),
     (
         "Insert",
@@ -296,7 +297,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | Dither | AutoGain | ToggleSnap | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
+            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | Dither | AutoGain | ToggleSnap | LoopClip | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
     }
 
     pub fn label(self) -> &'static str {
@@ -309,6 +310,7 @@ impl Action {
             TempoFromClip => "Set Tempo from Clip",
             ToggleSnap => "Snap to Grid",
             ToolSplit => "Split Tool",
+            LoopClip => "Loop Clip",
             ExportSelection => "Export Selection…",
             FormatPcm8 => "8-bit PCM",
             FormatPcm16 => "16-bit PCM",
@@ -446,6 +448,7 @@ impl Action {
             ImportClip => "CmdOrCtrl+Alt+O",
             GroupClips => "CmdOrCtrl+G",
             ToggleSnap => "CmdOrCtrl+4",
+            LoopClip => "CmdOrCtrl+Alt+L",
             Ungroup => "CmdOrCtrl+Alt+G",
             ZoomFit => "CmdOrCtrl+0",
             ShowTools => "CmdOrCtrl+1",
