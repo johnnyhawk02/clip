@@ -3721,6 +3721,7 @@ version = "0.1.0"
 dependencies = [
  "cpal",
  "eframe",
+ "flate2",
  "hound",
  "muda",
  "objc2 0.6.5",

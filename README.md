@@ -61,6 +61,14 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   any clip (copies are independent), and Clip ▸ Ungroup (⌥⌘G) puts the clips back.
 - Export writes the mix of the whole song (even from inside a group). Cues, regions and loops
   belong to each clip.
+- File ▸ Export Stems writes one WAV per track (with its volume and pan), all starting at zero and
+  all the same length, so they line up in another DAW. Together they add up to the mix.
+- File ▸ Export Ableton Live Set makes a "<name> Project" folder with a Live 12 set (.als) and a
+  Samples folder. Each track becomes an audio track with its name, colour, volume, pan, mute and
+  solo; clips sit in the arrangement where they are, trimmed the same, with clip loops as Live
+  loops, and the tempo and beats per bar carry over. Clips are warped so they play at their own
+  speed. Groups come across as their rendered audio. The set is built from Live's own default set
+  (`assets/ableton_template.xml`).
 - Shortcut changes: Select None is now ⇧⌘A and Zoom to Selection is ⇧⌘E.
 
 
@@ -197,6 +205,7 @@ macOS needs for recording, signs it ad hoc and copies it to /Applications.
 
 - `src/audio.rs` — decoding, WAV export, the edit operations, waveform peak cache
 - `src/project.rs` — the .sndproj project file
+- `src/ableton.rs` — Ableton Live Set export
 - `src/recorder.rs` — recording from the default input
 - `src/player.rs` — playback through the default output device (resamples to the device rate)
 - `src/actions.rs` — every command with its label, icon and shortcut; the menu and palette layouts

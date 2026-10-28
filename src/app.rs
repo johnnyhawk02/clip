@@ -10,6 +10,7 @@ use eframe::egui::{
     self, Align2, Button, Color32, FontId, Key, Modifiers, Pos2, Rect, Sense, Stroke, Vec2,
 };
 
+use crate::ableton;
 use crate::actions::{self, Action};
 use crate::audio::{self, Audio, Cue, Markers, Peaks, Region, WavFormat};
 use crate::effects::{self, Wave};
@@ -2335,6 +2336,135 @@ impl App {
     }
 
     /// Save each region as its own file, named after the region.
+    /// File ▸ Export Stems: one WAV per track (with its volume and pan), all starting at the
+    /// beginning and all the same length, so they line up when dropped into another DAW.
+    fn export_stems(&mut self) {
+        let tracks = self.song_tracks();
+        if tracks.is_empty() {
+            return;
+        }
+        let Some(dir) = rfd::FileDialog::new().set_title(format!("Choose a folder for {} stems", tracks.len())).pick_folder() else { return };
+        match self.write_stems(&tracks, &dir) {
+            Ok(n) => self.status = format!("Exported {n} stems to {}", dir.display()),
+            Err(e) => self.status = format!("Couldn't export stems: {e}"),
+        }
+    }
+
+    fn write_stems(&self, tracks: &[Track], dir: &Path) -> Result<usize, String> {
+        let rate = self.rate();
+        let len = tracks.iter().flat_map(|t| t.clips.iter().map(|c| c.end())).max().unwrap_or(0);
+        for (i, t) in tracks.iter().enumerate() {
+            let rendered = self.render_track(t);
+            let mut stem = effects::mix_panned(&[(&rendered, t.gain, t.pan)], rate);
+            // Pad to the full length so every stem lines up end to end too.
+            let channels = stem.num_channels().max(2);
+            stem = effects::convert_channels(&stem, channels);
+            for c in &mut stem.channels {
+                c.resize(len, 0.0);
+            }
+            let clean: String = t.name.chars().map(|c| if c.is_alphanumeric() || " -_".contains(c) { c } else { '_' }).collect();
+            audio::save_wav(&stem, &dir.join(format!("{:02} {}.wav", i + 1, clean.trim())), self.wav_format)?;
+        }
+        Ok(tracks.len())
+    }
+
+    /// File ▸ Export Ableton Live Set: a "<name> Project" folder holding a .als set (one audio
+    /// track per track, clips in place, loops, tempo) and the samples it plays.
+    fn export_ableton(&mut self) {
+        let tracks = self.song_tracks();
+        if tracks.is_empty() {
+            return;
+        }
+        let stem = self
+            .project_path
+            .as_ref()
+            .or(self.path.as_ref())
+            .and_then(|p| p.file_stem())
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Untitled".into());
+        let mut d = rfd::FileDialog::new().set_title("Export Ableton Live Set").add_filter("Ableton Live Set", &["als"]).set_file_name(format!("{stem}.als"));
+        if let Some(dir) = self.project_path.as_ref().or(self.path.as_ref()).and_then(|p| p.parent()) {
+            d = d.set_directory(dir);
+        }
+        let Some(p) = d.save_file() else { return };
+        let name = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(stem);
+        let dir = p.parent().unwrap_or(Path::new(".")).join(format!("{name} Project"));
+        match self.write_ableton(&tracks, &dir, &name) {
+            Ok(als) => self.status = format!("Exported Ableton Live Set {}", als.display()),
+            Err(e) => self.status = format!("Couldn't export the Live Set: {e}"),
+        }
+    }
+
+    fn write_ableton(&self, tracks: &[Track], dir: &Path, name: &str) -> Result<PathBuf, String> {
+        // Live's palette indices closest to each track colour (grey, blue, green, amber, red, purple).
+        const LIVE_COLORS: [u32; 6] = [27, 22, 19, 15, 14, 24];
+        let samples = dir.join("Samples").join("Imported");
+        std::fs::create_dir_all(&samples).map_err(|e| e.to_string())?;
+        // This (empty) folder is what makes Live treat the folder as a project, so it finds
+        // the samples by their project-relative paths.
+        std::fs::create_dir_all(dir.join("Ableton Project Info")).map_err(|e| e.to_string())?;
+        let bf = self.beat_frames();
+        let beats = |f: usize| f as f64 / bf;
+        let mut written: Vec<(*const Audio, String, u64)> = Vec::new();
+        let mut live = Vec::new();
+        for t in tracks {
+            let color = LIVE_COLORS[t.color % LIVE_COLORS.len()];
+            let mut clips = Vec::new();
+            for c in &t.clips {
+                // Each piece of audio is saved once, however many clips play it.
+                let key = Arc::as_ptr(&c.audio);
+                let (file, size) = match written.iter().find(|w| w.0 == key) {
+                    Some(w) => (w.1.clone(), w.2),
+                    None => {
+                        let clean: String = c.name.chars().map(|ch| if ch.is_alphanumeric() || " -_".contains(ch) { ch } else { '_' }).collect();
+                        let base = if clean.trim().is_empty() { "Clip".to_string() } else { clean.trim().to_string() };
+                        let mut file = format!("{base}.wav");
+                        let mut n = 2;
+                        while written.iter().any(|w| w.1 == file) {
+                            file = format!("{base} {n}.wav");
+                            n += 1;
+                        }
+                        let path = samples.join(&file);
+                        audio::save_wav(&c.audio, &path, WavFormat::Float32)?;
+                        let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                        written.push((key, file.clone(), size));
+                        (file, size)
+                    }
+                };
+                let rate = c.audio.rate.max(1);
+                // Sample positions in beats at the song tempo, the sample playing at its own speed.
+                let sb = |f: usize| f as f64 / rate as f64 * self.tempo / 60.0;
+                let (looping, ls, le, trim) = if c.looping {
+                    let (ls, le) = c.loop_range();
+                    let trim = if c.trim >= le && le > ls { ls + (c.trim - le) % (le - ls) } else { c.trim };
+                    (true, ls, le, trim)
+                } else {
+                    (false, c.trim, c.trim + c.len, c.trim)
+                };
+                clips.push(ableton::LiveClip {
+                    name: c.name.clone(),
+                    color,
+                    rel_path: format!("Samples/Imported/{file}"),
+                    abs_path: samples.join(&file).to_string_lossy().into_owned(),
+                    file_size: size,
+                    frames: c.audio.frames(),
+                    rate,
+                    start: beats(c.start),
+                    end: beats(c.end()),
+                    looping,
+                    loop_start: sb(ls),
+                    loop_end: sb(le),
+                    start_rel: if looping { sb(trim) - sb(ls) } else { 0.0 },
+                    sample_beats: sb(c.audio.frames()),
+                });
+            }
+            live.push(ableton::LiveTrack { name: t.name.clone(), color, gain: t.gain, pan: t.pan, mute: t.mute, solo: t.solo, clips });
+        }
+        let als = dir.join(format!("{name}.als"));
+        ableton::write(&als, self.tempo, self.beats_per_bar, &live)?;
+        Ok(als)
+    }
+
     fn export_regions(&mut self) {
         if self.regions.is_empty() {
             return;
@@ -2539,7 +2669,7 @@ impl App {
                 Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Dither | Action::AutoGain => true,
                 Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions => true,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
-                Action::Export => doc && self.arrangement_frames() > 0,
+                Action::Export | Action::ExportStems | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
                 Action::SplitClip => doc,
                 Action::ToolSelect | Action::ToolSplit => true,
@@ -2872,6 +3002,8 @@ impl App {
             }
             Action::AddRegion => self.add_region(),
             Action::ExportRegions => self.export_regions(),
+            Action::ExportStems => self.export_stems(),
+            Action::ExportAbleton => self.export_ableton(),
             Action::RulerTime => self.ruler = RulerUnits::Time,
             Action::RulerSamples => self.ruler = RulerUnits::Samples,
             Action::RulerTimecode => self.ruler = RulerUnits::Timecode,
@@ -5705,6 +5837,15 @@ impl App {
                         let q = Pos2::new(parts[0].parse().unwrap_or(0.0), parts.get(1).and_then(|v| v.parse().ok()).unwrap_or(0.0));
                         let files = parts.iter().skip(2).map(PathBuf::from).collect();
                         self.handle_drop(files, Some(q), ctx);
+                    }
+                    "als" => {
+                        let p = Path::new(arg);
+                        let r = self.write_ableton(&self.song_tracks(), p, "Test");
+                        self.status = format!("als {arg}: {r:?}");
+                    }
+                    "stems" => {
+                        let r = self.write_stems(&self.song_tracks(), Path::new(arg));
+                        self.status = format!("stems {arg}: {r:?}");
                     }
                     "saveproj" => {
                         let r = self.write_project(Path::new(arg));

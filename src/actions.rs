@@ -113,6 +113,8 @@ pub enum Action {
     LoopClip,
     CollapseClip,
     CollapseTrack,
+    ExportStems,
+    ExportAbleton,
 }
 
 use Action::*;
@@ -129,6 +131,7 @@ pub const ALL: &[Action] = &[
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
     GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
     ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack,
+    ExportStems, ExportAbleton,
 ];
 
 pub enum Item {
@@ -154,6 +157,8 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(Export),
             Do(ExportSelection),
             Do(ExportRegions),
+            Do(ExportStems),
+            Do(ExportAbleton),
             Sub("Export Format", &[Do(FormatPcm8), Do(FormatPcm16), Do(FormatPcm24), Do(FormatFloat32), Separator, Do(Dither)]),
             Separator,
             Do(Split),
@@ -395,6 +400,8 @@ impl Action {
             ClearLoop => "Clear Loop",
             AddRegion => "Region from Selection",
             ExportRegions => "Export Regions…",
+            ExportStems => "Export Stems…",
+            ExportAbleton => "Export Ableton Live Set…",
             RulerTime => "Minutes:Seconds",
             RulerSamples => "Samples",
             RulerTimecode => "Timecode (30 fps)",
