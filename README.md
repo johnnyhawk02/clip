@@ -20,7 +20,7 @@ job: chopping up loops, keeping the good bits and arranging them into a track.
 - To mangle a stretch of time instead of whole clips, drag across the ruler to set the loop and turn Loop on. Mangle then cuts the clips at the loop's edges, slices what's inside at the grid, and mangles only that, on the track you're working on (or the tracks of the selected clips). You hear it looping, and ⌘Y gives a new variation.
 - Auto Arrange (in the top bar, or Clip ▸ Auto Arrange) builds a 4-minute track from the loops in the song. Each loop is warped to the song tempo and cut into 8 or 16 bar sections, and the sections are laid out on one track per loop with an intro, a build, a breakdown and an outro. ◀ ▶ step through variations; each number always gives the same layout, so you can go back to one you liked. Loops shorter than a section repeat to fill it.
 - Overlap two clips on the same track and they crossfade across the overlap (equal power), shown by an X. Drag further over for a longer fade. A clip lying wholly inside another just plays on top of it.
-- Swap Section (R, or Clip ▸ Auto Arrange ▸ Swap Section): click a clip and press R to replace it with a random section of the same length from the loop pool, in the same place. Press R again for another; ⌘Z undoes it.
+- Swap Section (⇧R, or Clip ▸ Auto Arrange ▸ Swap Section): click a clip and press ⇧R to replace it with a random section of the same length from the loop pool, in the same place. Press ⇧R again for another; ⌘Z undoes it.
 - The Loop Pool (View ▸ Panels ▸ Loop Pool, ⌘7) lists the loops in the song, warped to its tempo. Drag one onto a track to add it there at the grid line you drop it on, or below the last track for a new one. Auto Arrange and Swap Section draw from the same pool; Grouped clips count as loops too, and Clip ▸ Add to Pool (also on the right-click menu) puts any selected clip in as it is, trimmed or grouped. × takes a loop out of the pool and Add Loops from Song brings in new ones.
 - The tool palette floats: a strip of the tools, then a row of Mangle buttons and a row of
   BBCut styles. Drag it by its title, collapse it with the triangle, close it with the cross
@@ -43,7 +43,7 @@ Try the files in `samples/`.
 **Projects:** File ▸ Save Project (⌘S) / Save Project As (⇧⌘S) saves everything — tracks,
 clips, groups, cues, regions, loops, mixer settings and the audio itself — in one `.sndproj`
 file. Open it again by double-clicking it in Finder, with File ▸ Open, or by dropping it on the
-window. (Audio files can be opened from Finder with Open With ▸ Sound Edit too.) Export Mix (⌥⌘S) writes
+window. (Audio files can be opened from Finder with Open With ▸ Sound Edit too.) Export Mix (⇧⌘R) writes
 the mixed-down WAV/AIFF. The unsaved-changes prompt offers to save the project.
 
 **Arrangement and clips (like Ableton's Arrangement view).** A sound is an arrangement of tracks,
@@ -84,7 +84,7 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   They become one group clip holding them, in the same places and keeping their tracks' settings.
   Double-click a group to open it as its own arrangement; the path bar (Song ▸ Group 1 ▸ …) or
   ⌘Return goes back up. Groups can hold groups, can be moved, trimmed, split and duplicated like
-  any clip (copies are independent), and Clip ▸ Ungroup (⌥⌘G) puts the clips back.
+  any clip (copies are independent), and Clip ▸ Ungroup (⇧⌘G) puts the clips back.
 - Export writes the mix of the whole song (even from inside a group). Cues, regions and loops
   belong to each clip.
 - Warping: a clip whose file name gives its tempo ("Loop 118bpm 16bar", "Kick - 124 BPM",
@@ -104,12 +104,12 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   loops, and the tempo and beats per bar carry over. Clips are warped so they play at their own
   speed. Groups come across as their rendered audio. The set is built from Live's own default set
   (`assets/ableton_template.xml`).
-- Shortcut changes: Select None is now ⇧⌘A and Zoom to Selection is ⇧⌘E.
+- Shortcuts follow Ableton Live wherever the two apps share a feature: ⌘E split, ⌘D duplicate, ⌘J consolidate (Collapse to Audio), ⌘G / ⇧⌘G group and ungroup, ⌘L loop on/off, R reverse clip, Z zoom to selection, X zoom back, W fit the song in the window, ⌘1 / ⌘2 narrow and widen the grid, ⌘4 snap, B draw (Pencil), ⌘T new track, ⇧⌘J crop (Trim), ⇧⌘R export, F9 record, ⇧Tab switch between the arrangement and the clip editor. Select None is ⇧⌘A.
 
 
 A clean black, white and grey layout: tools on the left, the waveform in the middle, the transport
 bar (play controls, time counter, level meters) along the bottom, and an Info / Cues side panel on
-the right. Window ▸ Tools / Controls / Info / Cues (⌘1 / ⌘2 / ⌘I / ⌘3) shows or hides each part.
+the right. Window ▸ Tools / Controls / Info / Cues (⌥⌘1 / ⌥⌘2 / ⌘I / ⌘3) shows or hides each part.
 Every command is in the menu bar: **File, Edit, Insert, Effects, Control, View, Window**.
 
 **Tools** (palette, or press the key):
@@ -118,9 +118,9 @@ Every command is in the menu bar: **File, Edit, Insert, Effects, Control, View, 
 |---|---|---|
 | Selection | S | Drag to select, shift-click to extend, double-click selects all, click sets the insertion point |
 | Hand | H | Drag to scroll through the sound |
-| Zoom | Z | Click to zoom in, ⌥-click to zoom out, drag a range to zoom to it |
-| Pencil | P | Redraw the waveform by hand (zoom in close first); each stroke is one undo step |
-| Split | B | In the arrangement, click a clip to cut it there (snaps to the grid; hold ⌘ to cut anywhere) |
+| Zoom | — | Click to zoom in, ⌥-click to zoom out, drag a range to zoom to it |
+| Pencil | B | Redraw the waveform by hand (zoom in close first); each stroke is one undo step |
+| Split | C | In the arrangement, click a clip to cut it there (snaps to the grid; hold ⌘ to cut anywhere) |
 
 **Mouse and modifier keys:**
 
@@ -144,18 +144,18 @@ level meters. **Info** shows the format, length, selection and peak level.
 | Do this | How |
 |---|---|
 | Play / pause | Space (plays the selection if there is one). Esc stops. ⌘L loops the selection. |
-| Zoom | Pinch or ⌘-scroll, ⌘= / ⌘-, ⌘0 shows the entire sound, ⌘E zooms to the selection |
+| Zoom | Pinch or ⌘-scroll, ⌘= / ⌘-, W or ⌘0 shows the entire sound, Z zooms to the selection and X zooms back |
 | Scroll | Scroll / two-finger swipe, the Hand tool, or the bar under the waveform |
 | Cut / Copy / Paste / Clear | ⌘X / ⌘C / ⌘V / ⌫ |
 | Mix Paste | ⌥⌘V — mixes the clipboard in at the cursor (with a level) instead of inserting it |
-| Trim | ⌘T keeps only the selection |
+| Trim | ⇧⌘J keeps only the selection |
 | Undo / Redo | ⌘Z / ⇧⌘Z |
 | New | ⌘N gives an empty 44.1 kHz stereo sound to build up with Insert, Paste or Mix Paste |
 | Save project | ⌘S, Save As ⇧⌘S |
-| Export | ⌥⌘S the mix, ⌥⇧⌘S the selection (editor) or selected clip (arrangement). Bit depth is under File ▸ Export Format. |
+| Export | ⇧⌘R the mix, ⌥⇧⌘S the selection (editor) or selected clip (arrangement). Bit depth is under File ▸ Export Format. |
 | Split into sounds | ⇧⌘K — see below |
 
-**Multiple tracks:** the Tracks menu adds tracks: New Track (⇧⌘T, silent, as long as the sound),
+**Multiple tracks:** the Tracks menu adds tracks: New Track (⌘T, silent, as long as the sound),
 Import File as Track… (⇧⌘O), Duplicate Track and Delete Track. Tracks play together, mixed. Each one
 has a header with its name, **M** (mute), **S** (solo) and a volume slider. Click a track, or use ⌥⌘↑ / ⌥⌘↓,
 to make it the one you're editing: selections, effects, pasting, recording and the pencil all
@@ -169,7 +169,7 @@ turns a mix down if it would clip. Effects ▸ Cut Out Gaps shortens silent stre
 
 **Loops and regions:** Insert ▸ Set Loop to Selection (⇧⌘L) marks loop points (a black bar in the
 ruler); with Loop on (⌘L) and nothing selected, Play repeats them. Insert ▸ Region from Selection
-(⇧⌘R) adds a named region (a grey band in the ruler; click it to select it). Window ▸ Regions lists
+(⌥⌘R) adds a named region (a grey band in the ruler; click it to select it). Window ▸ Regions lists
 them; File ▸ Export Regions saves each as its own file. Cues, regions and loop points are all saved
 in WAV files.
 
@@ -187,7 +187,7 @@ following playback live); 3D shows a waterfall of spectra across the selection.
 **Batch Convert** (File menu): convert many files at once to WAV (8/16/24/32-bit float) or AIFF,
 optionally changing the sample rate or channels and normalizing.
 
-**Recording:** Control ▸ Record… (⌘R), or the record button in the transport bar, opens the Record window.
+**Recording:** Control ▸ Record… (F9), or the record button in the transport bar, opens the Record window.
 Press Record, then Stop: the take goes in at the insertion point (or replaces the selection), or
 becomes a new sound if nothing is open. It records from the Mac's current input (System Settings ▸
 Sound ▸ Input); macOS asks for microphone permission the first time.

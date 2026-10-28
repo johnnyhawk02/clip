@@ -246,6 +246,8 @@ pub struct App {
     loop_points: Option<Sel>,
     show_regions: bool,
     show_pool: bool,
+    /// The view before Zoom to Selection, for Zoom Back (in the arrangement or the editor).
+    zoom_back: Option<(bool, f64, f64)>,
     ruler: RulerUnits,
     show_spectrum: bool,
     spectrum_3d: bool,
@@ -371,6 +373,7 @@ impl App {
             loop_points: None,
             show_regions: false,
             show_pool: false,
+            zoom_back: None,
             ruler: RulerUnits::Time,
             show_spectrum: false,
             spectrum_3d: false,
@@ -908,7 +911,9 @@ impl App {
                 Action::SwapSection | Action::AddToPool => has_clip,
                 Action::CollapseTrack => self.tracks.get(self.active).is_some_and(|t| !t.clips.is_empty()),
                 Action::ClearLoop => self.arr_loop.is_some(),
-                Action::ToggleSnap => doc,
+                Action::ToggleSnap | Action::NarrowGrid | Action::WidenGrid => doc,
+                Action::ZoomSel => has_clip || self.arr_loop.is_some(),
+                Action::ZoomBack => self.zoom_back.is_some_and(|z| z.0),
                 Action::Ungroup => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.group.is_some()),
                 Action::SelectAll => doc,
                 Action::BackToArrangement => !self.nest.is_empty(),
@@ -926,7 +931,8 @@ impl App {
             Action::BackToArrangement => return true,
             Action::SaveProject | Action::SaveProjectAs => return doc,
             Action::EditClip | Action::SplitClip | Action::DuplicateClip | Action::NewClip | Action::ImportClip => return false,
-            Action::GroupClips | Action::Ungroup | Action::TempoFromClip | Action::ToggleSnap | Action::LoopClip => return false,
+            Action::GroupClips | Action::Ungroup | Action::TempoFromClip | Action::ToggleSnap | Action::LoopClip | Action::NarrowGrid | Action::WidenGrid => return false,
+            Action::ZoomBack => return self.zoom_back.is_some_and(|z| !z.0),
             Action::CollapseClip | Action::CollapseTrack | Action::WarpClip | Action::SliceClip | Action::ReverseClip => return false,
             Action::MangleShuffle | Action::MangleReverse | Action::MangleSwap | Action::MangleStutter | Action::MangleRandomReverse | Action::MangleDropOut | Action::MangleBBCut | Action::MangleAgain => return false,
             Action::MangleCutHouse | Action::MangleCutHipHop | Action::MangleCutDembow | Action::MangleCutFootwork | Action::MangleCutTrap | Action::MangleCutBreakcore | Action::MangleCutHalftime => return false,
@@ -1049,6 +1055,25 @@ impl App {
                 Action::ZoomIn => return self.arr_zoom(0.5, mid),
                 Action::ZoomOut => return self.arr_zoom(2.0, mid),
                 Action::ZoomFit => return self.arr_fit(),
+                Action::ZoomSel => {
+                    // The selected clips, or the loop range.
+                    let span = self.selected_clips().iter().filter_map(|&p| self.clip(p)).map(|c| (c.start, c.end())).reduce(|a, b| (a.0.min(b.0), a.1.max(b.1))).or(self.arr_loop);
+                    if let Some((s, e)) = span {
+                        self.zoom_back = Some((true, self.arr_view_start, self.arr_view_len));
+                        let pad = (e - s) as f64 * 0.05;
+                        self.arr_view_start = s as f64 - pad;
+                        self.arr_view_len = (e - s) as f64 + 2.0 * pad;
+                        self.arr_clamp();
+                    }
+                    return;
+                }
+                Action::ZoomBack => {
+                    if let Some((true, s, l)) = self.zoom_back.take() {
+                        (self.arr_view_start, self.arr_view_len) = (s, l);
+                        self.arr_clamp();
+                    }
+                    return;
+                }
                 Action::GoStart => {
                     self.arr_cursor = 0;
                     self.arr_view_start = 0.0;
@@ -1164,7 +1189,16 @@ impl App {
             }
             Action::ZoomIn => self.zoom(0.5, mid),
             Action::ZoomOut => self.zoom(2.0, mid),
-            Action::ZoomSel => self.zoom_to_selection(),
+            Action::ZoomSel => {
+                self.zoom_back = Some((false, self.view_start, self.view_len));
+                self.zoom_to_selection();
+            }
+            Action::ZoomBack => {
+                if let Some((false, s, l)) = self.zoom_back.take() {
+                    (self.view_start, self.view_len) = (s, l);
+                    self.clamp_view();
+                }
+            }
             Action::ZoomFit => self.zoom_fit(),
             Action::ToolSelect => self.tool = Tool::Select,
             Action::ToolHand => self.tool = Tool::Hand,
@@ -1203,6 +1237,15 @@ impl App {
             Action::CollapseClip => self.collapse_clip(),
             Action::CollapseTrack => self.collapse_track(self.active),
             Action::ToggleSnap => self.snap = !self.snap,
+            Action::NarrowGrid | Action::WidenGrid => {
+                // Steps through 1 Bar … 1/32; from Off or Auto it starts at 1/4.
+                self.grid = match (self.grid, a == Action::NarrowGrid) {
+                    (0 | 1, _) => 4,
+                    (g, true) => (g + 1).min(GRID.len() - 1),
+                    (g, false) => (g - 1).max(2),
+                };
+                self.status = format!("Grid {}", GRID[self.grid].0);
+            }
             Action::AutoWarp => self.auto_warp = !self.auto_warp,
             Action::WarpClip => self.toggle_warp(),
             Action::SliceClip => self.slice_clip(),
@@ -1334,13 +1377,17 @@ impl App {
             (none, Key::Plus, Action::ZoomIn),
             (none, Key::Minus, Action::ZoomOut),
             (none, Key::F, Action::ZoomFit),
+            (none, Key::W, Action::ZoomFit),
+            (none, Key::Z, Action::ZoomSel),
+            (none, Key::X, Action::ZoomBack),
             (none, Key::L, Action::Loop),
             (none, Key::S, Action::ToolSelect),
             (none, Key::H, Action::ToolHand),
-            (none, Key::Z, Action::ToolZoom),
-            (none, Key::P, Action::ToolPencil),
-            (none, Key::B, Action::ToolSplit),
-            (none, Key::R, Action::SwapSection),
+            (none, Key::B, Action::ToolPencil),
+            (none, Key::C, Action::ToolSplit),
+            // ⇧R before R: a plain-key binding also catches the shifted key.
+            (Modifiers::SHIFT, Key::R, Action::SwapSection),
+            (none, Key::R, Action::ReverseClip),
             (none, Key::Enter, Action::EditClip),
             (none, Key::OpenBracket, Action::PrevCue),
             (none, Key::CloseBracket, Action::NextCue),
@@ -1349,6 +1396,11 @@ impl App {
             if ctx.input_mut(|i| i.consume_key(m, k)) {
                 self.run(a, ctx);
             }
+        }
+        // ⇧Tab switches between the arrangement and the clip editor, as in Live.
+        if ctx.input_mut(|i| i.consume_key(Modifiers::SHIFT, Key::Tab)) {
+            let a = if self.view == View::Arrangement { Action::EditClip } else { Action::BackToArrangement };
+            self.run(a, ctx);
         }
         if ctx.input_mut(|i| i.consume_key(none, Key::Escape)) {
             if self.player.is_playing() {

@@ -123,9 +123,9 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <h2><span class="n">03</span>Chopping loops</h2>
   <div class="cards">
     <div class="card"><b>Split Clip <kbd>⌘E</kbd></b><span>Cuts the clip under the pointer, at the pointer (snapped to the grid), or at the playhead when the pointer isn't over a clip.</span></div>
-    <div class="card"><b>Split tool <kbd>B</kbd></b><span>Click anywhere on a clip to cut it there. Press <kbd>S</kbd> to go back to the selection tool.</span></div>
+    <div class="card"><b>Split tool <kbd>C</kbd></b><span>Click anywhere on a clip to cut it there. Press <kbd>S</kbd> to go back to the selection tool.</span></div>
     <div class="card"><b>Slice at Grid <kbd>⌘U</kbd></b><span>Cuts the selected clips at every grid line, ready to drag around, duplicate, loop and group.</span></div>
-    <div class="card"><b>Reverse</b><span>Plays the selected clips backwards. On the clip's right-click menu.</span></div>
+    <div class="card"><b>Reverse <kbd>R</kbd></b><span>Plays the selected clips backwards. Also on the clip's right-click menu.</span></div>
   </div>
   <figure><img src="img/slice.jpg" alt="A loop sliced into beat-length clips"><figcaption>A loop after Slice at Grid: every beat is now its own clip.</figcaption></figure>
 </section>
@@ -161,8 +161,8 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <li><b>Add to Pool</b> on a clip's right-click menu puts that exact clip in, trimmed or grouped.</li>
     <li><b>×</b> takes a loop out. <b>Add Loops from Song</b> brings in any new ones.</li>
   </ul>
-  <h3>Swap a section <kbd>R</kbd></h3>
-  <p>Click a clip and press <kbd>R</kbd>. It becomes a random section of the same length from the pool, in the same place. Press <kbd>R</kbd> again for another, or <kbd>⌘Z</kbd> to go back. Works on several selected clips at once.</p>
+  <h3>Swap a section <kbd>⇧R</kbd></h3>
+  <p>Click a clip and press <kbd>⇧R</kbd>. It becomes a random section of the same length from the pool, in the same place. Press <kbd>⇧R</kbd> again for another, or <kbd>⌘Z</kbd> to go back. Works on several selected clips at once.</p>
   <h3>Auto Arrange</h3>
   <p>Press <b>Auto Arrange</b> in the top bar. It builds about four minutes from the pool: each loop gets its own track and is cut into 8 or 16 bar sections, laid out with an intro, a build, a breakdown a little past halfway, a second peak and an outro.</p>
   <figure><img src="img/swap1.jpg" alt="An auto-arranged song with three loop tracks"><figcaption>Variation 1 from three loops: 15 sections of 8 bars, 4.1 minutes.</figcaption></figure>
@@ -193,22 +193,22 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <ul>
     <li><b>Loop Clip</b> <kbd>⌥⌘L</kbd> makes a clip repeat for as long as you drag its right edge out. Dotted lines show where it starts over.</li>
     <li><b>Song loop:</b> drag in the ruler to draw a loop range, and turn it on or off with <kbd>⌘L</kbd> or the loop button.</li>
-    <li><b>Group into Clip</b> <kbd>⌘G</kbd>: shift-click clips (or <kbd>⌘A</kbd>) and they become one clip holding them all. Double-click it to open it as its own arrangement; the path bar or <kbd>⌘Return</kbd> goes back up. <kbd>⌥⌘G</kbd> ungroups.</li>
+    <li><b>Group into Clip</b> <kbd>⌘G</kbd>: shift-click clips (or <kbd>⌘A</kbd>) and they become one clip holding them all. Double-click it to open it as its own arrangement; the path bar or <kbd>⌘Return</kbd> goes back up. <kbd>⇧⌘G</kbd> ungroups.</li>
     <li><b>Collapse to Audio</b> <kbd>⌘J</kbd> renders a group, looped or trimmed clip down to one plain clip that sounds the same.</li>
   </ul>
 </section>
 
 <section id="editor">
   <h2><span class="n">08</span>The clip editor</h2>
-  <p>Double-click a clip, or press <kbd>Return</kbd>, to edit its audio in the waveform editor. <b>◀ Arrangement</b> or <kbd>⌘Return</kbd> goes back.</p>
+  <p>Double-click a clip, or press <kbd>Return</kbd>, to edit its audio in the waveform editor. <b>◀ Arrangement</b> or <kbd>⌘Return</kbd> goes back, and <kbd>⇧Tab</kbd> flips between the two as in Live.</p>
   <figure><img src="img/editor.jpg" alt="The waveform editor showing a stereo loop"><figcaption>Editing one clip. Selections, effects and the pencil work on this clip only.</figcaption></figure>
   <div class="table"><table>
     <tr><th>Tool</th><th>Key</th><th>What it does</th></tr>
     <tr><td>Selection</td><td><kbd>S</kbd></td><td>Drag to select, shift-click to extend, double-click selects between cues.</td></tr>
     <tr><td>Hand</td><td><kbd>H</kbd></td><td>Drag to scroll. Holding Space does the same with any tool.</td></tr>
-    <tr><td>Zoom</td><td><kbd>Z</kbd></td><td>Click to zoom in, <kbd>⌥</kbd>-click to zoom out, drag a range to zoom to it.</td></tr>
-    <tr><td>Pencil</td><td><kbd>P</kbd></td><td>Redraw the waveform by hand, zoomed in close.</td></tr>
-    <tr><td>Split</td><td><kbd>B</kbd></td><td>Click a clip in the arrangement to cut it there.</td></tr>
+    <tr><td>Zoom</td><td>palette</td><td>Click to zoom in, <kbd>⌥</kbd>-click to zoom out, drag a range to zoom to it.</td></tr>
+    <tr><td>Pencil</td><td><kbd>B</kbd></td><td>Redraw the waveform by hand, zoomed in close.</td></tr>
+    <tr><td>Split</td><td><kbd>C</kbd></td><td>Click a clip in the arrangement to cut it there.</td></tr>
   </table></div>
   <p>The older sound-editor features live under the <b>More</b> menu: effects (Normalize, fades, Reverb, Delay, Echo, EQ, Compressor, Noise Gate, Pitch, Tempo and more), Insert (silence, tones, noise, FM synthesis), cue points and regions, recording, Spectrum and Batch Convert.</p>
 </section>
@@ -217,7 +217,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <h2><span class="n">09</span>Saving and exporting</h2>
   <div class="cards">
     <div class="card"><b>Save Project <kbd>⌘S</kbd></b><span>One .sndproj file with every track, clip, group, loop, mixer setting and the audio itself. Double-click it in Finder to open.</span></div>
-    <div class="card"><b>Export Mix <kbd>⌥⌘S</kbd></b><span>The whole song as one WAV or AIFF, at 16-bit, 24-bit or 32-bit float.</span></div>
+    <div class="card"><b>Export Mix <kbd>⇧⌘R</kbd></b><span>The whole song as one WAV or AIFF, at 16-bit, 24-bit or 32-bit float.</span></div>
     <div class="card"><b>Export Stems</b><span>One WAV per track, all starting at zero and the same length, so they line up in another DAW.</span></div>
     <div class="card"><b>Export Ableton Live Set</b><span>A Live 12 project folder: tracks, names, colours, mixer, clip positions, loops and warping all carry over. Crossfades don't.</span></div>
   </div>
@@ -225,6 +225,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 
 <section id="keys">
   <h2><span class="n">10</span>Shortcuts</h2>
+  <p>Wherever Sound Edit and Ableton Live share a feature, the key is the same as in Live, so your hands already know them.</p>
   <div class="table"><table>
     <tr><th>Keys</th><th>Does</th></tr>
     <tr><td><kbd>Space</kbd></td><td>Play / pause. <kbd>Esc</kbd> stops.</td></tr>
@@ -232,20 +233,25 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <tr><td><kbd>⌘U</kbd></td><td>Slice at grid</td></tr>
     <tr><td><kbd>⌘D</kbd></td><td>Duplicate clip</td></tr>
     <tr><td><kbd>⌘Y</kbd></td><td>Mangle again</td></tr>
-    <tr><td><kbd>R</kbd></td><td>Swap the selected clip for a random section from the pool</td></tr>
+    <tr><td><kbd>R</kbd></td><td>Reverse the selected clips</td></tr>
+    <tr><td><kbd>⇧R</kbd></td><td>Swap the selected clip for a random section from the pool</td></tr>
     <tr><td><kbd>⌘7</kbd></td><td>Show or hide the Loop Pool</td></tr>
-    <tr><td><kbd>⌘G</kbd> / <kbd>⌥⌘G</kbd></td><td>Group / ungroup</td></tr>
+    <tr><td><kbd>⌘G</kbd> / <kbd>⇧⌘G</kbd></td><td>Group / ungroup</td></tr>
     <tr><td><kbd>⌘J</kbd></td><td>Collapse to audio</td></tr>
     <tr><td><kbd>⌥⌘L</kbd></td><td>Loop clip</td></tr>
     <tr><td><kbd>⌘L</kbd></td><td>Song loop on / off</td></tr>
     <tr><td><kbd>⌘4</kbd></td><td>Snap to grid on / off</td></tr>
-    <tr><td><kbd>Return</kbd> / <kbd>⌘Return</kbd></td><td>Edit clip / back to the arrangement</td></tr>
-    <tr><td><kbd>S</kbd> <kbd>H</kbd> <kbd>Z</kbd> <kbd>P</kbd> <kbd>B</kbd></td><td>Selection, Hand, Zoom, Pencil, Split tools</td></tr>
-    <tr><td><kbd>F</kbd> or <kbd>⌘0</kbd></td><td>Zoom to fit</td></tr>
-    <tr><td><kbd>⌘=</kbd> / <kbd>⌘-</kbd></td><td>Zoom in / out (or pinch, ⌘-scroll)</td></tr>
+    <tr><td><kbd>Return</kbd> / <kbd>⌘Return</kbd></td><td>Edit clip / back to the arrangement. <kbd>⇧Tab</kbd> flips between them.</td></tr>
+    <tr><td><kbd>Z</kbd> / <kbd>X</kbd></td><td>Zoom to the selection / zoom back</td></tr>
+    <tr><td><kbd>⌘1</kbd> / <kbd>⌘2</kbd></td><td>Narrow / widen the grid</td></tr>
+    <tr><td><kbd>⌘T</kbd></td><td>New track</td></tr>
+    <tr><td><kbd>F9</kbd></td><td>Record</td></tr>
+    <tr><td><kbd>S</kbd> <kbd>H</kbd> <kbd>B</kbd> <kbd>C</kbd></td><td>Selection, Hand, Pencil (Live's Draw), Split tools</td></tr>
+    <tr><td><kbd>W</kbd> or <kbd>⌘0</kbd></td><td>Fit the song in the window</td></tr>
+    <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom in / out (or ⌘= / ⌘-, pinch, ⌘-scroll)</td></tr>
     <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Go to start / end</td></tr>
     <tr><td><kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd></td><td>Undo / redo</td></tr>
-    <tr><td><kbd>⌘S</kbd> / <kbd>⌥⌘S</kbd></td><td>Save project / export mix</td></tr>
+    <tr><td><kbd>⌘S</kbd> / <kbd>⇧⌘R</kbd></td><td>Save project / export mix</td></tr>
   </table></div>
 </section>
 
