@@ -275,6 +275,17 @@ pub(super) fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color3
                 Stroke::NONE,
             ));
         }
+        Action::Crossfeed => {
+            // Headphones: a band over the top and an ear cup either side.
+            let pts: Vec<Pos2> = (0..=20).map(|i| {
+                let t = std::f32::consts::PI * (1.0 + i as f32 / 20.0);
+                pt(7.0 * t.cos(), 2.0 + 8.0 * t.sin())
+            }).collect();
+            p.add(egui::Shape::line(pts, st));
+            for s in [-1.0f32, 1.0] {
+                p.rect_filled(Rect::from_min_max(pt(s * 7.5 - 2.5, 1.0), pt(s * 7.5 + 2.5, 8.0)), 1.5, color);
+            }
+        }
         _ => {}
     }
 }

@@ -27,6 +27,8 @@ pub struct ProjectFile {
     pub arr_loop: Option<(usize, usize)>,
     #[serde(default)]
     pub looping: bool,
+    #[serde(default = "default_master")]
+    pub master_gain: f32,
     pub rate: u32,
     pub tracks: Vec<TrackData>,
     pub audio: Vec<AudioData>,
@@ -43,6 +45,9 @@ fn default_grid() -> usize {
 }
 fn default_snap() -> bool {
     true
+}
+fn default_master() -> f32 {
+    1.0
 }
 
 #[derive(Serialize, Deserialize)]
@@ -146,6 +151,7 @@ mod tests {
             snap: true,
             arr_loop: Some((0, 3)),
             looping: true,
+            master_gain: 1.0,
             rate: 1000,
             tracks: vec![TrackData {
                 name: "T".into(),

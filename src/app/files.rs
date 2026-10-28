@@ -305,6 +305,7 @@ impl App {
             snap: self.snap,
             arr_loop: self.arr_loop,
             looping: self.looping,
+            master_gain: self.master_gain,
             rate: self.rate(),
             tracks: data,
             audio: pool.iter().map(|a| project::AudioData { rate: a.rate, channels: a.num_channels(), frames: a.frames() }).collect(),
@@ -324,6 +325,7 @@ impl App {
         let audio: Vec<Arc<Audio>> = audio.into_iter().map(Arc::new).collect();
         let rate = file.rate;
         (self.tempo, self.beats_per_bar, self.grid, self.snap) = (file.tempo, file.beats_per_bar.max(1), file.grid.min(GRID.len() - 1), file.snap);
+        self.master_gain = file.master_gain;
         (self.arr_loop, self.looping) = (file.arr_loop, file.looping);
         fn build(app: &App, data: &[TrackData], audio: &[Arc<Audio>], rate: u32) -> Vec<Track> {
             data.iter()

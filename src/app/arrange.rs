@@ -3,6 +3,9 @@
 
 use super::*;
 
+/// Height of the master channel strip under the tracks.
+const MASTER_H: f32 = 40.0;
+
 /// Where the parts of the arrangement view sit this frame.
 #[derive(Clone, Copy)]
 struct ArrArea {
@@ -522,7 +525,9 @@ impl App {
         let ruler_h = 22.0;
         let ruler = Rect::from_min_max(Pos2::new(full.left() + header_w, full.top()), Pos2::new(full.right(), full.top() + ruler_h));
         let scroll = Rect::from_min_max(Pos2::new(full.left() + header_w, full.bottom() - 15.0), full.max);
-        let lanes = Rect::from_min_max(Pos2::new(full.left() + header_w, ruler.bottom()), Pos2::new(full.right(), scroll.top()));
+        // The master channel sits under the tracks, above the scroll bar.
+        let master = Rect::from_min_max(Pos2::new(full.left(), scroll.top() - MASTER_H), Pos2::new(full.right(), scroll.top()));
+        let lanes = Rect::from_min_max(Pos2::new(full.left() + header_w, ruler.bottom()), Pos2::new(full.right(), master.top()));
         let n_tracks = self.tracks.len().max(1);
         let lane_h = (lanes.height() / n_tracks as f32).min(120.0);
         self.arr_lanes = Some((lanes, lane_h));
@@ -792,8 +797,59 @@ impl App {
         self.paint_arrangement(ui, &a, thumb, resp.hover_pos(), playing, play_pos);
         self.pool_drop(ui, &resp);
         if !self.tracks.is_empty() {
-            let header = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.left() + header_w, scroll.top()));
+            let header = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.left() + header_w, lanes.bottom()));
             self.track_headers(ui, header, self.tracks.len(), &lane);
+            self.master_strip(ui, master, header_w);
+        }
+    }
+
+    /// The master channel: the whole mix's volume and level, and the headphone crossfeed switch.
+    fn master_strip(&mut self, ui: &mut egui::Ui, r: Rect, header_w: f32) {
+        let p = ui.painter();
+        p.rect_filled(r, 0.0, PANEL);
+        // The corner beside the scroll bar, below the header column.
+        p.rect_filled(Rect::from_min_size(Pos2::new(r.left(), r.bottom()), Vec2::new(header_w, 15.0)), 0.0, PANEL);
+        p.line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, Color32::from_gray(190)));
+        p.line_segment([Pos2::new(r.left() + header_w - 1.0, r.top()), Pos2::new(r.left() + header_w - 1.0, r.bottom())], Stroke::new(1.0, LINE));
+        // Level meters along the lane side.
+        let m = Rect::from_min_max(Pos2::new(r.left() + header_w + 12.0, r.top() + 11.0), Pos2::new((r.left() + header_w + 372.0).min(r.right() - 12.0), r.bottom() - 11.0));
+        let n = self.meter.len().max(1);
+        let h = (m.height() - 2.0 * (n - 1) as f32) / n as f32;
+        for c in 0..n {
+            let row = Rect::from_min_size(Pos2::new(m.left(), m.top() + c as f32 * (h + 2.0)), Vec2::new(m.width(), h));
+            draw_meter(p, row, self.meter.get(c).copied().unwrap_or(0.0));
+        }
+        let inner = Rect::from_min_max(Pos2::new(r.left() + 10.0, r.top() + 1.0), Pos2::new(r.left() + header_w - 10.0, r.bottom()));
+        let mut toggle = false;
+        let mut changed = false;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+            ui.label(egui::RichText::new("Master").strong().color(INK));
+            let (b, resp) = ui.allocate_exact_size(Vec2::new(26.0, 22.0), Sense::click());
+            let on = self.crossfeed;
+            let hover = resp.hovered();
+            ui.painter().rect(b, 4.0, if on { INK } else if hover { Color32::from_gray(232) } else { Color32::WHITE }, Stroke::new(1.0, if on { INK } else { LINE }), egui::StrokeKind::Inside);
+            paint_icon(ui.painter(), b, Action::Crossfeed, if on { Color32::WHITE } else { INK }, false);
+            if resp.on_hover_text(if on { "Headphone crossfeed is on (click to turn off)" } else { "Headphone crossfeed: hear the mix as if from speakers" }).clicked() {
+                toggle = true;
+            }
+            ui.spacing_mut().slider_width = ui.available_width().max(20.0);
+            let vol = ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=2.0).show_value(false)).on_hover_text(format!("Master volume {:.0}%", self.master_gain * 100.0));
+            if vol.double_clicked() {
+                self.master_gain = 1.0;
+                changed = true;
+            }
+            if vol.drag_stopped() || (vol.changed() && !vol.dragged()) {
+                changed = true;
+            }
+        });
+        if toggle {
+            let ctx = ui.ctx().clone();
+            self.run(Action::Crossfeed, &ctx);
+        }
+        if changed {
+            self.dirty = true;
+            self.refresh_playback();
         }
     }
 

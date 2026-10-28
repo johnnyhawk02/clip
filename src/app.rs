@@ -250,6 +250,8 @@ pub struct App {
     zoom_back: Option<(bool, f64, f64)>,
     /// Headphone crossfeed on playback, remembered between runs.
     crossfeed: bool,
+    /// The master channel's volume, applied to the whole mix (and saved in the project).
+    master_gain: f32,
     ruler: RulerUnits,
     show_spectrum: bool,
     spectrum_3d: bool,
@@ -384,6 +386,7 @@ impl App {
             show_pool: false,
             zoom_back: None,
             crossfeed: crossfeed_pref().exists(),
+            master_gain: 1.0,
             ruler: RulerUnits::Time,
             show_spectrum: false,
             spectrum_3d: false,
@@ -491,14 +494,24 @@ impl App {
 
     /// Mix of all audible tracks at the level being shown (solo wins over mute).
     fn mixdown(&self) -> Audio {
-        let mix = self.render_tracks(&self.tracks);
+        let mix = self.master(self.render_tracks(&self.tracks));
         if self.auto_gain { auto_gain(mix) } else { mix }
     }
 
     /// The whole song's mix, whichever group is open.
     fn song_mix(&self) -> Audio {
-        let mix = self.render_tracks(&self.song_tracks());
+        let mix = self.master(self.render_tracks(&self.song_tracks()));
         if self.auto_gain { auto_gain(mix) } else { mix }
+    }
+
+    /// The master channel's volume on a mix.
+    fn master(&self, mut mix: Audio) -> Audio {
+        if self.master_gain != 1.0 {
+            for ch in &mut mix.channels {
+                ch.iter_mut().for_each(|v| *v *= self.master_gain);
+            }
+        }
+        mix
     }
 
     /// The top-level tracks, with the open group(s) folded back in.
