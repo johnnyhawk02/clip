@@ -5775,9 +5775,14 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
         p.rect_filled(m, 1.0, INK);
         name_x += 15.0;
     }
-    if r.right() - name_x > 20.0 {
-        let galley = p.layout(c.name.clone(), FontId::proportional(11.0), INK, r.right() - name_x - 4.0);
-        p.galley(Pos2::new(name_x, title.center().y - galley.size().y / 2.0), galley, INK);
+    // The name stays on one line, cut short with "…" when the clip is narrow (and leaves room
+    // for the loop mark).
+    let max_w = r.right().min(clip_to.right()) - name_x - if c.looping { 20.0 } else { 4.0 };
+    if max_w > 12.0 {
+        let mut job = egui::text::LayoutJob::simple_singleline(c.name.clone(), FontId::proportional(11.0), INK);
+        job.wrap = egui::text::TextWrapping { max_width: max_w, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
+        let galley = p.ctx().fonts_mut(|f| f.layout_job(job));
+        p.with_clip_rect(title.intersect(clip_to)).galley(Pos2::new(name_x, title.center().y - galley.size().y / 2.0), galley, INK);
     }
     // Waveform of the visible part, one min/max line per pixel (all channels together).
     let body = Rect::from_min_max(Pos2::new(r.left(), title.bottom() + 2.0), Pos2::new(r.right(), r.bottom() - 2.0));
