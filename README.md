@@ -238,7 +238,16 @@ macOS needs for recording, signs it ad hoc and copies it to /Applications.
 - `src/player.rs` — playback through the default output device (resamples to the device rate)
 - `src/actions.rs` — every command with its label, icon and shortcut; the menu and palette layouts
 - `src/menu.rs` — the native macOS menu bar (muda)
-- `src/app.rs` — the window: tool palette, waveform view, selection, dialogs, undo/redo
+- `src/app.rs` — the app's state, undo/redo, playback, the action dispatcher, shortcuts and the frame loop
+  - `src/app/clip.rs` — clips and tracks, warping to the song tempo, clip operations and groups
+  - `src/app/chop.rs` — Split, Slice at Grid, Reverse, Mangle and BBCut
+  - `src/app/arrange.rs` — the arrangement view and its right-click menus
+  - `src/app/editor.rs` — the single-clip waveform editor and selection edits
+  - `src/app/dialogs.rs` — effect dialogs and the curve, spectrum, mix and record windows
+  - `src/app/files.rs` — opening, saving, export (mix, stems, Ableton, regions) and Batch Convert
+  - `src/app/panels.rs` — Tools palette, transport bar, side panel and status bar
+  - `src/app/look.rs` — colours, style, shared dialog widgets and drawn icons
+  - `src/app/automation.rs` — scripted headless runs for testing
 
 For headless checks, `SOUND_EDIT_ACTIONS="sel:1-2,fadeout"` and `SOUND_EDIT_SNAPSHOT=out.png`
 run scripted actions on the opened file, save a screenshot and quit (`run:<Action>` runs any
