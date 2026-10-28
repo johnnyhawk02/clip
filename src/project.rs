@@ -77,6 +77,9 @@ pub struct ClipData {
     #[serde(default)]
     pub looping: bool,
     pub group: Option<Vec<TrackData>>,
+    /// Warped clips: (clip tempo, song tempo it's stretched to, index of the original audio).
+    #[serde(default)]
+    pub warp: Option<(f64, f64, usize)>,
 }
 
 pub fn write(path: &Path, project: &ProjectFile, audio: &[&Audio]) -> Result<(), String> {
@@ -162,6 +165,7 @@ mod tests {
                     loop_points: Some((0, 2)),
                     looping: true,
                     group: None,
+                    warp: None,
                 }],
             }],
             audio: vec![AudioData { rate: 1000, channels: 2, frames: 3 }],

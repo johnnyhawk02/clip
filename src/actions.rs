@@ -111,6 +111,8 @@ pub enum Action {
     ToggleSnap,
     ToolSplit,
     LoopClip,
+    WarpClip,
+    AutoWarp,
     CollapseClip,
     CollapseTrack,
     ExportStems,
@@ -130,7 +132,7 @@ pub const ALL: &[Action] = &[
     PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions, Dither, CutGaps,
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
     GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
-    ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack,
+    ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp,
     ExportStems, ExportAbleton,
 ];
 
@@ -186,7 +188,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
     ),
     (
         "Clip",
-        &[Do(NewClip), Do(ImportClip), Separator, Do(EditClip), Do(BackToArrangement), Separator, Do(SplitClip), Do(DuplicateClip), Separator, Do(GroupClips), Do(Ungroup), Do(CollapseClip), Separator, Do(LoopClip), Do(TempoFromClip), Do(ToggleSnap)],
+        &[Do(NewClip), Do(ImportClip), Separator, Do(EditClip), Do(BackToArrangement), Separator, Do(SplitClip), Do(DuplicateClip), Separator, Do(GroupClips), Do(Ungroup), Do(CollapseClip), Separator, Do(LoopClip), Do(WarpClip), Do(TempoFromClip), Do(ToggleSnap), Do(AutoWarp)],
     ),
     (
         "Insert",
@@ -305,7 +307,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | Dither | AutoGain | ToggleSnap | LoopClip | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
+            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
     }
 
     pub fn label(self) -> &'static str {
@@ -319,6 +321,8 @@ impl Action {
             ToggleSnap => "Snap to Grid",
             ToolSplit => "Split Tool",
             LoopClip => "Loop Clip",
+            WarpClip => "Warp to Tempo",
+            AutoWarp => "Warp Loops on Import",
             CollapseClip => "Collapse to Audio",
             CollapseTrack => "Collapse Track to One Clip",
             ExportSelection => "Export Selection…",

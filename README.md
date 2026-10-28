@@ -61,6 +61,15 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   any clip (copies are independent), and Clip ▸ Ungroup (⌥⌘G) puts the clips back.
 - Export writes the mix of the whole song (even from inside a group). Cues, regions and loops
   belong to each clip.
+- Warping: a clip whose file name gives its tempo ("Loop 118bpm 16bar", "Kick - 124 BPM",
+  "Bpm130_Drums") is stretched to the song tempo when it's dropped in or imported, keeping its
+  pitch. A bar count in the name gives the exact tempo. Change the song tempo and warped clips
+  re-fit, staying on their beats. Opening such a file sets the song tempo from it. Clip ▸ Warp to
+  Tempo switches warping on or off for the selected clips (clips with no tempo in the name are
+  taken as the whole-bar loop closest to the song tempo); Clip ▸ Warp Loops on Import turns the
+  automatic part off. Editing a warped clip in the editor makes it plain audio at its current
+  speed. Warping is saved in projects, and the Ableton export hands Live the original audio with
+  warp markers, so the clips follow Live's tempo too.
 - File ▸ Export Stems writes one WAV per track (with its volume and pan), all starting at zero and
   all the same length, so they line up in another DAW. Together they add up to the mix.
 - File ▸ Export Ableton Live Set makes a "<name> Project" folder with a Live 12 set (.als) and a

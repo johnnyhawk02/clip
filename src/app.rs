@@ -44,6 +44,81 @@ struct Clip {
     /// Repeat the clip's loop section (its loop points, or the whole audio) for as long as the
     /// clip is stretched out, independently of other clips.
     looping: bool,
+    /// A warped clip plays its source audio stretched to the song tempo (keeping its pitch),
+    /// as in Ableton; `audio` is then the stretched version.
+    warp: Option<Warp>,
+}
+
+#[derive(Clone)]
+struct Warp {
+    /// The clip's own tempo.
+    bpm: f64,
+    /// The audio at its original speed.
+    source: Arc<Audio>,
+    /// The song tempo `audio` is currently stretched to.
+    tempo: f64,
+}
+
+/// A tempo and bar count written in a file name, as in "Loop 118bpm 16bar" or "Kick - 124 BPM".
+fn tempo_in_name(name: &str) -> (Option<f64>, Option<f64>) {
+    let lower = name.to_lowercase();
+    let b = lower.as_bytes();
+    let is_sep = |c: u8| c == b' ' || c == b'_' || c == b'-';
+    // The number just before position `i` (skipping separators), or just after `j`.
+    let before = |i: usize| {
+        let mut e = i;
+        while e > 0 && is_sep(b[e - 1]) {
+            e -= 1;
+        }
+        let mut st = e;
+        while st > 0 && (b[st - 1].is_ascii_digit() || b[st - 1] == b'.') {
+            st -= 1;
+        }
+        lower[st..e].trim_start_matches('.').parse::<f64>().ok()
+    };
+    let after = |j: usize| {
+        let mut st = j;
+        while st < b.len() && is_sep(b[st]) {
+            st += 1;
+        }
+        let mut e = st;
+        while e < b.len() && (b[e].is_ascii_digit() || b[e] == b'.') {
+            e += 1;
+        }
+        lower[st..e].trim_end_matches('.').parse::<f64>().ok()
+    };
+    let mut bpm = None;
+    let mut bars = None;
+    for (i, _) in lower.match_indices("bpm") {
+        bpm = bpm.or(before(i).or_else(|| after(i + 3)).filter(|v| (40.0..=300.0).contains(v)));
+    }
+    for (i, _) in lower.match_indices("bar") {
+        // "bar" or "bars" as a word ending (not "barrel").
+        let mut j = i + 3;
+        if b.get(j) == Some(&b's') {
+            j += 1;
+        }
+        if b.get(j).is_some_and(|c| c.is_ascii_alphabetic()) {
+            continue;
+        }
+        bars = bars.or(before(i).filter(|v| *v >= 1.0 && *v <= 256.0 && v.fract() == 0.0));
+    }
+    (bpm, bars)
+}
+
+/// The tempo of a clip from its name: the bar count gives the exact tempo when it agrees with
+/// the BPM written there (or when only bars are given).
+fn clip_tempo_from_name(name: &str, frames: usize, rate: u32, beats_per_bar: u32) -> Option<f64> {
+    let (bpm, bars) = tempo_in_name(name);
+    let secs = frames as f64 / rate.max(1) as f64;
+    let from_bars = bars.map(|n| n * beats_per_bar as f64 * 60.0 / secs).filter(|v| secs > 0.0 && (40.0..=300.0).contains(v));
+    match (bpm, from_bars) {
+        // The written BPM when the length agrees with it, else the tempo the length gives.
+        (Some(b), Some(f)) if (f - b).abs() < 0.02 => Some(b),
+        (Some(b), Some(f)) if (f / b - 1.0).abs() < 0.03 => Some(f),
+        (Some(b), _) => Some(b),
+        (None, f) => f,
+    }
 }
 
 /// One level up from the arrangement being shown: the parent's tracks, and which of its clips
@@ -62,11 +137,53 @@ impl Clip {
     fn new(name: impl Into<String>, audio: Arc<Audio>, start: usize) -> Clip {
         let peaks = Arc::new(Peaks::build(&audio));
         let len = audio.frames();
-        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None, looping: false }
+        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None, looping: false, warp: None }
     }
 
     fn end(&self) -> usize {
         self.start + self.len
+    }
+
+    /// Stretch a warped clip to `tempo`, keeping its place and length in beats.
+    fn fit_to_tempo(&mut self, tempo: f64) -> bool {
+        let Some(w) = self.warp.as_mut() else { return false };
+        if (w.tempo - tempo).abs() < 1e-6 || tempo <= 0.0 {
+            return false;
+        }
+        let r = w.tempo / tempo;
+        let factor = w.bpm / tempo;
+        self.audio = if (factor - 1.0).abs() < 1e-6 { w.source.clone() } else { Arc::new(effects::time_stretch(&w.source, factor)) };
+        w.tempo = tempo;
+        self.peaks = Arc::new(Peaks::build(&self.audio));
+        let sc = |f: usize| (f as f64 * r).round() as usize;
+        let n = self.audio.frames();
+        self.start = sc(self.start);
+        self.trim = sc(self.trim).min(n.saturating_sub(1));
+        self.len = sc(self.len).max(1);
+        if !self.looping {
+            self.len = self.len.min(n - self.trim);
+        }
+        self.loop_points = self.loop_points.map(|(a, b)| (sc(a).min(n), sc(b).min(n)));
+        for q in &mut self.cues {
+            q.frame = sc(q.frame).min(n);
+        }
+        for g in &mut self.regions {
+            (g.start, g.end) = (sc(g.start).min(n), sc(g.end).min(n));
+        }
+        true
+    }
+
+    /// Start warping at clip tempo `bpm`: from now on the clip follows the song tempo.
+    fn warp_from(&mut self, bpm: f64, song_tempo: f64) {
+        self.warp = Some(Warp { bpm, source: self.audio.clone(), tempo: bpm });
+        self.fit_to_tempo(song_tempo);
+    }
+
+    /// Back to the audio's own speed.
+    fn unwarp(&mut self) {
+        let Some(bpm) = self.warp.as_ref().map(|w| w.bpm) else { return };
+        self.fit_to_tempo(bpm);
+        self.warp = None;
     }
 
     /// The part of the audio the clip plays.
@@ -616,6 +733,8 @@ pub struct App {
     mix_to_new: bool,
     /// Turn mixes down when they would clip.
     auto_gain: bool,
+    /// Warp clips whose names give their tempo when they're imported.
+    auto_warp: bool,
     cue_drag: Option<usize>,
     /// ⌥-drag fine adjustment: (moving the end edge?, exact position in frames).
     fine_edge: Option<(bool, f64)>,
@@ -726,6 +845,7 @@ impl App {
             mix_include: None,
             mix_to_new: true,
             auto_gain: true,
+            auto_warp: true,
             cue_drag: None,
             fine_edge: None,
             last_double: None,
@@ -845,6 +965,7 @@ impl App {
                     let c = &mut self.tracks[pos.0].clips[pos.1];
                     (c.cues, c.regions, c.loop_points) = (m.cues, m.regions, m.loop_points);
                     self.status = format!("Added {} as a clip", file_name(&path));
+                    self.auto_warp(pos);
                 }
                 Ok(_) => self.status = format!("{} contains no audio", file_name(&path)),
                 Err(e) => self.status = format!("Couldn't open {}: {e}", file_name(&path)),
@@ -864,6 +985,7 @@ impl App {
                     self.add_track(t, "Import Track");
                     self.sel_clip = Some((self.active, 0));
                     self.status = format!("Imported {} as a new track", file_name(&path));
+                    self.auto_warp((self.active, 0));
                 }
                 Ok(_) => self.status = format!("{} contains no audio", file_name(&path)),
                 Err(e) => self.status = format!("Couldn't open {}: {e}", file_name(&path)),
@@ -890,6 +1012,13 @@ impl App {
                 let a = Arc::new(a);
                 let mut clip = Clip::new(name.clone(), a.clone(), 0);
                 (clip.cues, clip.regions, clip.loop_points) = (markers.cues, markers.regions, markers.loop_points);
+                // A file with its tempo in the name sets the song tempo, and is warped so it
+                // follows any later tempo change.
+                if let Some(bpm) = clip_tempo_from_name(&name, a.frames(), a.rate, self.beats_per_bar).filter(|_| self.auto_warp) {
+                    self.tempo = (bpm * 100.0).round() / 100.0;
+                    clip.warp = Some(Warp { bpm, source: a.clone(), tempo: bpm });
+                    clip.fit_to_tempo(self.tempo);
+                }
                 let mut t = Track::new(name);
                 t.clips.push(clip);
                 self.tracks = vec![t];
@@ -900,7 +1029,7 @@ impl App {
                 self.arr_cursor = 0;
                 self.project_path = None;
                 self.path = Some(path);
-                self.audio = Some(a);
+                self.audio = Some(self.tracks[0].clips[0].audio.clone());
                 self.peaks = Some(self.tracks[0].clips[0].peaks.clone());
                 self.cues.clear();
                 self.regions.clear();
@@ -920,9 +1049,11 @@ impl App {
         self.peaks = Some(peaks.clone());
         // The editor works on one clip: keep that clip in step with every edit.
         if let View::Editor { track, clip } = self.view {
-            if let Some(c) = self.tracks.get_mut(track).and_then(|t| t.clips.get_mut(clip)) {
+            if let Some(c) = self.tracks.get_mut(track).and_then(|t| t.clips.get_mut(clip)).filter(|c| !Arc::ptr_eq(&c.audio, &a)) {
                 c.audio = a.clone();
                 c.peaks = peaks;
+                // An edited clip is plain audio at its current speed.
+                c.warp = None;
                 if c.looping {
                     // A looping clip keeps its length on the timeline; it repeats the new audio.
                     c.trim = c.trim.min(a.frames().saturating_sub(1));
@@ -1109,7 +1240,7 @@ impl App {
         }
         self.player.stop();
         // Editing works on what the clip shows: bake its trim in first.
-        let visible = if clip.looping || (clip.trim == 0 && clip.len >= clip.audio.frames()) {
+        let visible = if clip.looping || clip.warp.is_some() || (clip.trim == 0 && clip.len >= clip.audio.frames()) {
             clip.audio.clone()
         } else {
             Arc::new(clip.visible())
@@ -1251,6 +1382,7 @@ impl App {
     fn clip_menu(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let is_group = self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.group.is_some());
         let looping = self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.looping);
+        let warped = self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.warp.is_some());
         let pick = |ui: &mut egui::Ui, label: &str, a: Action| {
             if ui.button(label).clicked() {
                 ui.close();
@@ -1269,6 +1401,7 @@ impl App {
         ui.separator();
         chosen = chosen.or(pick(ui, "Split at Playhead", Action::SplitClip));
         chosen = chosen.or(pick(ui, if looping { "Stop Looping" } else { "Loop Clip" }, Action::LoopClip));
+        chosen = chosen.or(pick(ui, if warped { "Original Speed" } else { "Warp to Tempo" }, Action::WarpClip));
         chosen = chosen.or(pick(ui, "Group", Action::GroupClips));
         if is_group {
             chosen = chosen.or(pick(ui, "Ungroup", Action::Ungroup));
@@ -1424,6 +1557,13 @@ impl App {
                             loop_points: c.loop_points,
                             looping: c.looping,
                             group: c.group.as_ref().map(|g| tracks_data(g, pool)),
+                            warp: c.warp.as_ref().map(|w| {
+                                let i = pool.iter().position(|a| Arc::ptr_eq(a, &w.source)).unwrap_or_else(|| {
+                                    pool.push(w.source.clone());
+                                    pool.len() - 1
+                                });
+                                (w.bpm, w.tempo, i)
+                            }),
                         })
                         .collect(),
                 })
@@ -1477,6 +1617,11 @@ impl App {
                         clip.loop_points = c.loop_points;
                         clip.looping = c.looping;
                         clip.len = if c.looping { c.len } else { clip.len };
+                        if let Some((bpm, tempo, i)) = c.warp {
+                            if let Some(source) = audio.get(i) {
+                                clip.warp = Some(Warp { bpm, source: source.clone(), tempo });
+                            }
+                        }
                         track.clips.push(clip);
                     }
                     track
@@ -2411,8 +2556,10 @@ impl App {
             let color = LIVE_COLORS[t.color % LIVE_COLORS.len()];
             let mut clips = Vec::new();
             for c in &t.clips {
+                // A warped clip exports its original audio, and Live does the stretching.
+                let src = c.warp.as_ref().map_or(&c.audio, |w| &w.source);
                 // Each piece of audio is saved once, however many clips play it.
-                let key = Arc::as_ptr(&c.audio);
+                let key = Arc::as_ptr(src);
                 let (file, size) = match written.iter().find(|w| w.0 == key) {
                     Some(w) => (w.1.clone(), w.2),
                     None => {
@@ -2425,7 +2572,7 @@ impl App {
                             n += 1;
                         }
                         let path = samples.join(&file);
-                        audio::save_wav(&c.audio, &path, WavFormat::Float32)?;
+                        audio::save_wav(src, &path, WavFormat::Float32)?;
                         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                         written.push((key, file.clone(), size));
                         (file, size)
@@ -2433,7 +2580,8 @@ impl App {
                 };
                 let rate = c.audio.rate.max(1);
                 // Sample positions in beats at the song tempo, the sample playing at its own speed.
-                let sb = |f: usize| f as f64 / rate as f64 * self.tempo / 60.0;
+                let fit_tempo = c.warp.as_ref().map_or(self.tempo, |w| w.tempo);
+                let sb = |f: usize| f as f64 / rate as f64 * fit_tempo / 60.0;
                 let (looping, ls, le, trim) = if c.looping {
                     let (ls, le) = c.loop_range();
                     let trim = if c.trim >= le && le > ls { ls + (c.trim - le) % (le - ls) } else { c.trim };
@@ -2447,7 +2595,7 @@ impl App {
                     rel_path: format!("Samples/Imported/{file}"),
                     abs_path: samples.join(&file).to_string_lossy().into_owned(),
                     file_size: size,
-                    frames: c.audio.frames(),
+                    frames: src.frames(),
                     rate,
                     start: beats(c.start),
                     end: beats(c.end()),
@@ -2455,7 +2603,7 @@ impl App {
                     loop_start: sb(ls),
                     loop_end: sb(le),
                     start_rel: if looping { sb(trim) - sb(ls) } else { 0.0 },
-                    sample_beats: sb(c.audio.frames()),
+                    sample_beats: src.frames() as f64 / rate as f64 * c.warp.as_ref().map_or(self.tempo, |w| w.bpm) / 60.0,
                 });
             }
             live.push(ableton::LiveTrack { name: t.name.clone(), color, gain: t.gain, pan: t.pan, mute: t.mute, solo: t.solo, clips });
@@ -2673,7 +2821,8 @@ impl App {
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
                 Action::SplitClip => doc,
                 Action::ToolSelect | Action::ToolSplit => true,
-                Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop | Action::CollapseClip => has_clip,
+                Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop | Action::CollapseClip | Action::WarpClip => has_clip,
+                Action::AutoWarp => true,
                 Action::CollapseTrack => self.tracks.get(self.active).is_some_and(|t| !t.clips.is_empty()),
                 Action::ClearLoop => self.arr_loop.is_some(),
                 Action::ToggleSnap => doc,
@@ -2695,7 +2844,8 @@ impl App {
             Action::SaveProject | Action::SaveProjectAs => return doc,
             Action::EditClip | Action::SplitClip | Action::DuplicateClip | Action::NewClip | Action::ImportClip => return false,
             Action::GroupClips | Action::Ungroup | Action::TempoFromClip | Action::ToggleSnap | Action::LoopClip => return false,
-            Action::CollapseClip | Action::CollapseTrack => return false,
+            Action::CollapseClip | Action::CollapseTrack | Action::WarpClip => return false,
+            Action::AutoWarp => return true,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
             Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack => return false,
             _ => {}
@@ -2764,6 +2914,8 @@ impl App {
             Action::ShowSpectrum => self.show_spectrum,
             Action::ShowRegions => self.show_regions,
             Action::ToggleSnap => self.snap,
+            Action::AutoWarp => self.auto_warp,
+            Action::WarpClip => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.warp.is_some()),
             Action::LoopClip => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.looping),
             Action::Dither => audio::DITHER.load(std::sync::atomic::Ordering::Relaxed),
             Action::AutoGain => self.auto_gain,
@@ -2962,6 +3114,8 @@ impl App {
             Action::CollapseClip => self.collapse_clip(),
             Action::CollapseTrack => self.collapse_track(self.active),
             Action::ToggleSnap => self.snap = !self.snap,
+            Action::AutoWarp => self.auto_warp = !self.auto_warp,
+            Action::WarpClip => self.toggle_warp(),
             Action::SaveProject => {
                 self.save_project(false);
             }
@@ -4893,10 +5047,91 @@ impl App {
         format!("{bar}.{beat}.{sixteenth}")
     }
 
+    /// Warp a newly imported clip if its name gives its tempo (and warping on import is on).
+    fn auto_warp(&mut self, (t, c): (usize, usize)) {
+        if !self.auto_warp {
+            return;
+        }
+        let (tempo, bpb) = (self.tempo, self.beats_per_bar);
+        let Some(clip) = self.tracks.get_mut(t).and_then(|t| t.clips.get_mut(c)) else { return };
+        if clip.group.is_some() {
+            return;
+        }
+        if let Some(bpm) = clip_tempo_from_name(&clip.name, clip.audio.frames(), clip.audio.rate, bpb) {
+            clip.warp_from(bpm, tempo);
+            self.status = format!("{} is {:.2} BPM; warped to {:.2} BPM", clip.name, bpm, tempo);
+            self.refresh_playback();
+        }
+    }
+
+    /// Clip ▸ Warp to Tempo: switch warping on or off for the selected clips. The clip's tempo
+    /// comes from its name, or else is guessed as the whole-bar loop closest to the song tempo.
+    fn toggle_warp(&mut self) {
+        let sel = self.selected_clips();
+        let Some(first) = sel.first().and_then(|&p| self.clip(p)) else { return };
+        let on = first.warp.is_none();
+        self.push_undo(if on { "Warp Clip" } else { "Unwarp Clip" });
+        let (tempo, bpb) = (self.tempo, self.beats_per_bar);
+        let mut done = Vec::new();
+        for (t, c) in sel {
+            let Some(clip) = self.tracks.get_mut(t).and_then(|t| t.clips.get_mut(c)) else { continue };
+            if clip.group.is_some() {
+                continue;
+            }
+            if !on {
+                clip.unwarp();
+                done.push(clip.name.clone());
+                continue;
+            }
+            if clip.warp.is_some() {
+                continue;
+            }
+            let (frames, rate) = (clip.audio.frames(), clip.audio.rate);
+            let secs = frames as f64 / rate.max(1) as f64;
+            let guess = || {
+                [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]
+                    .iter()
+                    .map(|bars| 60.0 * bpb as f64 * bars / secs)
+                    .filter(|bpm| (40.0..=300.0).contains(bpm))
+                    .min_by(|a, b| (a / tempo).ln().abs().total_cmp(&(b / tempo).ln().abs()))
+            };
+            if let Some(bpm) = clip_tempo_from_name(&clip.name, frames, rate, bpb).or_else(guess) {
+                clip.warp_from(bpm, tempo);
+                done.push(format!("{} ({bpm:.2} BPM)", clip.name));
+            }
+        }
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = if on { format!("Warped to {:.2} BPM: {}", tempo, done.join(", ")) } else { format!("Back to original speed: {}", done.join(", ")) };
+    }
+
+    /// Re-stretch warped clips after the song tempo changes.
+    fn refit_warped(&mut self) {
+        let tempo = self.tempo;
+        let mut changed = false;
+        for t in &mut self.tracks {
+            for c in &mut t.clips {
+                changed |= c.fit_to_tempo(tempo);
+            }
+        }
+        if changed {
+            self.dirty = true;
+            self.refresh_playback();
+        }
+    }
+
     /// Clip ▸ Set Tempo from Clip: treat the selected clip as a loop of a whole number of bars
     /// and pick the tempo (nearest 120 BPM, between 70 and 180) that fits it exactly.
     fn tempo_from_clip(&mut self) {
         let Some(c) = self.sel_clip.and_then(|p| self.clip(p)) else { return };
+        // A warped clip knows its tempo.
+        if let Some(bpm) = c.warp.as_ref().map(|w| w.bpm) {
+            self.push_undo("Set Tempo");
+            self.tempo = (bpm * 100.0).round() / 100.0;
+            self.dirty = true;
+            self.status = format!("Tempo set to {:.2} BPM", self.tempo);
+            return;
+        }
         let secs = c.len as f64 / self.rate() as f64;
         if secs <= 0.0 {
             return;
@@ -5524,6 +5759,10 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.poll_loading();
+        // Warped clips follow the tempo once it's been set (not on every step of a drag).
+        if self.view == View::Arrangement && !ui.ctx().input(|i| i.pointer.any_down()) && ui.ctx().memory(|m| m.focused().is_none()) {
+            self.refit_warped();
+        }
 
         // Drag and drop.
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
@@ -5785,9 +6024,16 @@ impl App {
         auto.frames_after_load += 1;
         if auto.frames_after_load == 3 {
             let rate = self.audio.as_ref().unwrap().rate as f64;
-            for a in std::mem::take(&mut auto.actions) {
+            let mut queue = std::mem::take(&mut auto.actions).into_iter();
+            while let Some(a) = queue.next() {
                 let (cmd, arg) = a.split_once(':').unwrap_or((a.as_str(), ""));
                 match cmd {
+                    // wait: carry on with the rest once loading (a drop, an import) has finished.
+                    "wait" => {
+                        auto.actions = queue.collect();
+                        auto.frames_after_load = 0;
+                        break;
+                    }
                     "sel" => {
                         let (s, e) = arg.split_once('-').unwrap_or(("0", "0"));
                         let f = |t: &str| ((t.parse::<f64>().unwrap_or(0.0) * rate) as usize).min(self.frames());
@@ -5820,6 +6066,15 @@ impl App {
                         }
                     }
                     "spectrum3d" => self.spectrum_3d = true,
+                    "tempo" => self.tempo = arg.parse().unwrap_or(self.tempo),
+                    "clips" => {
+                        for (ti, t) in self.tracks.iter().enumerate() {
+                            for c in &t.clips {
+                                let w = c.warp.as_ref().map(|w| (w.bpm, w.tempo));
+                                eprintln!("clip t{ti} {:?} start {} len {} frames {} warp {:?} tempo {}", c.name, c.start, c.len, c.audio.frames(), w, self.tempo);
+                            }
+                        }
+                    }
                     "run" => match Action::from_id(arg) {
                         Some(act) => self.run(act, ctx),
                         None => eprintln!("unknown action id {arg}"),
@@ -6315,5 +6570,31 @@ mod tests {
         c.trim = 10;
         c.len = 3;
         assert_eq!(c.visible().channels[0], vec![6., 7., 4.]);
+    }
+
+    #[test]
+    fn reads_tempo_and_bars_from_names() {
+        assert_eq!(tempo_in_name("elixir Quekrixn Grukon 118bpm 16bar 2"), (Some(118.0), Some(16.0)));
+        assert_eq!(tempo_in_name("BVKER - 909 Kit - Kick Loop 02 - 120 BPM"), (Some(120.0), None));
+        assert_eq!(tempo_in_name("Soundiron_VORT_Phrase_Latin_80BPM_D_25"), (Some(80.0), None));
+        assert_eq!(tempo_in_name("Bpm130_Am_BrainFreeze_Drums"), (Some(130.0), None));
+        assert_eq!(tempo_in_name("Pad 4 bars"), (None, Some(4.0)));
+        assert_eq!(tempo_in_name("barrel 2"), (None, None));
+        // 16 bars at 118 BPM is 32.5424 s: the bar count gives the exact tempo.
+        let t = clip_tempo_from_name("x 118bpm 16bar", (32.542381 * 44100.0) as usize, 44100, 4).unwrap();
+        assert!((t - 118.0).abs() < 0.001, "{t}");
+    }
+
+    #[test]
+    fn warped_clip_keeps_its_beats() {
+        let a = Arc::new(Audio { rate: 1000, channels: vec![(0..4000).map(|i| ((i as f32) * 0.05).sin()).collect()] });
+        let mut c = Clip::new("loop 120bpm", a, 2000);
+        c.warp_from(120.0, 60.0);
+        // Half the tempo: twice as long, and it starts twice as late (same beat).
+        assert_eq!(c.start, 4000);
+        assert!((c.audio.frames() as i64 - 8000).abs() < 50);
+        assert!((c.len as i64 - 8000).abs() < 50);
+        c.unwarp();
+        assert_eq!((c.start, c.len, c.audio.frames()), (2000, 4000, 4000));
     }
 }
