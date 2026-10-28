@@ -4,7 +4,9 @@ use super::*;
 
 /// Scripted self-test, driven by environment variables (used to verify the app headlessly):
 /// `SOUND_EDIT_ACTIONS="sel:1.0-2.5,fadeout,normalize"` and `SOUND_EDIT_SNAPSHOT=out.png`.
-/// Once the file has loaded, runs the actions, saves a screenshot and quits.
+/// Once the file has loaded, runs the actions, saves a screenshot and quits. A run that hasn't
+/// finished after `TIMEOUT` (waiting for a load that never comes, say) gives up and exits with
+/// status 2, so a stuck test never keeps running in the background.
 pub(super) struct Automation {
     pub(super) actions: Vec<String>,
     pub(super) snapshot: Option<PathBuf>,
@@ -13,7 +15,10 @@ pub(super) struct Automation {
     /// Print the native menu bar a few frames later, once its state has synced.
     pub(super) dump_menu: bool,
     pub(super) done: Arc<std::sync::atomic::AtomicBool>,
+    pub(super) started: std::time::Instant,
 }
+
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl Automation {
     pub(super) fn from_env() -> Option<Automation> {
@@ -31,6 +36,7 @@ impl Automation {
             requested: false,
             dump_menu: false,
             done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            started: std::time::Instant::now(),
         })
     }
 }
@@ -38,6 +44,10 @@ impl Automation {
 impl App {
     pub(super) fn run_automation(&mut self, ctx: &egui::Context) {
         let Some(mut auto) = self.automation.take() else { return };
+        if auto.started.elapsed() > TIMEOUT {
+            eprintln!("automation: gave up after {}s ({} actions left)", TIMEOUT.as_secs(), auto.actions.len());
+            std::process::exit(2);
+        }
         ctx.request_repaint();
         if self.audio.is_none() || self.loading.is_some() {
             self.automation = Some(auto);
