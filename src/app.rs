@@ -15,6 +15,7 @@ use crate::audio::{self, Audio, Cue, Markers, Peaks, Region, WavFormat};
 use crate::effects::{self, Wave};
 use crate::menu::NativeMenu;
 use crate::player::Player;
+use crate::project::{self, ClipData, ProjectFile, TrackData};
 use crate::recorder::Recorder;
 
 type Sel = (usize, usize);
@@ -505,6 +506,8 @@ pub struct App {
     /// What the player is playing: the active track alone, or the mix of all tracks.
     play_audio: Option<Arc<Audio>>,
     path: Option<PathBuf>,
+    /// The .sndproj file this sound was saved to or opened from.
+    project_path: Option<PathBuf>,
     dirty: bool,
 
     undo: Vec<Snapshot>,
@@ -615,6 +618,7 @@ impl App {
             arr_lanes: None,
             play_audio: None,
             path: None,
+            project_path: None,
             dirty: false,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -697,8 +701,8 @@ impl App {
     fn open_dialog(&mut self, ctx: &egui::Context) {
         let picked = rfd::FileDialog::new()
             .add_filter(
-                "Audio",
-                &["wav", "mp3", "flac", "ogg", "oga", "m4a", "mp4", "aac", "aif", "aiff", "caf", "mkv", "webm"],
+                "Sound Edit projects and audio",
+                &["sndproj", "wav", "mp3", "flac", "ogg", "oga", "m4a", "mp4", "aac", "aif", "aiff", "caf", "mkv", "webm"],
             )
             .add_filter("All files", &["*"])
             .pick_file();
@@ -708,6 +712,9 @@ impl App {
     }
 
     fn start_load(&mut self, path: PathBuf, ctx: &egui::Context) {
+        if project::is_project(&path) {
+            return self.open_project(path);
+        }
         self.start_load_as(path, ctx, false);
     }
 
@@ -825,10 +832,12 @@ impl App {
                 let mut t = Track::new(name);
                 t.clips.push(clip);
                 self.tracks = vec![t];
+                self.nest.clear();
                 self.active = 0;
                 self.sel_clip = Some((0, 0));
                 self.view = View::Arrangement;
                 self.arr_cursor = 0;
+                self.project_path = None;
                 self.path = Some(path);
                 self.audio = Some(a);
                 self.peaks = Some(self.tracks[0].clips[0].peaks.clone());
@@ -1116,6 +1125,159 @@ impl App {
         v
     }
 
+    // ---------- projects ----------
+
+    /// Save the project (⌘S), asking where the first time or for Save As.
+    fn save_project(&mut self, save_as: bool) -> bool {
+        if self.tracks.is_empty() {
+            return false;
+        }
+        let path = match (&self.project_path, save_as) {
+            (Some(p), false) => p.clone(),
+            _ => {
+                let stem = self
+                    .project_path
+                    .as_ref()
+                    .or(self.path.as_ref())
+                    .and_then(|p| p.file_stem())
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "Untitled".into());
+                let mut d = rfd::FileDialog::new().add_filter("Sound Edit project", &["sndproj"]).set_file_name(format!("{stem}.sndproj"));
+                if let Some(dir) = self.project_path.as_ref().or(self.path.as_ref()).and_then(|p| p.parent()) {
+                    d = d.set_directory(dir);
+                }
+                let Some(mut p) = d.save_file() else { return false };
+                if !project::is_project(&p) {
+                    p.set_extension("sndproj");
+                }
+                p
+            }
+        };
+        match self.write_project(&path) {
+            Ok(()) => {
+                self.dirty = false;
+                self.status = format!("Saved {}", path.display());
+                self.project_path = Some(path.clone());
+                self.path = Some(path);
+                true
+            }
+            Err(e) => {
+                self.status = format!("Couldn't save the project: {e}");
+                false
+            }
+        }
+    }
+
+    fn write_project(&mut self, path: &Path) -> Result<(), String> {
+        self.sync_clip_markers();
+        let tracks = self.song_tracks();
+        // Each distinct piece of audio is stored once, however many clips use it.
+        let mut pool: Vec<Arc<Audio>> = Vec::new();
+        fn tracks_data(tracks: &[Track], pool: &mut Vec<Arc<Audio>>) -> Vec<TrackData> {
+            tracks
+                .iter()
+                .map(|t| TrackData {
+                    name: t.name.clone(),
+                    gain: t.gain,
+                    pan: t.pan,
+                    color: t.color,
+                    mute: t.mute,
+                    solo: t.solo,
+                    clips: t
+                        .clips
+                        .iter()
+                        .map(|c| ClipData {
+                            name: c.name.clone(),
+                            audio: if c.group.is_some() {
+                                None
+                            } else {
+                                Some(pool.iter().position(|a| Arc::ptr_eq(a, &c.audio)).unwrap_or_else(|| {
+                                    pool.push(c.audio.clone());
+                                    pool.len() - 1
+                                }))
+                            },
+                            start: c.start,
+                            trim: c.trim,
+                            len: c.len,
+                            cues: c.cues.iter().map(|q| (q.frame, q.name.clone())).collect(),
+                            regions: c.regions.iter().map(|r| (r.start, r.end, r.name.clone())).collect(),
+                            loop_points: c.loop_points,
+                            group: c.group.as_ref().map(|g| tracks_data(g, pool)),
+                        })
+                        .collect(),
+                })
+                .collect()
+        }
+        let data = tracks_data(&tracks, &mut pool);
+        let file = ProjectFile {
+            version: 1,
+            rate: self.rate(),
+            tracks: data,
+            audio: pool.iter().map(|a| project::AudioData { rate: a.rate, channels: a.num_channels(), frames: a.frames() }).collect(),
+        };
+        let refs: Vec<&Audio> = pool.iter().map(|a| a.as_ref()).collect();
+        project::write(path, &file, &refs)
+    }
+
+    fn open_project(&mut self, path: PathBuf) {
+        let (file, audio) = match project::read(&path) {
+            Ok(x) => x,
+            Err(e) => {
+                self.status = format!("Couldn't open {}: {e}", file_name(&path));
+                return;
+            }
+        };
+        let audio: Vec<Arc<Audio>> = audio.into_iter().map(Arc::new).collect();
+        let rate = file.rate;
+        fn build(app: &App, data: &[TrackData], audio: &[Arc<Audio>], rate: u32) -> Vec<Track> {
+            data.iter()
+                .map(|t| {
+                    let mut track = Track::new(t.name.clone());
+                    (track.gain, track.pan, track.color, track.mute, track.solo) = (t.gain, t.pan, t.color, t.mute, t.solo);
+                    for c in &t.clips {
+                        let a = c.audio.and_then(|i| audio.get(i).cloned()).unwrap_or_else(|| Arc::new(Audio { rate, channels: vec![Vec::new()] }));
+                        let mut clip = Clip::new(c.name.clone(), a, c.start);
+                        if let Some(g) = &c.group {
+                            let inner = build(app, g, audio, rate);
+                            app.set_group_content(&mut clip, inner);
+                        }
+                        clip.trim = c.trim.min(clip.audio.frames());
+                        clip.len = c.len.min(clip.audio.frames() - clip.trim);
+                        clip.cues = c.cues.iter().map(|(f, n)| Cue { frame: *f, name: n.clone() }).collect();
+                        clip.regions = c.regions.iter().map(|(s, e, n)| Region { start: *s, end: *e, name: n.clone() }).collect();
+                        clip.loop_points = c.loop_points;
+                        track.clips.push(clip);
+                    }
+                    track
+                })
+                .collect()
+        }
+        self.player.stop();
+        // Group mixes are rendered at the project's rate.
+        self.audio = Some(Arc::new(Audio { rate, channels: vec![Vec::new(); 2] }));
+        self.tracks = Vec::new();
+        let tracks = build(self, &file.tracks, &audio, rate);
+        self.tracks = tracks;
+        self.nest.clear();
+        self.undo.clear();
+        self.redo.clear();
+        self.active = 0;
+        self.sel_clip = None;
+        self.sel_extra.clear();
+        self.view = View::Arrangement;
+        self.arr_cursor = 0;
+        self.sel = None;
+        self.cues.clear();
+        self.regions.clear();
+        self.loop_points = None;
+        self.dirty = false;
+        self.project_path = Some(path.clone());
+        self.path = Some(path.clone());
+        self.refresh_playback();
+        self.arr_fit();
+        self.status = format!("Opened project {}", file_name(&path));
+    }
+
     /// Open a group clip as its own arrangement.
     fn enter_group(&mut self, (t, c): (usize, usize)) {
         let Some(clip) = self.clip((t, c)).cloned() else { return };
@@ -1356,9 +1518,7 @@ impl App {
                     self.wav_format.label(),
                     fmt_time(a.duration_secs())
                 );
-                if suffix == "-edit" {
-                    self.dirty = false;
-                }
+                let _ = suffix;
             }
             Err(e) => self.status = format!("Export failed: {e}"),
         }
@@ -1977,6 +2137,8 @@ impl App {
         self.regions.clear();
         self.loop_points = None;
         self.tracks = vec![Track::new("Track 1")];
+        self.nest.clear();
+        self.project_path = None;
         self.active = 0;
         self.sel_clip = None;
         self.view = View::Arrangement;
@@ -2128,6 +2290,7 @@ impl App {
             let has_clip = self.sel_clip.and_then(|p| self.clip(p)).is_some();
             return match a {
                 Action::New | Action::Open | Action::Quit | Action::BatchConvert | Action::Record | Action::NewClip | Action::ImportClip => true,
+                Action::SaveProject | Action::SaveProjectAs => doc,
                 Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Dither | Action::AutoGain => true,
                 Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions => true,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
@@ -2150,6 +2313,7 @@ impl App {
         }
         match a {
             Action::BackToArrangement => return true,
+            Action::SaveProject | Action::SaveProjectAs => return doc,
             Action::EditClip | Action::SplitClip | Action::DuplicateClip | Action::NewClip | Action::ImportClip => return false,
             Action::GroupClips | Action::Ungroup => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
@@ -2381,6 +2545,12 @@ impl App {
             Action::DuplicateClip => self.duplicate_clip(),
             Action::NewClip => self.new_clip(),
             Action::GroupClips => self.group_clips(),
+            Action::SaveProject => {
+                self.save_project(false);
+            }
+            Action::SaveProjectAs => {
+                self.save_project(true);
+            }
             Action::Ungroup => self.ungroup_clip(),
             Action::ImportClip => self.import_clip_dialog(ctx),
             Action::NewTrack => self.new_track(),
@@ -4607,8 +4777,8 @@ impl App {
         let mut choice = None;
         dialog_modal("unsaved").show(ctx, |ui| {
             ui.set_width(DIALOG_W);
-            dialog_header(ui, "Unsaved changes", &format!("You have edits that haven't been exported. Discard them and {what}?"));
-            let (export, cancel) = dialog_buttons(ui, "Export…", true, |ui| {
+            dialog_header(ui, "Unsaved changes", &format!("Save the project before you {what}?"));
+            let (export, cancel) = dialog_buttons(ui, "Save…", true, |ui| {
                 if ui.add(Button::new("Discard").min_size(Vec2::new(84.0, 26.0))).clicked() {
                     choice = Some(1);
                 }
@@ -4622,8 +4792,7 @@ impl App {
         });
         match choice {
             Some(0) => {
-                self.export(false);
-                if !self.dirty {
+                if self.save_project(false) {
                     self.resolve_pending(ctx);
                 }
             }
@@ -4657,7 +4826,7 @@ impl eframe::App for App {
         // Drag and drop.
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
         for p in dropped {
-            if self.view == View::Arrangement && !self.tracks.is_empty() && self.loading.is_none() {
+            if self.view == View::Arrangement && !self.tracks.is_empty() && self.loading.is_none() && !project::is_project(&p) {
                 // Dropping onto a track adds a clip there at the drop point; dropping on the
                 // empty space below the tracks makes a new track for it.
                 #[cfg(target_os = "macos")]
@@ -4680,7 +4849,7 @@ impl eframe::App for App {
         }
 
         let name = self.path.as_deref().map(file_name).unwrap_or_else(|| "Untitled".into());
-        let title = if self.audio.is_some() { format!("{name}{} — Sound Edit", if self.dirty { " (edited)" } else { "" }) } else { "Sound Edit".into() };
+        let title = if self.tracks.is_empty() { "Sound Edit".into() } else { format!("{name}{} — Sound Edit", if self.dirty { " (edited)" } else { "" }) };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
         let modal_open = self.pending.is_some() || self.dialog.is_some() || self.curve.is_some() || self.mix_include.is_some();
@@ -4971,6 +5140,11 @@ impl App {
                         self.import_as_clip = true;
                         self.start_load_as(PathBuf::from(path), ctx, true);
                     }
+                    "saveproj" => {
+                        let r = self.write_project(Path::new(arg));
+                        self.status = format!("saveproj {arg}: {r:?}");
+                    }
+                    "openproj" => self.open_project(PathBuf::from(arg)),
                     "playhead" => self.arr_cursor = (arg.parse::<f64>().unwrap_or(0.0) * rate) as usize,
                     "export" => {
                         let a = if self.view == View::Arrangement { Arc::new(self.mixdown()) } else { self.audio.clone().unwrap() };

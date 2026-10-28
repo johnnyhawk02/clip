@@ -6,6 +6,7 @@ mod audio;
 mod effects;
 mod menu;
 mod player;
+mod project;
 mod recorder;
 
 fn main() -> eframe::Result {

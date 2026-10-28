@@ -105,6 +105,8 @@ pub enum Action {
     ImportClip,
     GroupClips,
     Ungroup,
+    SaveProject,
+    SaveProjectAs,
 }
 
 use Action::*;
@@ -119,7 +121,7 @@ pub const ALL: &[Action] = &[
     ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, SoloTrack, NextTrack,
     PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions, Dither, CutGaps,
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
-    GroupClips, Ungroup,
+    GroupClips, Ungroup, SaveProject, SaveProjectAs,
 ];
 
 pub enum Item {
@@ -139,6 +141,8 @@ pub const MENUS: &[(&str, &[Item])] = &[
         &[
             Do(New),
             Do(Open),
+            Do(SaveProject),
+            Do(SaveProjectAs),
             Separator,
             Do(Export),
             Do(ExportSelection),
@@ -293,7 +297,9 @@ impl Action {
         match self {
             New => "New",
             Open => "Open…",
-            Export => "Export WAV…",
+            Export => "Export Mix…",
+            SaveProject => "Save Project",
+            SaveProjectAs => "Save Project As…",
             ExportSelection => "Export Selection…",
             FormatPcm8 => "8-bit PCM",
             FormatPcm16 => "16-bit PCM",
@@ -401,8 +407,10 @@ impl Action {
         Some(match self {
             New => "CmdOrCtrl+N",
             Open => "CmdOrCtrl+O",
-            Export => "CmdOrCtrl+S",
-            ExportSelection => "CmdOrCtrl+Shift+S",
+            Export => "CmdOrCtrl+Alt+S",
+            ExportSelection => "CmdOrCtrl+Alt+Shift+S",
+            SaveProject => "CmdOrCtrl+S",
+            SaveProjectAs => "CmdOrCtrl+Shift+S",
             Quit => "CmdOrCtrl+Q",
             Undo => "CmdOrCtrl+Z",
             Redo => "CmdOrCtrl+Shift+Z",
@@ -454,8 +462,10 @@ impl Action {
         Some(match self {
             New => "⌘N",
             Open => "⌘O",
-            Export => "⌘S",
-            ExportSelection => "⇧⌘S",
+            Export => "⌥⌘S",
+            ExportSelection => "⌥⇧⌘S",
+            SaveProject => "⌘S",
+            SaveProjectAs => "⇧⌘S",
             Undo => "⌘Z",
             Redo => "⇧⌘Z",
             Cut => "⌘X",

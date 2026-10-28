@@ -14,6 +14,11 @@ Try the files in `samples/`.
 
 ## Using it
 
+**Projects:** File ▸ Save Project (⌘S) / Save Project As (⇧⌘S) saves everything — tracks,
+clips, groups, cues, regions, loops, mixer settings and the audio itself — in one `.sndproj`
+file. Open it again with File ▸ Open or by dropping it on the window. Export Mix (⌥⌘S) writes
+the mixed-down WAV/AIFF. The unsaved-changes prompt offers to save the project.
+
 **Arrangement and clips (like Ableton's Arrangement view).** A sound is an arrangement of tracks,
 and audio sits on them as clips. Opening a file gives one track with one clip.
 
@@ -81,7 +86,8 @@ level meters. **Info** shows the format, length, selection and peak level.
 | Trim | ⌘T keeps only the selection |
 | Undo / Redo | ⌘Z / ⇧⌘Z |
 | New | ⌘N gives an empty 44.1 kHz stereo sound to build up with Insert, Paste or Mix Paste |
-| Export | ⌘S whole sound, ⇧⌘S selection. Bit depth is under File ▸ Export Format. |
+| Save project | ⌘S, Save As ⇧⌘S |
+| Export | ⌥⌘S the mix, ⌥⇧⌘S the selection (editor) or selected clip (arrangement). Bit depth is under File ▸ Export Format. |
 | Split into sounds | ⇧⌘K — see below |
 
 **Multiple tracks:** the Tracks menu adds tracks: New Track (⇧⌘T, silent, as long as the sound),
@@ -168,6 +174,7 @@ macOS needs for recording, signs it ad hoc and copies it to /Applications.
 ## Code
 
 - `src/audio.rs` — decoding, WAV export, the edit operations, waveform peak cache
+- `src/project.rs` — the .sndproj project file
 - `src/recorder.rs` — recording from the default input
 - `src/player.rs` — playback through the default output device (resamples to the device rate)
 - `src/actions.rs` — every command with its label, icon and shortcut; the menu and palette layouts
