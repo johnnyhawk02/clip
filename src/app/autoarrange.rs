@@ -53,6 +53,61 @@ impl App {
         self.build_arrangement();
     }
 
+    /// Clip ▸ Swap Section (R): replace each selected clip with a random section of the same
+    /// length from the pool, in the same place. Without a pool yet, the loops in the song are it.
+    pub(super) fn swap_sections(&mut self) {
+        let mut picked: Vec<(usize, usize)> = self.sel_clip.into_iter().chain(self.sel_extra.iter().copied()).collect();
+        picked.retain(|&(t, c)| self.tracks.get(t).is_some_and(|tr| tr.clips.get(c).is_some_and(|c| c.group.is_none())));
+        if picked.is_empty() {
+            return;
+        }
+        if self.pool.is_empty() {
+            self.pool = self.collect_pool();
+            self.variation = 1;
+        }
+        if self.pool.is_empty() {
+            return;
+        }
+        self.push_undo("Swap Section");
+        let mut rng = self.mangle_seed;
+        let mut rand = move || {
+            rng ^= rng >> 12;
+            rng ^= rng << 25;
+            rng ^= rng >> 27;
+            (rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let bar = self.bar_frames();
+        for (t, c) in picked {
+            let old = self.tracks[t].clips[c].clone();
+            // Try a few times for something that differs from what is there now.
+            let mut clip = old.clone();
+            for _ in 0..8 {
+                let mut cand = self.pool[(rand() * self.pool.len() as f64) as usize % self.pool.len()].clip.clone();
+                let frames = cand.audio.frames();
+                // Sections start on whole multiples of the clip's length (in bars where it is bar-sized).
+                let step = if old.len as f64 >= bar * 0.95 { ((old.len as f64 / bar).round().max(1.0) * bar) as usize } else { old.len };
+                let sections = if step == 0 { 0 } else { (frames + step / 20) / step };
+                (cand.start, cand.len) = (old.start, old.len);
+                if sections == 0 {
+                    cand.looping = true;
+                } else {
+                    cand.trim = ((rand() * sections as f64) as usize % sections) * step;
+                    cand.len = cand.len.min(frames - cand.trim.min(frames));
+                }
+                let same = Arc::ptr_eq(&cand.audio, &old.audio) && cand.trim == old.trim;
+                clip = cand;
+                if !same {
+                    break;
+                }
+            }
+            self.tracks[t].clips[c] = clip;
+        }
+        self.mangle_seed = self.mangle_seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407) | 1;
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = "Swapped for a random section from the pool (R again for another, ⌘Z to undo)".into();
+    }
+
     /// ◀ ▶: the previous or next variation of the current pool.
     pub(super) fn step_variation(&mut self, forward: bool) {
         if self.pool.is_empty() {
