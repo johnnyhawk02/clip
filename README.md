@@ -16,7 +16,8 @@ Try the files in `samples/`.
 
 **Projects:** File ▸ Save Project (⌘S) / Save Project As (⇧⌘S) saves everything — tracks,
 clips, groups, cues, regions, loops, mixer settings and the audio itself — in one `.sndproj`
-file. Open it again with File ▸ Open or by dropping it on the window. Export Mix (⌥⌘S) writes
+file. Open it again by double-clicking it in Finder, with File ▸ Open, or by dropping it on the
+window. (Audio files can be opened from Finder with Open With ▸ Sound Edit too.) Export Mix (⌥⌘S) writes
 the mixed-down WAV/AIFF. The unsaved-changes prompt offers to save the project.
 
 **Arrangement and clips (like Ableton's Arrangement view).** A sound is an arrangement of tracks,

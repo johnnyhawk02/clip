@@ -661,7 +661,11 @@ impl App {
             pending: None,
             allow_close: false,
             automation: Automation::from_env(),
-            menu: NativeMenu::install(&cc.egui_ctx),
+            menu: {
+                #[cfg(target_os = "macos")]
+                crate::menu::install_open_handler(&cc.egui_ctx);
+                NativeMenu::install(&cc.egui_ctx)
+            },
             dialog: None,
             tool: Tool::Select,
             pencil: None,
@@ -5084,6 +5088,11 @@ impl eframe::App for App {
 
         // Drag and drop.
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
+        // Files Finder asks us to open (double-click, Open With, the Dock icon).
+        #[cfg(target_os = "macos")]
+        for p in crate::menu::take_open_requests() {
+            self.request_open(p, &ctx);
+        }
         if !dropped.is_empty() {
             #[cfg(target_os = "macos")]
             let drop_pos = ctx.input(|i| i.viewport().inner_rect).and_then(crate::menu::mouse_in_window);

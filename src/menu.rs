@@ -175,3 +175,91 @@ pub fn mouse_in_window(window_inner: eframe::egui::Rect) -> Option<eframe::egui:
     let top = screen_h - p.y;
     Some(eframe::egui::pos2(p.x as f32 - window_inner.min.x, top as f32 - window_inner.min.y))
 }
+
+/// Files macOS asks the app to open (double-clicking a .sndproj or an audio file in Finder,
+/// dropping onto the Dock icon, Open With…). Collected here and picked up by the app each frame.
+#[cfg(target_os = "macos")]
+static OPEN_REQUESTS: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+#[cfg(target_os = "macos")]
+static OPEN_CTX: std::sync::OnceLock<eframe::egui::Context> = std::sync::OnceLock::new();
+
+/// `-[NSApplication finishLaunching]` as AppKit implemented it, before we wrapped it.
+#[cfg(target_os = "macos")]
+static ORIGINAL_FINISH_LAUNCHING: std::sync::OnceLock<objc2::runtime::Imp> = std::sync::OnceLock::new();
+
+/// `application:openURLs:` for the app delegate: AppKit calls it for files opened from Finder,
+/// both when they launch the app and while it's running.
+#[cfg(target_os = "macos")]
+unsafe extern "C-unwind" fn open_urls(
+    _this: *mut objc2::runtime::AnyObject,
+    _cmd: objc2::runtime::Sel,
+    _app: *mut objc2::runtime::AnyObject,
+    urls: *mut objc2::runtime::AnyObject,
+) {
+    use objc2::msg_send;
+    use objc2::rc::Retained;
+    if urls.is_null() {
+        return;
+    }
+    unsafe {
+        let n: usize = msg_send![urls, count];
+        for i in 0..n {
+            let url: Option<Retained<objc2_foundation::NSURL>> = msg_send![urls, objectAtIndex: i];
+            if let Some(path) = url.and_then(|u| u.path()) {
+                OPEN_REQUESTS.lock().unwrap().push(std::path::PathBuf::from(path.to_string()));
+            }
+        }
+    }
+    if let Some(ctx) = OPEN_CTX.get() {
+        ctx.request_repaint();
+    }
+}
+
+/// Our wrapper: give the delegate (winit's, which exists by now) an `application:openURLs:`
+/// before AppKit finishes launching and delivers any files that launched the app.
+#[cfg(target_os = "macos")]
+unsafe extern "C-unwind" fn finish_launching(this: *mut objc2::runtime::AnyObject, cmd: objc2::runtime::Sel) {
+    use objc2::{msg_send, sel};
+    unsafe {
+        let delegate: *mut objc2::runtime::AnyObject = msg_send![this, delegate];
+        if !delegate.is_null() {
+            let cls = objc2::ffi::object_getClass(delegate) as *mut objc2::runtime::AnyClass;
+            let imp: objc2::runtime::Imp = std::mem::transmute(open_urls as unsafe extern "C-unwind" fn(_, _, _, _));
+            objc2::ffi::class_addMethod(cls, sel!(application:openURLs:), imp, c"v@:@@".as_ptr());
+        }
+        if let Some(orig) = ORIGINAL_FINISH_LAUNCHING.get() {
+            let orig: unsafe extern "C-unwind" fn(*mut objc2::runtime::AnyObject, objc2::runtime::Sel) = std::mem::transmute(*orig);
+            orig(this, cmd);
+        }
+    }
+}
+
+/// Lets Finder open files in the app (double-clicking a project, Open With, the Dock icon).
+/// Call once at startup, before the event loop starts: it wraps AppKit's finishLaunching.
+#[cfg(target_os = "macos")]
+pub fn install_open_event_handler() {
+    use objc2::runtime::AnyClass;
+    use objc2::sel;
+    unsafe {
+        let Some(cls) = AnyClass::get(c"NSApplication") else { return };
+        let method = objc2::ffi::class_getInstanceMethod(cls, sel!(finishLaunching));
+        if method.is_null() || ORIGINAL_FINISH_LAUNCHING.get().is_some() {
+            return;
+        }
+        let imp: objc2::runtime::Imp = std::mem::transmute(finish_launching as unsafe extern "C-unwind" fn(_, _));
+        if let Some(orig) = objc2::ffi::method_setImplementation(method, imp) {
+            let _ = ORIGINAL_FINISH_LAUNCHING.set(orig);
+        }
+    }
+}
+
+/// Give the open hook the egui context, so files opened later wake the app up.
+#[cfg(target_os = "macos")]
+pub fn install_open_handler(ctx: &eframe::egui::Context) {
+    let _ = OPEN_CTX.set(ctx.clone());
+}
+
+#[cfg(target_os = "macos")]
+pub fn take_open_requests() -> Vec<std::path::PathBuf> {
+    std::mem::take(&mut *OPEN_REQUESTS.lock().unwrap())
+}

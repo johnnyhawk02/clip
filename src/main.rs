@@ -10,6 +10,10 @@ mod project;
 mod recorder;
 
 fn main() -> eframe::Result {
+    // Catch files Finder asks us to open at launch (double-clicking a project).
+    #[cfg(target_os = "macos")]
+    menu::install_open_event_handler();
+
     // Optional: open a file passed on the command line.
     let initial = std::env::args_os().nth(1).map(std::path::PathBuf::from);
 
