@@ -116,7 +116,7 @@ impl App {
         let (Some(a), Some((s, e))) = (self.audio.clone(), self.sel) else { return false };
         let clip = a.slice(s, e);
         // Put a text marker on the system clipboard so ⌘V reliably produces a paste event.
-        ctx.copy_text(format!("[Sound Edit clip, {}]", fmt_time(clip.duration_secs())));
+        ctx.copy_text(format!("[PhotoSound clip, {}]", fmt_time(clip.duration_secs())));
         self.status = format!("Copied {}", fmt_time(clip.duration_secs()));
         self.clipboard = Some(clip);
         true

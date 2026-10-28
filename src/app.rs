@@ -29,6 +29,7 @@ mod panels;
 mod look;
 mod automation;
 mod autoarrange;
+mod layers;
 
 use self::clip::*;
 use self::chop::*;
@@ -541,16 +542,15 @@ impl App {
         c.group = Some(Arc::new(tracks));
     }
 
-    /// Mix of a set of tracks (solo wins over mute), with their volumes and pan.
+    /// What a set of layers sounds like: at each moment only the topmost visible layer with a
+    /// clip there is heard.
     fn render_tracks(&self, tracks: &[Track]) -> Audio {
-        let any_solo = tracks.iter().any(|t| t.solo);
-        let rendered: Vec<(Audio, f32, f32)> = tracks
+        let layers: Vec<layers::Layer> = tracks
             .iter()
-            .filter(|t| if any_solo { t.solo } else { !t.mute })
-            .map(|t| (self.render_track(t), t.gain, t.pan))
+            .filter(|t| !t.mute)
+            .map(|t| layers::Layer::of(t, self.render_track(t)))
             .collect();
-        let inputs: Vec<(&Audio, f32, f32)> = rendered.iter().map(|(a, g, p)| (a, *g, *p)).collect();
-        effects::mix_panned(&inputs, self.rate())
+        layers::flatten(&layers, self.rate())
     }
 
     /// Extent of the timeline: the clip's length in the editor, or the end of the last clip
@@ -603,6 +603,20 @@ impl App {
         self.tracks.remove(self.active);
         self.active = self.active.min(self.tracks.len() - 1);
         self.sel_clip = None;
+        self.dirty = true;
+        self.refresh_playback();
+    }
+
+    /// Move the active layer above or below its neighbour, changing which one is heard.
+    fn move_layer(&mut self, up: bool) {
+        let a = self.active;
+        let Some(b) = (if up { a.checked_sub(1) } else { Some(a + 1) }).filter(|&b| b < self.tracks.len()) else { return };
+        self.push_undo(if up { "Move Layer Up" } else { "Move Layer Down" });
+        self.tracks.swap(a, b);
+        let swap = |t: usize| if t == a { b } else if t == b { a } else { t };
+        self.sel_clip = self.sel_clip.map(|(t, c)| (swap(t), c));
+        self.sel_extra = self.sel_extra.iter().map(|&(t, c)| (swap(t), c)).collect();
+        self.active = b;
         self.dirty = true;
         self.refresh_playback();
     }
@@ -771,8 +785,19 @@ impl App {
             if self.tracks.is_empty() {
                 self.new_sound();
             }
-            self.add_clip("Recording", Arc::new(clip), "Record");
-            self.status = format!("Recorded {} as a new clip at the playhead", fmt_time(secs));
+            // Recordings land on a new top layer, so they are heard over everything else.
+            let (t, c) = self.add_clip("Recording", Arc::new(clip), "Record");
+            if self.tracks.len() > 1 || self.tracks[t].clips.len() > 1 {
+                let c = self.tracks[t].clips.remove(c);
+                let mut layer = Track::new("Recording");
+                layer.color = self.tracks.len() % TRACK_COLORS.len();
+                layer.clips.push(c);
+                self.tracks.insert(0, layer);
+                self.active = 0;
+                self.sel_clip = Some((0, 0));
+                self.refresh_playback();
+            }
+            self.status = format!("Recorded {} on a new top layer", fmt_time(secs));
         } else {
             self.insert_clip("Record", clip);
             self.status = format!("Recorded {} — ⌘Z to undo", fmt_time(secs));
@@ -951,6 +976,8 @@ impl App {
                 Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack | Action::SoloTrack => doc,
                 Action::TrackColor | Action::OffsetTrack => doc,
                 Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack | Action::MixDialog => self.tracks.len() > 1,
+                Action::LayerUp => self.active > 0,
+                Action::LayerDown => self.active + 1 < self.tracks.len(),
                 _ => false,
             };
         }
@@ -966,7 +993,7 @@ impl App {
             Action::AutoWarp => return true,
             Action::AutoArrange | Action::PrevVariation | Action::NextVariation | Action::SwapSection | Action::AddToPool => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
-            Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack => return false,
+            Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown => return false,
             _ => {}
         }
         let has = self.audio.is_some();
@@ -1065,7 +1092,7 @@ impl App {
                 Action::Copy | Action::Cut => {
                     if let Some(c) = self.sel_clip.and_then(|p| self.clip(p)) {
                         let clip = c.visible();
-                        ctx.copy_text(format!("[Sound Edit clip, {}]", fmt_time(clip.duration_secs())));
+                        ctx.copy_text(format!("[PhotoSound clip, {}]", fmt_time(clip.duration_secs())));
                         self.status = format!("Copied clip {}", c.name);
                         self.clipboard = Some(clip);
                         if a == Action::Cut {
@@ -1377,6 +1404,8 @@ impl App {
             }
             Action::BatchConvert => self.show_batch = true,
             Action::MixDialog => self.mix_include = Some(vec![true; self.tracks.len()]),
+            Action::LayerUp => self.move_layer(true),
+            Action::LayerDown => self.move_layer(false),
             Action::TrackColor => {
                 let t = &mut self.tracks[self.active];
                 t.color = (t.color + 1) % TRACK_COLORS.len();
@@ -1587,7 +1616,7 @@ impl eframe::App for App {
         }
 
         let name = self.path.as_deref().map(file_name).unwrap_or_else(|| "Untitled".into());
-        let title = if self.tracks.is_empty() { "Sound Edit".into() } else { format!("{name}{} — Sound Edit", if self.dirty { " (edited)" } else { "" }) };
+        let title = if self.tracks.is_empty() { "PhotoSound".into() } else { format!("{name}{} — PhotoSound", if self.dirty { " (edited)" } else { "" }) };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
         let modal_open = self.pending.is_some() || self.dialog.is_some() || self.curve.is_some() || self.mix_include.is_some();

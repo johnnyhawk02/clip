@@ -47,7 +47,7 @@ impl App {
     pub(super) fn open_dialog(&mut self, ctx: &egui::Context) {
         let picked = rfd::FileDialog::new()
             .add_filter(
-                "Sound Edit projects and audio",
+                "PhotoSound projects and audio",
                 &["sndproj", "wav", "mp3", "flac", "ogg", "oga", "m4a", "mp4", "aac", "aif", "aiff", "caf", "mkv", "webm"],
             )
             .add_filter("All files", &["*"])
@@ -222,7 +222,7 @@ impl App {
                     .and_then(|p| p.file_stem())
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "Untitled".into());
-                let mut d = rfd::FileDialog::new().add_filter("Sound Edit project", &["sndproj"]).set_file_name(format!("{stem}.sndproj"));
+                let mut d = rfd::FileDialog::new().add_filter("PhotoSound project", &["sndproj"]).set_file_name(format!("{stem}.sndproj"));
                 if let Some(dir) = self.project_path.as_ref().or(self.path.as_ref()).and_then(|p| p.parent()) {
                     d = d.set_directory(dir);
                 }
@@ -532,6 +532,9 @@ impl App {
     pub(super) fn write_ableton(&self, tracks: &[Track], dir: &Path, name: &str) -> Result<PathBuf, String> {
         // Live's palette indices closest to each track colour (grey, blue, green, amber, red, purple).
         const LIVE_COLORS: [u32; 6] = [27, 22, 19, 15, 14, 24];
+        // Live gets what is heard: the layers flattened onto one track.
+        let flat = [layers::flatten_clips(tracks)];
+        let tracks = &flat[..];
         let samples = dir.join("Samples").join("Imported");
         std::fs::create_dir_all(&samples).map_err(|e| e.to_string())?;
         // This (empty) folder is what makes Live treat the folder as a project, so it finds

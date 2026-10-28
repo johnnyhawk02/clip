@@ -216,7 +216,7 @@ impl App {
     fn track_menu(&mut self, ui: &mut egui::Ui, t: usize, ctx: &egui::Context) {
         self.set_active(t);
         let Some(track) = self.tracks.get(t) else { return };
-        let (mute, solo, has_clips) = (track.mute, track.solo, !track.clips.is_empty());
+        let (mute, has_clips) = (track.mute, !track.clips.is_empty());
         let mut chosen = None;
         let mut collapse = false;
         let item = |ui: &mut egui::Ui, label: &str, enabled: bool| {
@@ -226,27 +226,30 @@ impl App {
             }
             clicked
         };
-        if item(ui, "New Track", true) {
+        if item(ui, "New Layer", true) {
             chosen = Some(Action::NewTrack);
         }
-        if item(ui, "Duplicate Track", true) {
+        if item(ui, "Duplicate Layer", true) {
             chosen = Some(Action::DuplicateTrack);
         }
-        if item(ui, "Delete Track", self.tracks.len() > 1) {
+        if item(ui, "Delete Layer", self.tracks.len() > 1) {
             chosen = Some(Action::DeleteTrack);
         }
         ui.separator();
-        if item(ui, if mute { "Unmute" } else { "Mute" }, true) {
-            chosen = Some(Action::MuteTrack);
+        if item(ui, "Move Layer Up", t > 0) {
+            chosen = Some(Action::LayerUp);
         }
-        if item(ui, if solo { "Unsolo" } else { "Solo" }, true) {
-            chosen = Some(Action::SoloTrack);
+        if item(ui, "Move Layer Down", t + 1 < self.tracks.len()) {
+            chosen = Some(Action::LayerDown);
+        }
+        if item(ui, if mute { "Show Layer" } else { "Hide Layer" }, true) {
+            chosen = Some(Action::MuteTrack);
         }
         if item(ui, "Next Colour", true) {
             chosen = Some(Action::TrackColor);
         }
         ui.separator();
-        if item(ui, "Collapse Track to One Clip", has_clips) {
+        if item(ui, "Collapse Layer to One Clip", has_clips) {
             collapse = true;
         }
         if item(ui, "Import File as Clip…", true) {
@@ -260,7 +263,7 @@ impl App {
         }
     }
 
-    /// Per-track controls beside each lane: name, mute, solo and volume.
+    /// Per-layer controls beside each lane: name, show/hide, volume and colour.
     fn track_headers(&mut self, ui: &mut egui::Ui, header: Rect, n_tracks: usize, lane: &dyn Fn(usize) -> Rect) {
         // The whole column, including the corners beside the ruler and scroll bar.
         let column = Rect::from_min_max(Pos2::new(header.left(), header.top() - RULER_H), Pos2::new(header.right(), header.bottom() + 15.0));
@@ -295,41 +298,20 @@ impl App {
                 }
                 if inner.height() > 44.0 {
                     ui.horizontal(|ui| {
-                        if ui.add(Button::new("M").selected(t.mute).min_size(Vec2::new(24.0, 20.0))).on_hover_text("Mute").clicked() {
+                        let (eye, eye_r) = ui.allocate_exact_size(Vec2::new(24.0, 20.0), Sense::click());
+                        paint_eye(ui.painter(), eye, !t.mute, eye_r.hovered());
+                        if eye_r.on_hover_text(if t.mute { "Show layer" } else { "Hide layer" }).clicked() {
                             t.mute = !t.mute;
                             changed = true;
                         }
-                        if ui.add(Button::new("S").selected(t.solo).min_size(Vec2::new(24.0, 20.0))).on_hover_text("Solo").clicked() {
-                            t.solo = !t.solo;
-                            changed = true;
+                        let (sw, swr) = ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
+                        ui.painter().rect_filled(sw.shrink(3.0), 3.0, TRACK_COLORS[t.color % TRACK_COLORS.len()]);
+                        if swr.on_hover_text("Layer colour (click to change)").clicked() {
+                            t.color = (t.color + 1) % TRACK_COLORS.len();
                         }
                         ui.spacing_mut().slider_width = (inner.width() - 60.0).max(30.0);
                         let vol = ui.add(egui::Slider::new(&mut t.gain, 0.0..=2.0).show_value(false)).on_hover_text(format!("Volume {:.0}%", t.gain * 100.0));
                         if vol.drag_stopped() || (vol.changed() && !vol.dragged()) {
-                            changed = true;
-                        }
-                    });
-                }
-                if inner.height() > 70.0 {
-                    ui.horizontal(|ui| {
-                        let (sw, swr) = ui.allocate_exact_size(Vec2::new(24.0, 20.0), Sense::click());
-                        ui.painter().rect_filled(sw.shrink(3.0), 3.0, TRACK_COLORS[t.color % TRACK_COLORS.len()]);
-                        if swr.on_hover_text("Track colour (click to change)").clicked() {
-                            t.color = (t.color + 1) % TRACK_COLORS.len();
-                        }
-                        ui.label(egui::RichText::new("Pan").size(11.0).color(MUTED));
-                        ui.spacing_mut().slider_width = (inner.width() - 64.0).max(30.0);
-                        let pan_tip = match t.pan {
-                            p if p.abs() < 0.01 => "Pan centre".to_string(),
-                            p if p < 0.0 => format!("Pan {:.0}% left", -p * 100.0),
-                            p => format!("Pan {:.0}% right", p * 100.0),
-                        };
-                        let pan = ui.add(egui::Slider::new(&mut t.pan, -1.0..=1.0).show_value(false)).on_hover_text(pan_tip);
-                        if pan.double_clicked() {
-                            t.pan = 0.0;
-                            changed = true;
-                        }
-                        if pan.drag_stopped() || (pan.changed() && !pan.dragged()) {
                             changed = true;
                         }
                     });
@@ -1034,14 +1016,14 @@ impl App {
             }
         }
         // Lanes and clips.
-        let any_solo = self.tracks.iter().any(|t| t.solo);
+        let hidden = layers::covered_above(&self.tracks);
         for (ti, t) in self.tracks.iter().enumerate() {
             let l = lane(ti);
             if ti == self.active {
                 painter.rect_filled(l, 0.0, Color32::from_gray(250));
             }
             painter.line_segment([l.left_bottom(), l.right_bottom()], Stroke::new(1.0, Color32::from_gray(225)));
-            let muted = if any_solo { !t.solo } else { t.mute };
+            let muted = t.mute;
             let color = TRACK_COLORS[t.color % TRACK_COLORS.len()];
             let fades = crossfades(&t.clips);
             for (ci, c) in t.clips.iter().enumerate() {
@@ -1052,6 +1034,15 @@ impl App {
                 let r = Rect::from_min_max(Pos2::new(x0, l.top() + 3.0), Pos2::new(x1.max(x0 + 2.0), l.bottom() - 3.0));
                 let selected = self.sel_clip == Some((ti, ci)) || self.sel_extra.contains(&(ti, ci));
                 draw_clip(&painter, r, c, color, selected, muted, lanes);
+                // Parts a layer above plays over are washed out: they are not heard.
+                for &(s, e) in &hidden[ti] {
+                    let (s, e) = (s.max(c.start), e.min(c.end()));
+                    if e > s {
+                        let (hx0, hx1) = (f_to_x(s as f64, vs, vl), f_to_x(e as f64, vs, vl));
+                        let h = Rect::from_min_max(Pos2::new(hx0, r.top()), Pos2::new(hx1, r.bottom())).intersect(lanes);
+                        painter.rect_filled(h, 0.0, Color32::from_white_alpha(185));
+                    }
+                }
             }
             // Crossfades: an X across each overlap, drawn over both clips.
             for (c, &(_, fout)) in t.clips.iter().zip(&fades) {

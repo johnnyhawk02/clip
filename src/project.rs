@@ -111,9 +111,9 @@ pub fn write(path: &Path, project: &ProjectFile, audio: &[&Audio]) -> Result<(),
 pub fn read(path: &Path) -> Result<(ProjectFile, Vec<Audio>), String> {
     let mut r = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| format!("Can't open project: {e}"))?);
     let mut head = [0u8; 16];
-    r.read_exact(&mut head).map_err(|_| "Not a Sound Edit project")?;
+    r.read_exact(&mut head).map_err(|_| "Not a PhotoSound project")?;
     if &head[0..8] != MAGIC {
-        return Err("Not a Sound Edit project".into());
+        return Err("Not a PhotoSound project".into());
     }
     let len = u64::from_le_bytes(head[8..16].try_into().unwrap()) as usize;
     let mut json = vec![0u8; len];

@@ -16,11 +16,11 @@ serde_json = "1.0.154"
 symphonia = { version = "0.6.1", features = ["all"] }
 
 [package.metadata.bundle]
-name = "Sound Edit"
+name = "PhotoSound"
 identifier = "com.johnnyhawk.soundedit"
 icon = ["assets/icon.png"]
 category = "public.app-category.music"
-short_description = "A simple audio editor"
+short_description = "Edit a track in layers"
 
 [profile.release]
 strip = true

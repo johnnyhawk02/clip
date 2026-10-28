@@ -27,19 +27,19 @@ impl NativeMenu {
         let menu = Menu::new();
         let mut entries = HashMap::new();
 
-        let app_menu = Submenu::new("Sound Edit", true);
+        let app_menu = Submenu::new("PhotoSound", true);
         let quit = MenuItem::with_id(Action::Quit.id(), Action::Quit.label(), true, accel(Action::Quit));
         let _ = app_menu.append_items(&[
             &PredefinedMenuItem::about(
-                Some("About Sound Edit"),
+                Some("About PhotoSound"),
                 Some(AboutMetadata {
-                    name: Some("Sound Edit".into()),
+                    name: Some("PhotoSound".into()),
                     version: Some(env!("CARGO_PKG_VERSION").into()),
                     ..Default::default()
                 }),
             ),
             &PredefinedMenuItem::separator(),
-            &PredefinedMenuItem::hide(Some("Hide Sound Edit")),
+            &PredefinedMenuItem::hide(Some("Hide PhotoSound")),
             &PredefinedMenuItem::hide_others(None),
             &PredefinedMenuItem::show_all(None),
             &PredefinedMenuItem::separator(),

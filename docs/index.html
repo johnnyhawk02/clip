@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Sound Edit Guide</title>
+<title>PhotoSound Guide</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
@@ -74,9 +74,10 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 
 <div class="wrap">
 <nav id="nav">
-  <div class="brand"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M1 10h2M5 6v8M8 3v14M11 7v6M14 4v12M17 8v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Sound Edit</div>
+  <div class="brand"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M1 10h2M5 6v8M8 3v14M11 7v6M14 4v12M17 8v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>PhotoSound</div>
   <a href="#start">Getting started</a>
   <a href="#arrangement">The arrangement</a>
+  <a href="#layers">Layers</a>
   <a href="#chop">Chopping loops</a>
   <a href="#mangle">Mangle and BBCut</a>
   <a href="#build">Building a track</a>
@@ -90,39 +91,52 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 
 <main>
 <header>
-  <h1>Sound Edit</h1>
-  <p>A small Mac sound editor for one job: chopping up loops, keeping the good bits and arranging them into a track, with as little fiddling as possible.</p>
+  <h1>PhotoSound</h1>
+  <p>A small Mac sound editor for one job: chopping up loops, keeping the good bits and editing them into a track. Tracks work like layers in a photo editor: only one clip is heard at a time, and the top layer wins. (It was called Sound Edit until October 2026.)</p>
   <div class="facts"><span>macOS</span><span>WAV · MP3 · FLAC · OGG · M4A · AIFF · CAF in</span><span>WAV · AIFF out</span><span>Exports to Ableton Live 12</span></div>
 </header>
 
 <section id="start">
   <h2><span class="n">01</span>Getting started</h2>
   <ol class="steps">
-    <li><b>Open the app</b> from Applications, or Spotlight "Sound Edit".</li>
-    <li><b>Drop loops on the window.</b> Each goes on its own track. A tempo in the file name, like "118bpm 16bar" or "124 BPM", sets the song tempo and stretches the loop to fit it.</li>
+    <li><b>Open the app</b> from Applications, or Spotlight "PhotoSound".</li>
+    <li><b>Drop loops on the window.</b> Each goes on its own layer. A tempo in the file name, like "118bpm 16bar" or "124 BPM", sets the song tempo and stretches the loop to fit it.</li>
     <li><b>Press Space</b> to play the whole song from the playhead. Click empty space to move the playhead.</li>
-    <li><b>Chop, move and arrange</b> with the tools below, then <span class="path">File ▸ Save Project</span> <kbd>⌘S</kbd> to keep everything in one file.</li>
+    <li><b>Chop, stack and arrange</b> with the tools below, then <span class="path">File ▸ Save Project</span> <kbd>⌘S</kbd> to keep everything in one file.</li>
   </ol>
   <div class="tip">Nothing you do touches your original files. Every edit can be undone with <kbd>⌘Z</kbd>.</div>
 </section>
 
 <section id="arrangement">
   <h2><span class="n">02</span>The arrangement</h2>
-  <p>A song is a set of tracks, and audio sits on them as clips, much like Ableton's Arrangement view. The top bar sets the tempo, beats per bar, the grid, and whether things snap to it.</p>
-  <figure><img src="img/ctxclip.jpg" alt="The arrangement with one clip and its right-click menu open"><figcaption>Right-click a clip for everything you can do to it. Right-click a track's header or empty lane for track commands.</figcaption></figure>
+  <p>A song is a stack of layers, and audio sits on them as clips, laid out much like Ableton's Arrangement view. The top bar sets the tempo, beats per bar, the grid, and whether things snap to it.</p>
+  <figure><img src="img/ctxclip.jpg" alt="The arrangement with one clip and its right-click menu open"><figcaption>Right-click a clip for everything you can do to it. Right-click a layer's header or empty lane for layer commands.</figcaption></figure>
   <ul>
     <li><b>Select several</b> by dragging a box from empty space: every clip it touches is selected. Hold <kbd>⇧</kbd> to add to the selection, or shift-click clips one by one. <kbd>⌫</kbd> deletes them all.</li>
-    <li><b>Move</b> a clip by dragging it, along its track or onto another. Drag below the last track to make a new one. <kbd>⌥</kbd>-drag drags a copy.</li>
+    <li><b>Move</b> a clip by dragging it, along its layer or onto another. Drag below the last layer to make a new one. <kbd>⌥</kbd>-drag drags a copy.</li>
     <li><b>Trim</b> by dragging either edge. The audio underneath is kept, so you can drag it back out.</li>
     <li><b>Snapping:</b> moves and trims snap to the grid, other clips' edges and the playhead. Hold <kbd>⌘</kbd> to place freely.</li>
-    <li><b>Each track</b> has mute (M), solo (S), volume, pan and a colour swatch. <kbd>⌥⌘↑</kbd> <kbd>⌥⌘↓</kbd> step between tracks.</li>
-    <li><b>Copy, cut, paste</b> clips with <kbd>⌘C</kbd> <kbd>⌘X</kbd> <kbd>⌘V</kbd>. Paste goes on the selected track at the playhead. <kbd>⌘D</kbd> duplicates a clip right after itself, and <kbd>⌫</kbd> deletes it.</li>
-    <li><b>Dropping files</b> onto a track adds them at the drop point. Several files go on the tracks below, one each.</li>
+    <li><b>Each layer</b> has an eye (show/hide), a colour swatch and a volume slider. <kbd>⌥⌘↑</kbd> <kbd>⌥⌘↓</kbd> step between layers.</li>
+    <li><b>Copy, cut, paste</b> clips with <kbd>⌘C</kbd> <kbd>⌘X</kbd> <kbd>⌘V</kbd>. Paste goes on the selected layer at the playhead. <kbd>⌘D</kbd> duplicates a clip right after itself, and <kbd>⌫</kbd> deletes it.</li>
+    <li><b>Dropping files</b> onto a layer adds them at the drop point. Several files go on the layers below, one each.</li>
+  </ul>
+</section>
+
+<section id="layers">
+  <h2><span class="n">03</span>Layers</h2>
+  <p>Only one clip is heard at any moment: the one on the highest layer that has a clip there. Where no layer has a clip you hear silence. So you edit one track instead of mixing several. Lay a long loop on a low layer, then drop short clips on the layers above to patch over parts of it.</p>
+  <figure><img src="img/layers.jpg" alt="A one-bar hit on the top layer, with the part of the loop below it washed out"><figcaption>The hit on the top layer plays over bar 5 of the loop. That part of the loop is washed out because it isn't heard.</figcaption></figure>
+  <ul>
+    <li><b>Washed-out parts</b> of a clip are covered by a layer above, so the screen always shows what you hear.</li>
+    <li><b>The eye</b> hides a layer, and the layers below show through.</li>
+    <li><b>Move Layer Up / Down</b> on a layer's right-click menu, or the Layers menu, changes which one wins.</li>
+    <li><b>No clicks:</b> where a layer cuts in over one that is still sounding, the one cut off fades out over 5 ms. A clip that starts or ends on its own keeps its edge.</li>
+    <li><b>Recording</b> puts the take on a new top layer. <span class="path">Layers ▸ Flatten Layers</span> turns what you hear into one plain clip.</li>
   </ul>
 </section>
 
 <section id="chop">
-  <h2><span class="n">03</span>Chopping loops</h2>
+  <h2><span class="n">04</span>Chopping loops</h2>
   <div class="cards">
     <div class="card"><b>Split Clip <kbd>⌘E</kbd></b><span>Cuts the clip under the pointer, at the pointer (snapped to the grid), or at the playhead when the pointer isn't over a clip.</span></div>
     <div class="card"><b>Split tool <kbd>C</kbd></b><span>Click anywhere on a clip to cut it there. Press <kbd>S</kbd> to go back to the selection tool.</span></div>
@@ -133,7 +147,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 </section>
 
 <section id="mangle">
-  <h2><span class="n">04</span>Mangle and BBCut</h2>
+  <h2><span class="n">05</span>Mangle and BBCut</h2>
   <p>Mangle rearranges the selected clips in the slots they already sit in. A single clip is sliced at the grid first. The buttons are on the floating tool palette, and in <span class="path">Clip ▸ Mangle</span>.</p>
   <div class="table"><table>
     <tr><th>Mangle</th><th>What happens</th></tr>
@@ -150,37 +164,37 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <div class="styles"><span>Jungle</span><span>House</span><span>Hip-Hop</span><span>Dembow</span><span>Footwork</span><span>Trap</span><span>Breakcore</span><span>Halftime</span></div>
   <figure><img src="img/bbcut.jpg" alt="A loop re-cut by BBCut into many short blocks and rolls"><figcaption>A loop after BBCut: blocks of eighths, some moved, some rolled.</figcaption></figure>
   <h3>Mangling a stretch of time</h3>
-  <p>Drag across the ruler to set a loop range, which turns Loop on. Mangle then cuts the clips at the loop's edges, slices what's inside at the grid and mangles only that, on the track you're working on or the tracks of the selected clips. You hear it looping, and <kbd>⌘Y</kbd> gives another take.</p>
+  <p>Drag across the ruler to set a loop range, which turns Loop on. Mangle then cuts the clips at the loop's edges, slices what's inside at the grid and mangles only that, on the layer you're working on or the layers of the selected clips. You hear it looping, and <kbd>⌘Y</kbd> gives another take.</p>
 </section>
 
 <section id="build">
-  <h2><span class="n">05</span>Building a track</h2>
+  <h2><span class="n">06</span>Building a track</h2>
   <h3>The Loop Pool</h3>
   <p>Open it with <kbd>⌘7</kbd> or <span class="path">View ▸ Panels ▸ Loop Pool</span>. It fills itself with the loops in your song, grouped clips included, all fitted to the song tempo.</p>
-  <figure><img src="img/pool3.jpg" alt="The Loop Pool panel with a loop being dragged onto a track"><figcaption>Dragging a one-bar hit from the pool: the outline shows where it will land, snapped to bar 7.</figcaption></figure>
+  <figure><img src="img/pool3.jpg" alt="The Loop Pool panel with a loop being dragged onto a layer"><figcaption>Dragging a one-bar hit from the pool: the outline shows where it will land, snapped to bar 7.</figcaption></figure>
   <ul>
-    <li><b>Drag a loop</b> onto any track. It lands on the grid line under the pointer. Drop it below the last track for a new track.</li>
+    <li><b>Drag a loop</b> onto any layer. It lands on the grid line under the pointer. Drop it below the last layer for a new layer at the bottom. Drop it on a layer above a loop to patch over it.</li>
     <li><b>Add to Pool</b> on a clip's right-click menu puts that exact clip in, trimmed or grouped.</li>
     <li><b>×</b> takes a loop out. <b>Add Loops from Song</b> brings in any new ones.</li>
   </ul>
   <h3>Swap a section <kbd>⇧R</kbd></h3>
   <p>Click a clip and press <kbd>⇧R</kbd>. It becomes a random section of the same length from the pool, in the same place. Press <kbd>⇧R</kbd> again for another, or <kbd>⌘Z</kbd> to go back. Works on several selected clips at once.</p>
   <h3>Auto Arrange</h3>
-  <p>Press <b>Auto Arrange</b> in the top bar. It builds about four minutes from the pool: each loop gets its own track and is cut into 8 or 16 bar sections, laid out with an intro, a build, a breakdown a little past halfway, a second peak and an outro.</p>
-  <figure><img src="img/swap1.jpg" alt="An auto-arranged song with three loop tracks"><figcaption>Variation 1 from three loops: 15 sections of 8 bars, 4.1 minutes.</figcaption></figure>
+  <p>Press <b>Auto Arrange</b> in the top bar. It builds about four minutes from the pool: each loop is cut into 8 or 16 bar sections, and one section plays at a time, end to end on a single layer. Calm loops fill the quiet parts and busy ones the peaks, following an intro, a build, a breakdown a little past halfway, a second peak and an outro.</p>
+  <figure><img src="img/arrange1.jpg" alt="An auto-arranged song on one layer, with the Loop Pool beside it"><figcaption>Variation 1 from three loops: 15 sections of 8 bars, 4.1 minutes.</figcaption></figure>
   <ul>
     <li><b>◀ ▶</b> flip through variations. Each number always gives the same layout, so you can go back to one you liked.</li>
     <li><b>8 / 16 bars</b> changes the section length.</li>
-    <li>Loops shorter than a section repeat to fill it. Volume and pan stay with a track that already played that loop.</li>
+    <li>Loops shorter than a section repeat to fill it.</li>
     <li>It replaces the whole song, and <kbd>⌘Z</kbd> brings it back.</li>
   </ul>
   <h3>Crossfades</h3>
-  <p>Overlap two clips on the same track and the overlap becomes a crossfade: the first fades out as the second fades in, keeping the level even. Drag further over for a longer fade. An X marks each one. A short clip lying entirely inside a longer one just plays on top.</p>
+  <p>Overlap two clips on the same layer and the overlap becomes a crossfade: the first fades out as the second fades in, keeping the level even. Drag further over for a longer fade. An X marks each one. A short clip lying entirely inside a longer one just plays on top.</p>
   <figure><img src="img/xf2.jpg" alt="Two clips overlapping by one bar with an X over the overlap"><figcaption>Two copies of a loop overlapping by a bar, crossfading across it.</figcaption></figure>
 </section>
 
 <section id="tempo">
-  <h2><span class="n">06</span>Tempo and warping</h2>
+  <h2><span class="n">07</span>Tempo and warping</h2>
   <ul>
     <li><b>Tempo from names:</b> a clip whose name gives its tempo ("Loop 118bpm 16bar", "Kick - 124 BPM", "Bpm130_Drums") is stretched to the song tempo, keeping its pitch. A bar count in the name gives the exact tempo.</li>
     <li><b>Change the tempo</b> in the top bar and warped clips re-fit, staying on their beats.</li>
@@ -191,7 +205,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 </section>
 
 <section id="groups">
-  <h2><span class="n">07</span>Loops and groups</h2>
+  <h2><span class="n">08</span>Loops and groups</h2>
   <ul>
     <li><b>Loop Clip</b> <kbd>⌥⌘L</kbd> makes a clip repeat for as long as you drag its right edge out. Dotted lines show where it starts over.</li>
     <li><b>Song loop:</b> drag in the ruler to draw a loop range, and turn it on or off with <kbd>⌘L</kbd> or the loop button.</li>
@@ -201,7 +215,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 </section>
 
 <section id="editor">
-  <h2><span class="n">08</span>The clip editor</h2>
+  <h2><span class="n">09</span>The clip editor</h2>
   <p>Double-click a clip, or press <kbd>Return</kbd>, to edit its audio in the waveform editor. <b>◀ Arrangement</b> or <kbd>⌘Return</kbd> goes back, and <kbd>⇧Tab</kbd> flips between the two as in Live.</p>
   <figure><img src="img/editor.jpg" alt="The waveform editor showing a stereo loop"><figcaption>Editing one clip. Selections, effects and the pencil work on this clip only.</figcaption></figure>
   <div class="table"><table>
@@ -216,25 +230,24 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 </section>
 
 <section id="headphones">
-  <h2><span class="n">09</span>Headphone crossfeed</h2>
-  <p>The <b>Master</b> strip under the tracks has the whole mix's volume (double-click to reset), its level meters and a headphone button. The headphone button, or <span class="path">Control ▸ Headphone Crossfeed</span>, makes headphones sound like a pair of speakers in front of you. Each ear also hears a slightly delayed, duller share of the other side, the way it would in a room, so hard-panned sounds stop sitting inside your head and the bass comes out in the middle.</p>
-  <figure><img src="img/master.jpg" alt="The Master strip under the tracks, with the headphone button switched on"><figcaption>The Master strip: volume, level meters, and the headphone button (black when crossfeed is on).</figcaption></figure>
+  <h2><span class="n">10</span>Headphone crossfeed</h2>
+  <p>The <b>Master</b> strip under the layers has the output volume (double-click to reset), its level meters and a headphone button. The headphone button, or <span class="path">Control ▸ Headphone Crossfeed</span>, makes headphones sound like a pair of speakers in front of you. Each ear also hears a slightly delayed, duller share of the other side, the way it would in a room, so hard-panned sounds stop sitting inside your head and the bass comes out in the middle.</p>
+  <figure><img src="img/master.jpg" alt="The Master strip under the layers, with the headphone button switched on"><figcaption>The Master strip: volume, level meters, and the headphone button (black when crossfeed is on).</figcaption></figure>
   <p>The filters were measured from a CanOpener setting by running clicks through each side, and match it to within -100 dB. It only changes what you hear, never what you export, and it stays on between runs.</p>
 </section>
 
 <section id="save">
-  <h2><span class="n">10</span>Saving and exporting</h2>
+  <h2><span class="n">11</span>Saving and exporting</h2>
   <div class="cards">
-    <div class="card"><b>Save Project <kbd>⌘S</kbd></b><span>One .sndproj file with every track, clip, group, loop, mixer setting and the audio itself. Double-click it in Finder to open.</span></div>
-    <div class="card"><b>Export Mix <kbd>⇧⌘R</kbd></b><span>The whole song as one WAV or AIFF, at 16-bit, 24-bit or 32-bit float.</span></div>
-    <div class="card"><b>Export Stems</b><span>One WAV per track, all starting at zero and the same length, so they line up in another DAW.</span></div>
-    <div class="card"><b>Export Ableton Live Set</b><span>A Live 12 project folder: tracks, names, colours, mixer, clip positions, loops and warping all carry over. Crossfades don't.</span></div>
+    <div class="card"><b>Save Project <kbd>⌘S</kbd></b><span>One .sndproj file with every layer, clip, group, loop, setting and the audio itself. Double-click it in Finder to open.</span></div>
+    <div class="card"><b>Export <kbd>⇧⌘R</kbd></b><span>What the whole song sounds like as one WAV or AIFF, at 16-bit, 24-bit or 32-bit float.</span></div>
+    <div class="card"><b>Export Ableton Live Set</b><span>A Live 12 project folder. The layers are flattened onto one track, each clip cut to the part you hear, with loops and warping kept. Crossfades don't carry over.</span></div>
   </div>
 </section>
 
 <section id="keys">
-  <h2><span class="n">11</span>Shortcuts</h2>
-  <p>Wherever Sound Edit and Ableton Live share a feature, the key is the same as in Live, so your hands already know them.</p>
+  <h2><span class="n">12</span>Shortcuts</h2>
+  <p>Wherever PhotoSound and Ableton Live share a feature, the key is the same as in Live, so your hands already know them.</p>
   <div class="table"><table>
     <tr><th>Keys</th><th>Does</th></tr>
     <tr><td><kbd>Space</kbd></td><td>Play / pause. <kbd>Esc</kbd> stops.</td></tr>
@@ -253,18 +266,18 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <tr><td><kbd>Return</kbd> / <kbd>⌘Return</kbd></td><td>Edit clip / back to the arrangement. <kbd>⇧Tab</kbd> flips between them.</td></tr>
     <tr><td><kbd>Z</kbd> / <kbd>X</kbd></td><td>Zoom to the selection / zoom back</td></tr>
     <tr><td><kbd>⌘1</kbd> / <kbd>⌘2</kbd></td><td>Narrow / widen the grid</td></tr>
-    <tr><td><kbd>⌘T</kbd></td><td>New track</td></tr>
+    <tr><td><kbd>⌘T</kbd></td><td>New layer</td></tr>
     <tr><td><kbd>F9</kbd></td><td>Record</td></tr>
     <tr><td><kbd>S</kbd> <kbd>H</kbd> <kbd>B</kbd> <kbd>C</kbd></td><td>Selection, Hand, Pencil (Live's Draw), Split tools</td></tr>
     <tr><td><kbd>W</kbd> or <kbd>⌘0</kbd></td><td>Fit the song in the window</td></tr>
     <tr><td><kbd>+</kbd> / <kbd>-</kbd></td><td>Zoom in / out (or ⌘= / ⌘-, pinch, ⌘-scroll)</td></tr>
     <tr><td><kbd>Home</kbd> / <kbd>End</kbd></td><td>Go to start / end</td></tr>
     <tr><td><kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd></td><td>Undo / redo</td></tr>
-    <tr><td><kbd>⌘S</kbd> / <kbd>⇧⌘R</kbd></td><td>Save project / export mix</td></tr>
+    <tr><td><kbd>⌘S</kbd> / <kbd>⇧⌘R</kbd></td><td>Save project / export</td></tr>
   </table></div>
 </section>
 
-<footer>Sound Edit is written in Rust with egui. Source: <a href="https://github.com/johnnyhawk02/sound-edit" style="color:inherit">github.com/johnnyhawk02/sound-edit</a>.</footer>
+<footer>PhotoSound is written in Rust with egui. Source: <a href="https://github.com/johnnyhawk02/sound-edit" style="color:inherit">github.com/johnnyhawk02/sound-edit</a>.</footer>
 </main>
 </div>
 
