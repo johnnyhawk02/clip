@@ -211,6 +211,48 @@ impl Clip {
     }
 }
 
+/// Where clips on one track overlap, the earlier one fades out across the overlap while the
+/// later one fades in (equal power). Returns each clip's (fade in, fade out) in frames. A clip
+/// lying wholly inside another just plays on top of it.
+pub(super) fn crossfades(clips: &[Clip]) -> Vec<(usize, usize)> {
+    clips
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let (mut fin, mut fout) = (0, 0);
+            for (j, o) in clips.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                if o.start < c.start && o.end() > c.start && o.end() < c.end() {
+                    fin = fin.max(o.end() - c.start);
+                }
+                if o.start > c.start && o.start < c.end() && o.end() > c.end() {
+                    fout = fout.max(c.end() - o.start);
+                }
+            }
+            if fin + fout > c.len {
+                let k = c.len as f64 / (fin + fout) as f64;
+                (fin, fout) = ((fin as f64 * k) as usize, (fout as f64 * k) as usize);
+            }
+            (fin, fout)
+        })
+        .collect()
+}
+
+/// Apply a crossfade's fade in and fade out to rendered clip audio.
+pub(super) fn apply_crossfade(a: &mut Audio, (fin, fout): (usize, usize)) {
+    let n = a.frames();
+    for ch in &mut a.channels {
+        for k in 0..fin.min(n) {
+            ch[k] *= (k as f32 / fin as f32 * std::f32::consts::FRAC_PI_2).sin();
+        }
+        for k in 0..fout.min(n) {
+            ch[n - 1 - k] *= ((k + 1) as f32 / fout as f32 * std::f32::consts::FRAC_PI_2).sin();
+        }
+    }
+}
+
 /// One track of the arrangement: its clips and mixer settings. All clips share a sample rate.
 #[derive(Clone)]
 pub(super) struct Track {

@@ -955,6 +955,7 @@ impl App {
             painter.line_segment([l.left_bottom(), l.right_bottom()], Stroke::new(1.0, Color32::from_gray(225)));
             let muted = if any_solo { !t.solo } else { t.mute };
             let color = TRACK_COLORS[t.color % TRACK_COLORS.len()];
+            let fades = crossfades(&t.clips);
             for (ci, c) in t.clips.iter().enumerate() {
                 let (x0, x1) = (f_to_x(c.start as f64, vs, vl), f_to_x(c.end() as f64, vs, vl));
                 if x1 < lanes.left() || x0 > lanes.right() {
@@ -963,6 +964,23 @@ impl App {
                 let r = Rect::from_min_max(Pos2::new(x0, l.top() + 3.0), Pos2::new(x1.max(x0 + 2.0), l.bottom() - 3.0));
                 let selected = self.sel_clip == Some((ti, ci)) || self.sel_extra.contains(&(ti, ci));
                 draw_clip(&painter, r, c, color, selected, muted, lanes);
+            }
+            // Crossfades: an X across each overlap, drawn over both clips.
+            for (c, &(_, fout)) in t.clips.iter().zip(&fades) {
+                if fout == 0 {
+                    continue;
+                }
+                let (x0, x1) = (f_to_x((c.end() - fout) as f64, vs, vl), f_to_x(c.end() as f64, vs, vl));
+                if x1 < lanes.left() || x0 > lanes.right() {
+                    continue;
+                }
+                let r = Rect::from_min_max(Pos2::new(x0, (l.top() + 19.0).min(l.bottom() - 3.0)), Pos2::new(x1, l.bottom() - 3.0));
+                let p = painter.with_clip_rect(lanes);
+                p.rect_filled(r, 0.0, Color32::from_white_alpha(140));
+                let stroke = Stroke::new(1.5, INK);
+                p.line_segment([r.left_top(), r.right_bottom()], stroke);
+                p.line_segment([r.left_bottom(), r.right_top()], stroke);
+                p.rect_stroke(r, 0.0, Stroke::new(1.0, INK), egui::StrokeKind::Inside);
             }
         }
         if self.tracks.is_empty() {

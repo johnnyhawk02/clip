@@ -462,13 +462,16 @@ impl App {
             .unwrap_or(44100)
     }
 
-    /// One track rendered to audio: its clips placed at their positions.
+    /// One track rendered to audio: its clips placed at their positions, crossfading where
+    /// they overlap.
     fn render_track(&self, t: &Track) -> Audio {
         let rate = self.rate();
         let channels = t.clips.iter().map(|c| c.audio.num_channels()).max().unwrap_or(1);
         let mut out = Audio { rate, channels: vec![Vec::new(); channels] };
-        for c in &t.clips {
-            out = effects::mix_into(&out, c.start, &c.visible(), 1.0);
+        for (c, fades) in t.clips.iter().zip(crossfades(&t.clips)) {
+            let mut v = c.visible();
+            apply_crossfade(&mut v, fades);
+            out = effects::mix_into(&out, c.start, &v, 1.0);
         }
         out
     }
@@ -1725,6 +1728,26 @@ mod tests {
         c.trim = 10;
         c.len = 3;
         assert_eq!(c.visible().channels[0], vec![6., 7., 4.]);
+    }
+
+    #[test]
+    fn overlapping_clips_crossfade() {
+        let a = Arc::new(Audio { rate: 10, channels: vec![vec![1.0; 100]] });
+        let (x, y, inner) = (Clip::new("x", a.clone(), 0), Clip::new("y", a.clone(), 80), Clip::new("z", a, 10));
+        let mut inner = inner;
+        inner.len = 20;
+        // x fades out over the 20 frames y overlaps it, y fades in over them; z just sits inside x.
+        assert_eq!(crossfades(&[x.clone(), y.clone(), inner]), vec![(0, 20), (20, 0), (0, 0)]);
+        let mut v = x.visible();
+        apply_crossfade(&mut v, (0, 20));
+        let mut w = y.visible();
+        apply_crossfade(&mut w, (20, 0));
+        // Equal power: the two gains' squares add up to one across the overlap.
+        for k in 0..20 {
+            let (g, h) = (v.channels[0][80 + k], w.channels[0][k]);
+            assert!((g * g + h * h - 1.0).abs() < 0.02, "frame {k}: {g} {h}");
+        }
+        assert_eq!(v.channels[0][79], 1.0);
     }
 
     #[test]
