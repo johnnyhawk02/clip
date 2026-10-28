@@ -3819,7 +3819,7 @@ impl App {
         let mut row = |ui: &mut egui::Ui, title: &str, items: &[(&str, Action)], this: &Self| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                ui.add_sized(Vec2::new(54.0, 22.0), egui::Label::new(small(title).color(MUTED)));
+                ui.add_sized(Vec2::new(54.0, 22.0), egui::Label::new(small_heading(title)));
                 for (label, a) in items {
                     let b = ui.add_enabled(this.enabled(*a), Button::new(small(label)).min_size(Vec2::new(0.0, 22.0)));
                     if b.on_hover_text(this.menu_label(*a)).clicked() {
@@ -3828,8 +3828,8 @@ impl App {
                 }
             });
         };
-        row(ui, "Mangle", &buttons, self);
-        row(ui, "BBCut", &styles, self);
+        row(ui, "MANGLE", &buttons, self);
+        row(ui, "BBCUT", &styles, self);
         if let Some(a) = run {
             self.run(a, &ctx);
         }
@@ -3914,7 +3914,7 @@ impl App {
                 ui.separator();
             }
             ui.add_space(8.0);
-            ui.label(egui::RichText::new(title).size(11.0).color(MUTED).strong());
+            ui.label(small_heading(title));
             ui.add_space(6.0);
         };
         let mut first = true;
@@ -4331,13 +4331,17 @@ impl App {
         let cache = &mut self.spectrum_cache;
         let center = self.desk.center();
         egui::Window::new("Spectrum")
-            .open(&mut open)
+            .title_bar(false)
+            .frame(card_frame())
             .default_pos(center - Vec2::new(280.0, 150.0))
             .default_size(Vec2::new(560.0, 300.0))
             .resizable(true)
             .fade_in(false)
             .collapsible(false)
             .show(ctx, |ui| {
+                if window_header(ui, "Spectrum") {
+                    open = false;
+                }
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut three_d, false, "2D");
                     ui.selectable_value(&mut three_d, true, "3D");
@@ -4464,13 +4468,17 @@ impl App {
         let running = b.progress.as_ref().is_some_and(|p| !p.lock().unwrap().finished);
         let center = self.desk.center();
         egui::Window::new("Batch Convert")
-            .open(&mut open)
+            .title_bar(false)
+            .frame(card_frame())
             .default_pos(center - Vec2::new(210.0, 180.0))
             .default_width(420.0)
             .resizable(false)
             .fade_in(false)
             .collapsible(false)
             .show(ctx, |ui| {
+                if window_header(ui, "Batch Convert") {
+                    open = false;
+                }
                 ui.horizontal(|ui| {
                     if ui.add_enabled(!running, Button::new("Add Files…")).clicked() {
                         if let Some(files) = rfd::FileDialog::new()
@@ -4507,7 +4515,7 @@ impl App {
                     });
                     ui.end_row();
                     ui.label("Format");
-                    egui::ComboBox::from_id_salt("bfmt").selected_text(BATCH_FORMATS[b.format].0).show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("bfmt").width(FIELD_W).selected_text(BATCH_FORMATS[b.format].0).show_ui(ui, |ui| {
                         for (i, f) in BATCH_FORMATS.iter().enumerate() {
                             ui.selectable_value(&mut b.format, i, f.0);
                         }
@@ -4516,7 +4524,7 @@ impl App {
                     ui.label("Sample rate");
                     let rates = [0u32, 8000, 11025, 16000, 22050, 32000, 44100, 48000, 96000];
                     let label = |r: u32| if r == 0 { "Keep".to_string() } else { format!("{} Hz", r) };
-                    egui::ComboBox::from_id_salt("brate").selected_text(label(b.rate)).show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("brate").width(FIELD_W).selected_text(label(b.rate)).show_ui(ui, |ui| {
                         for r in rates {
                             ui.selectable_value(&mut b.rate, r, label(r));
                         }
@@ -4524,7 +4532,7 @@ impl App {
                     ui.end_row();
                     ui.label("Channels");
                     let chl = |c: usize| ["Keep", "Mono", "Stereo"][c.min(2)];
-                    egui::ComboBox::from_id_salt("bch").selected_text(chl(b.channels)).show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("bch").width(FIELD_W).selected_text(chl(b.channels)).show_ui(ui, |ui| {
                         for c in 0..3 {
                             ui.selectable_value(&mut b.channels, c, chl(c));
                         }
@@ -4672,12 +4680,16 @@ impl App {
         }
         let mut toggle = false;
         self.place("Record", Pos2::new(self.desk.center().x - 135.0, self.desk.top() + 40.0))
-            .open(&mut open)
+            .title_bar(false)
+            .frame(card_frame())
             .auto_sized()
             .fade_in(false)
             .collapsible(false)
             .show(ctx, |ui| {
                 ui.set_width(270.0);
+                if window_header(ui, "Record") {
+                    open = false;
+                }
                 ui.horizontal(|ui| {
                     let label = if recording { "■ Stop" } else { "● Record" };
                     let btn = Button::new(egui::RichText::new(label).size(15.0).color(INK))
@@ -4716,7 +4728,7 @@ impl App {
         let mut cancel = false;
         let resp = dialog_modal("dialog").show(ctx, |ui| {
             ui.set_width(DIALOG_W);
-            ui.spacing_mut().interact_size.x = 96.0;
+            ui.spacing_mut().interact_size.x = FIELD_W;
             dialog_header(ui, kind.title(), &kind.blurb(scope));
             dialog_grid("fields").show(ui, |ui| {
                 for f in kind.fields().iter().filter(|_| kind != Dialog::Equalizer) {
@@ -4724,7 +4736,7 @@ impl App {
                     let v = self.params.entry(f.key).or_insert(f.default);
                     if !f.choices.is_empty() {
                         let current = f.choices.iter().find(|c| c.1 == *v).map_or("?", |c| c.0);
-                        egui::ComboBox::from_id_salt(f.key).width(140.0).selected_text(current).show_ui(ui, |ui| {
+                        egui::ComboBox::from_id_salt(f.key).width(FIELD_W).selected_text(current).show_ui(ui, |ui| {
                             for &(label, value) in f.choices {
                                 ui.selectable_value(v, value, label);
                             }
@@ -4743,13 +4755,13 @@ impl App {
                 }
                 if kind == Dialog::InsertDtmf {
                     ui.label("Keys");
-                    ui.add_sized([200.0, 22.0], egui::TextEdit::singleline(&mut self.dtmf_digits).hint_text("e.g. 555-0123"))
+                    ui.add_sized([FIELD_W, 22.0], egui::TextEdit::singleline(&mut self.dtmf_digits).hint_text("e.g. 555-0123"))
                         .on_hover_text("0–9, *, #, A–D. A comma adds a pause; other characters are ignored.");
                     ui.end_row();
                 }
                 if kind == Dialog::InsertTone {
                     ui.label("Waveform");
-                    egui::ComboBox::from_id_salt("wave").width(140.0).selected_text(self.tone_wave.label()).show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("wave").width(FIELD_W).selected_text(self.tone_wave.label()).show_ui(ui, |ui| {
                         for w in Wave::ALL {
                             ui.selectable_value(&mut self.tone_wave, w, w.label());
                         }
@@ -4771,7 +4783,7 @@ impl App {
                                 ui.add(egui::Slider::new(v, f.min..=f.max).vertical().show_value(false));
                             });
                             ui.add_space(4.0);
-                            ui.label(egui::RichText::new(format!("{:+.1} dB", *v)).monospace().size(11.0).color(INK));
+                            ui.label(egui::RichText::new(format!("{:+.1} dB", *v)).size(12.0).color(INK));
                             ui.label(egui::RichText::new(f.label).size(12.0).color(MUTED));
                         });
                     }
@@ -6395,7 +6407,18 @@ impl eframe::App for App {
             // Floating palette: drag it by its title bar; the cross hides it (Window ▸ Tools).
             let mut open = true;
             let pos = Pos2::new(self.desk.center().x - 280.0, self.desk.bottom() - 150.0);
-            self.place("Tools", pos).resizable(false).collapsible(true).open(&mut open).show(&ctx, |ui| self.floating_palette(ui));
+            self.place("Tools", pos).title_bar(false).frame(card_frame().inner_margin(egui::Margin::same(12))).resizable(false).show(&ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(small_heading("TOOLS"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if close_button(ui).on_hover_text("Close (Window ▸ Tools brings it back)").clicked() {
+                            open = false;
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+                self.floating_palette(ui);
+            });
             self.show_tools &= open;
         }
         if self.show_tools && self.palette_docked {
@@ -7062,6 +7085,8 @@ fn fmt_time(secs: f64) -> String {
 
 /// Dialog width, label column width and spacing shared by every dialog.
 const DIALOG_W: f32 = 400.0;
+/// Width of every number field, pop-up menu and text field in a dialog.
+const FIELD_W: f32 = 140.0;
 const LABEL_W: f32 = 120.0;
 
 /// A modal dialog with the app's frame: white, rounded, generous margins.
@@ -7074,6 +7099,46 @@ fn dialog_modal(id: &str) -> egui::Modal {
             .inner_margin(egui::Margin::same(22))
             .shadow(egui::Shadow { offset: [0, 8], blur: 28, spread: 0, color: Color32::from_black_alpha(45) }),
     )
+}
+
+/// The look every floating window shares with the dialogs: a white card, no title bar.
+fn card_frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(Color32::WHITE)
+        .stroke(Stroke::new(1.0, LINE))
+        .corner_radius(10)
+        .inner_margin(egui::Margin::same(18))
+        .shadow(egui::Shadow { offset: [0, 8], blur: 28, spread: 0, color: Color32::from_black_alpha(45) })
+}
+
+/// A floating window's title (as a dialog's) with a close button on the right; true when the
+/// close button was clicked. Drag the window by any empty part of it.
+fn window_header(ui: &mut egui::Ui, title: &str) -> bool {
+    let mut close = false;
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(title).size(17.0).strong().color(INK));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            close = close_button(ui).on_hover_text("Close").clicked();
+        });
+    });
+    ui.add_space(10.0);
+    close
+}
+
+/// A small drawn × for closing a floating window.
+fn close_button(ui: &mut egui::Ui) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
+    let color = if resp.hovered() { INK } else { MUTED };
+    let r = rect.shrink(6.0);
+    let st = Stroke::new(1.5, color);
+    ui.painter().line_segment([r.left_top(), r.right_bottom()], st);
+    ui.painter().line_segment([r.right_top(), r.left_bottom()], st);
+    resp
+}
+
+/// A small heading in capitals, as the side panel's sections and the palette's rows use.
+fn small_heading(text: &str) -> egui::RichText {
+    egui::RichText::new(text).size(11.0).color(MUTED).strong()
 }
 
 /// Dialog title and a muted explanation under it.
@@ -7102,6 +7167,8 @@ fn dialog_buttons(ui: &mut egui::Ui, ok_label: &str, ok_enabled: bool, extra: im
     ui.add_space(18.0);
     let mut out = (false, false);
     ui.horizontal(|ui| {
+        // Extra buttons (Flat, Reset…) are as tall as Cancel and OK, and line up with them.
+        ui.spacing_mut().interact_size.y = 26.0;
         extra(ui);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             out.0 = ui.add_enabled(ok_enabled, primary_button(ok_label)).clicked();
