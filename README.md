@@ -1,6 +1,18 @@
 # Sound Edit
 
-A simple desktop audio editor written in Rust (egui + symphonia + cpal + hound).
+A simple desktop audio editor written in Rust (egui + symphonia + cpal + hound), built for one
+job: chopping up loops, keeping the good bits and arranging them into a track.
+
+## Chopping loops
+
+- Drop loops in; ones with a tempo in the name ("118bpm 16bar", "124 BPM") warp to the song tempo.
+- Split Clip (⌘E) cuts the clip under the pointer, at the pointer (snapped to the grid; hold ⌘
+  for a free cut), or at the playhead when the pointer isn't over a clip. The Split tool (B) cuts
+  with a click.
+- Slice at Grid (⌘U) cuts the selected clips at every grid line (the grid size you pick, or
+  every beat when the grid is Off or Auto), ready to drag around, duplicate (⌘D), loop and group.
+- The menus hold just that. The older sound-editor features (effects, insert, markers, recording,
+  extra tools and panels, batch convert) are all still there, under the **More** menu.
 
 ## Run it
 

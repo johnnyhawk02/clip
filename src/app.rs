@@ -669,6 +669,8 @@ pub struct App {
     drop_queue: std::collections::VecDeque<(PathBuf, (Option<usize>, usize))>,
     /// The arrangement's lane area and lane height, from the last frame (for drops).
     arr_lanes: Option<(Rect, f32)>,
+    /// The clip under the pointer in the arrangement, and the (snapped) frame there.
+    arr_hover: Option<(usize, usize, usize)>,
     /// What the player is playing: the active track alone, or the mix of all tracks.
     play_audio: Option<Arc<Audio>>,
     path: Option<PathBuf>,
@@ -792,6 +794,7 @@ impl App {
             snap: true,
             drop_queue: Default::default(),
             arr_lanes: None,
+            arr_hover: None,
             play_audio: None,
             path: None,
             project_path: None,
@@ -1399,7 +1402,8 @@ impl App {
         chosen = chosen.or(pick(ui, "Duplicate", Action::DuplicateClip));
         chosen = chosen.or(pick(ui, "Delete", Action::Delete));
         ui.separator();
-        chosen = chosen.or(pick(ui, "Split at Playhead", Action::SplitClip));
+        chosen = chosen.or(pick(ui, "Split Here", Action::SplitClip));
+        chosen = chosen.or(pick(ui, "Slice at Grid", Action::SliceClip));
         chosen = chosen.or(pick(ui, if looping { "Stop Looping" } else { "Loop Clip" }, Action::LoopClip));
         chosen = chosen.or(pick(ui, if warped { "Original Speed" } else { "Warp to Tempo" }, Action::WarpClip));
         chosen = chosen.or(pick(ui, "Group", Action::GroupClips));
@@ -1793,6 +1797,11 @@ impl App {
     /// Split the selected clip (or the clip under the playhead on the active track) at the playhead.
     fn split_clip(&mut self) {
         self.sel_extra.clear();
+        // With the pointer over a clip, cut it there; otherwise at the playhead.
+        if let Some((t, c, f)) = self.arr_hover.filter(|&(t, c, f)| self.view == View::Arrangement && self.clip((t, c)).is_some_and(|cl| f > cl.start && f < cl.end())) {
+            self.active = t;
+            return self.split_clip_at((t, c), f);
+        }
         let at = self.arr_cursor;
         let pos = self.sel_clip.filter(|&p| self.clip(p).is_some_and(|c| at > c.start && at < c.end())).or_else(|| {
             let t = self.active;
@@ -1805,6 +1814,43 @@ impl App {
         self.split_clip_at((t, c), at);
     }
 
+    /// Clip ▸ Slice at Grid: cut the selected clips at every grid line inside them (every beat
+    /// when the grid is off), so the pieces can be moved around.
+    fn slice_clip(&mut self) {
+        let sel = self.selected_clips();
+        if sel.is_empty() {
+            return;
+        }
+        // A chosen grid size slices at that size; with the grid off or automatic, every beat.
+        let step = match GRID[self.grid.min(GRID.len() - 1)].1 {
+            -2.0 => self.bar_frames(),
+            b if b > 0.0 => self.beat_frames() * b,
+            _ => self.beat_frames(),
+        }
+        .max(1.0);
+        self.push_undo("Slice Clip");
+        let mut pieces = 0;
+        for (t, c) in sel {
+            let Some(clip) = self.clip((t, c)) else { continue };
+            let (start, end) = (clip.start, clip.end());
+            // Cut from the right so the left-hand piece keeps index `c`.
+            let first = (start as f64 / step).floor() as i64 + 1;
+            let cuts: Vec<usize> = (first..).map(|k| (k as f64 * step).round() as usize).take_while(|&f| f < end).filter(|&f| f > start).collect();
+            // No slivers: a clip a few samples longer than its bars doesn't get a tiny last piece.
+            let min = (step / 8.0) as usize;
+            let cuts: Vec<usize> = cuts.into_iter().filter(|&f| f - start >= min && end - f >= min).collect();
+            for &f in cuts.iter().rev() {
+                self.split_raw((t, c), f);
+            }
+            pieces += cuts.len() + 1;
+        }
+        self.sel_clip = None;
+        self.sel_extra.clear();
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = format!("Sliced into {pieces} pieces");
+    }
+
     /// Cut clip `(t, c)` in two at timeline frame `at`, selecting the right-hand piece.
     fn split_clip_at(&mut self, (t, c): (usize, usize), at: usize) {
         if !self.clip((t, c)).is_some_and(|cl| at > cl.start && at < cl.end()) {
@@ -1812,6 +1858,14 @@ impl App {
         }
         self.sel_extra.clear();
         self.push_undo("Split Clip");
+        self.split_raw((t, c), at);
+        self.sel_clip = Some((t, self.tracks[t].clips.len() - 1));
+        self.dirty = true;
+        self.refresh_playback();
+    }
+
+    /// Cut a clip in two without undo or refresh; the right piece goes on the end of the track.
+    fn split_raw(&mut self, (t, c): (usize, usize), at: usize) {
         let left = &mut self.tracks[t].clips[c];
         let cut = at - left.start;
         let mut right = left.clone();
@@ -1820,9 +1874,6 @@ impl App {
         right.trim += cut;
         right.len -= cut;
         self.tracks[t].clips.push(right);
-        self.sel_clip = Some((t, self.tracks[t].clips.len() - 1));
-        self.dirty = true;
-        self.refresh_playback();
     }
 
     fn export(&mut self, selection_only: bool) {
@@ -2821,7 +2872,7 @@ impl App {
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
                 Action::SplitClip => doc,
                 Action::ToolSelect | Action::ToolSplit => true,
-                Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop | Action::CollapseClip | Action::WarpClip => has_clip,
+                Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop | Action::CollapseClip | Action::WarpClip | Action::SliceClip => has_clip,
                 Action::AutoWarp => true,
                 Action::CollapseTrack => self.tracks.get(self.active).is_some_and(|t| !t.clips.is_empty()),
                 Action::ClearLoop => self.arr_loop.is_some(),
@@ -2844,7 +2895,7 @@ impl App {
             Action::SaveProject | Action::SaveProjectAs => return doc,
             Action::EditClip | Action::SplitClip | Action::DuplicateClip | Action::NewClip | Action::ImportClip => return false,
             Action::GroupClips | Action::Ungroup | Action::TempoFromClip | Action::ToggleSnap | Action::LoopClip => return false,
-            Action::CollapseClip | Action::CollapseTrack | Action::WarpClip => return false,
+            Action::CollapseClip | Action::CollapseTrack | Action::WarpClip | Action::SliceClip => return false,
             Action::AutoWarp => return true,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
             Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack => return false,
@@ -3116,6 +3167,7 @@ impl App {
             Action::ToggleSnap => self.snap = !self.snap,
             Action::AutoWarp => self.auto_warp = !self.auto_warp,
             Action::WarpClip => self.toggle_warp(),
+            Action::SliceClip => self.slice_clip(),
             Action::SaveProject => {
                 self.save_project(false);
             }
@@ -3325,7 +3377,7 @@ impl App {
         let pos = self.player.position();
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            for a in [Action::GoStart, Action::PlayPause, Action::Stop, Action::Record, Action::Loop, Action::GoEnd] {
+            for a in [Action::GoStart, Action::PlayPause, Action::Stop, Action::Loop, Action::GoEnd] {
                 self.palette_button(ui, a, Vec2::new(34.0, 28.0));
             }
             ui.add_space(12.0);
@@ -5290,6 +5342,14 @@ impl App {
         };
         let (vs, vl) = (self.arr_view_start, self.arr_view_len);
         let hover_hit = resp.hover_pos().and_then(|q| hit(&self.tracks, q, vs, vl));
+        self.arr_hover = match (resp.hover_pos(), hover_hit) {
+            (Some(q), Some((t, c, _))) => {
+                let f = x_to_f(q.x, vs, vl);
+                let f = if ui.input(|i| i.modifiers.command) { f } else { self.snap_to_grid(f, vl / lanes.width() as f64) };
+                Some((t, c, f as usize))
+            }
+            _ => None,
+        };
         if self.tool == Tool::Split {
             // Split tool: a line shows where the cut will go; a click cuts the clip there.
             let cmd = ui.input(|i| i.modifiers.command);
@@ -6300,6 +6360,28 @@ fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color32, playing:
             p.rect_stroke(Rect::from_min_max(pt(-9.0, -5.0), pt(-2.0, 5.0)), 2.0, st, egui::StrokeKind::Middle);
             p.rect_stroke(Rect::from_min_max(pt(2.0, -5.0), pt(9.0, 5.0)), 2.0, st, egui::StrokeKind::Middle);
             line(0.0, -9.0, 0.0, 9.0);
+        }
+        Action::SliceClip => {
+            p.rect_stroke(Rect::from_min_max(pt(-10.0, -5.0), pt(10.0, 5.0)), 2.0, st, egui::StrokeKind::Middle);
+            for x in [-5.0f32, 0.0, 5.0] {
+                line(x, -8.0, x, 8.0);
+            }
+        }
+        Action::DuplicateClip => {
+            p.rect_stroke(Rect::from_min_max(pt(-10.0, -4.0), pt(-1.0, 4.0)), 2.0, st, egui::StrokeKind::Middle);
+            p.rect_filled(Rect::from_min_max(pt(1.0, -4.0), pt(10.0, 4.0)), 2.0, color);
+        }
+        Action::LoopClip => {
+            p.rect_stroke(Rect::from_min_max(pt(-10.0, -4.0), pt(-2.0, 4.0)), 2.0, st, egui::StrokeKind::Middle);
+            for x in [1.0f32, 5.0, 9.0] {
+                line(x, -4.0, x, 4.0);
+            }
+            line(-2.0, 0.0, 10.0, 0.0);
+        }
+        Action::WarpClip => {
+            // A clip stretched between two arrows.
+            arrow_h(-10.0, 10.0);
+            bars(&[(-5.0, 4.0), (-2.0, 7.0), (2.0, 5.0), (5.0, 3.0)]);
         }
         Action::ToolPencil => {
             thick(-3.5, 3.5, 6.0, -6.0, 4.5);
