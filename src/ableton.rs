@@ -285,6 +285,8 @@ pub fn build(tempo: f64, beats_per_bar: u32, tracks: &[LiveTrack]) -> Result<Str
     replace_after(&mut s, main, "<TimeSignature>", "<Manual Value=\"201\" />", &format!("<Manual Value=\"{sig}\" />"))?;
     replace_after(&mut s, main, "<AutomationEnvelopes>", "<FloatEvent Id=\"0\" Time=\"-63072000\" Value=\"120\" />", &format!("<FloatEvent Id=\"0\" Time=\"-63072000\" Value=\"{bpm}\" />"))?;
     replace_after(&mut s, main, "<AutomationEnvelopes>", "<EnumEvent Id=\"0\" Time=\"-63072000\" Value=\"201\" />", &format!("<EnumEvent Id=\"0\" Time=\"-63072000\" Value=\"{sig}\" />"))?;
+    // Open in the Arrangement view (1 is the Session view, which the default set uses).
+    s = s.replacen("<SelectedDocumentViewInMainWindow Value=\"1\" />", "<SelectedDocumentViewInMainWindow Value=\"0\" />", 1);
     Ok(s)
 }
 
