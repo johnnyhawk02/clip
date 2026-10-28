@@ -15,6 +15,7 @@ job: chopping up loops, keeping the good bits and arranging them into a track.
   at the grid first): Shuffle, Reverse Order, Swap Pairs, Stutter (some slices repeat the one
   before), Random Reverse, Drop Out, and BBCut (breakbeat cutting in the style of Nick Collins' BBCut: the selection is re-cut in blocks, some jump to other parts of the loop, some become stutter rolls). BBCut comes in styles: Jungle (3+3+2 eighths, accelerating rolls), House (straight quarters, a fill roll at the end of a bar), Hip-Hop (beat chops shuffled), Dembow (3+3+2 sixteenths), Footwork (sixteenths in threes, busy rolls), Trap (triplet rolls), Breakcore (everything, plus reversed bits) and Halftime (long blocks, sparse fills). Mangle Again (⌘Y) re-rolls the last one. Also on the
   clip's right-click menu, along with Reverse.
+- To mangle a stretch of time instead of whole clips, drag across the ruler to set the loop and turn Loop on. Mangle then cuts the clips at the loop's edges, slices what's inside at the grid, and mangles only that, on the track you're working on (or the tracks of the selected clips). You hear it looping, and ⌘Y gives a new variation.
 - The tool palette floats: a strip of the tools, then a row of Mangle buttons and a row of
   BBCut styles. Drag it by its title, collapse it with the triangle, close it with the cross
   (Window ▸ Tools brings it back). Window ▸ Dock Tools on the Left puts it back in the left column.

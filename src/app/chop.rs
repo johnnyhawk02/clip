@@ -160,7 +160,6 @@ impl App {
     /// split into blocks of eighths (mostly 3+3+2), each block plays either its own spot or another
     /// spot of the loop, and some blocks become stutter rolls of shorter and shorter repeats.
     fn bbcut(&mut self, sel: Vec<(usize, usize)>, style: CutStyle) {
-        self.push_undo("Mangle");
         self.last_mangle = Some(Mangle::Cut(style));
         let rules = style.rules();
         let mut rng = self.mangle_seed;
@@ -287,18 +286,70 @@ impl App {
         self.status = format!("BBCut {style:?}: {} cuts (⌘Y cuts again)", new_sel.len());
     }
 
+    /// The arrangement loop, when Loop is on: Mangle then works on that span of time.
+    pub(super) fn loop_span(&self) -> Option<Sel> {
+        self.arr_loop.filter(|&(s, e)| self.looping && e > s)
+    }
+
+    /// The tracks a loop-span Mangle works on: those of the selected clips, or the active track.
+    fn loop_tracks(&self) -> Vec<usize> {
+        let mut tracks: Vec<usize> = self.selected_clips().iter().map(|p| p.0).collect();
+        if tracks.is_empty() {
+            tracks.push(self.active);
+        }
+        tracks.sort_unstable();
+        tracks.dedup();
+        tracks.retain(|&t| t < self.tracks.len());
+        tracks
+    }
+
+    /// Cut the clips on the loop tracks at the loop's edges, slice what's inside at the grid,
+    /// and return those pieces.
+    fn cut_loop_span(&mut self, (ls, le): Sel) -> Vec<(usize, usize)> {
+        let mut pieces = Vec::new();
+        for t in self.loop_tracks() {
+            for at in [ls, le] {
+                for c in 0..self.tracks[t].clips.len() {
+                    let cl = &self.tracks[t].clips[c];
+                    if at > cl.start && at < cl.end() {
+                        self.split_raw((t, c), at);
+                    }
+                }
+            }
+            let inside = |cl: &Clip| cl.start >= ls && cl.end() <= le;
+            let whole: Vec<usize> = (0..self.tracks[t].clips.len()).filter(|&c| inside(&self.tracks[t].clips[c])).collect();
+            for c in whole {
+                self.slice_raw((t, c));
+            }
+            pieces.extend((0..self.tracks[t].clips.len()).filter(|&c| inside(&self.tracks[t].clips[c])).map(|c| (t, c)));
+        }
+        pieces
+    }
+
     /// Clip ▸ Mangle: rearrange the selected clips in the slots they sit in (a single clip is
-    /// sliced at the grid first). Each track's clips are mangled among themselves.
+    /// sliced at the grid first). Each track's clips are mangled among themselves. With Loop on,
+    /// it works on the loop span instead: clips are cut at its edges and sliced at the grid, and
+    /// the pieces inside are mangled.
     pub(super) fn mangle(&mut self, how: Mangle) {
+        let span = self.loop_span();
         let mut sel = self.selected_clips();
-        if sel.is_empty() {
+        if let Some((ls, le)) = span {
+            let touches = self.loop_tracks().iter().any(|&t| self.tracks[t].clips.iter().any(|c| c.start < le && c.end() > ls));
+            if !touches {
+                self.status = "Nothing inside the loop to mangle on this track".into();
+                return;
+            }
+        } else if sel.is_empty() {
             return;
+        }
+        self.push_undo("Mangle");
+        if let Some(span) = span {
+            sel = self.cut_loop_span(span);
         }
         if let Mangle::Cut(style) = how {
             return self.bbcut(sel, style);
         }
-        self.push_undo("Mangle");
-        if sel.len() == 1 {
+        if span.is_none() && sel.len() == 1 {
             let (t, c) = sel[0];
             let before = self.tracks[t].clips.len();
             self.slice_raw((t, c));

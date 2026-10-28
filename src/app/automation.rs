@@ -99,6 +99,17 @@ impl App {
                     }
                     "spectrum3d" => self.spectrum_3d = true,
                     "tempo" => self.tempo = arg.parse().unwrap_or(self.tempo),
+                    // loop:A-B sets the arrangement loop from bar A to bar B (counting from 0) and turns Loop on.
+                    "loop" => {
+                        let (a, b) = arg.split_once('-').unwrap_or(("0", "1"));
+                        let bar = |t: &str| (t.parse::<f64>().unwrap_or(0.0) * self.bar_frames()) as usize;
+                        self.arr_loop = Some((bar(a), bar(b)));
+                        self.looping = true;
+                    }
+                    "deselect" => {
+                        self.sel_clip = None;
+                        self.sel_extra.clear();
+                    }
                     // seed:N makes Mangle and BBCut repeatable.
                     "seed" => self.mangle_seed = arg.parse::<u64>().unwrap_or(1) | 1,
                     // rclick:x|y and hover:x|y — pointer events at window point (x, y), a few frames apart.
