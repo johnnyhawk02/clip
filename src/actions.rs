@@ -103,6 +103,8 @@ pub enum Action {
     DuplicateClip,
     NewClip,
     ImportClip,
+    GroupClips,
+    Ungroup,
 }
 
 use Action::*;
@@ -117,6 +119,7 @@ pub const ALL: &[Action] = &[
     ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, SoloTrack, NextTrack,
     PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, ShowRegions, Dither, CutGaps,
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
+    GroupClips, Ungroup,
 ];
 
 pub enum Item {
@@ -167,7 +170,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
     ),
     (
         "Clip",
-        &[Do(NewClip), Do(ImportClip), Separator, Do(EditClip), Do(BackToArrangement), Separator, Do(SplitClip), Do(DuplicateClip)],
+        &[Do(NewClip), Do(ImportClip), Separator, Do(EditClip), Do(BackToArrangement), Separator, Do(SplitClip), Do(DuplicateClip), Separator, Do(GroupClips), Do(Ungroup)],
     ),
     (
         "Insert",
@@ -387,6 +390,8 @@ impl Action {
             DuplicateClip => "Duplicate Clip",
             NewClip => "New Clip",
             ImportClip => "Import File as Clip…",
+            GroupClips => "Group into Clip",
+            Ungroup => "Ungroup",
             AutoGain => "Auto Gain (Prevent Clipping)",
         }
     }
@@ -422,6 +427,8 @@ impl Action {
             BackToArrangement => "CmdOrCtrl+Enter",
             NewClip => "CmdOrCtrl+Alt+N",
             ImportClip => "CmdOrCtrl+Alt+O",
+            GroupClips => "CmdOrCtrl+G",
+            Ungroup => "CmdOrCtrl+Alt+G",
             ZoomFit => "CmdOrCtrl+0",
             ShowTools => "CmdOrCtrl+1",
             ShowControls => "CmdOrCtrl+2",

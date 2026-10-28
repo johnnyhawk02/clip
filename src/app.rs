@@ -36,13 +36,28 @@ struct Clip {
     cues: Vec<Cue>,
     regions: Vec<Region>,
     loop_points: Option<Sel>,
+    /// A group clip holds its own tracks of clips; `audio` is then their rendered mix. Copies
+    /// share this until one is opened and changed, so they stay independent.
+    group: Option<Arc<Vec<Track>>>,
+}
+
+/// One level up from the arrangement being shown: the parent's tracks, and which of its clips
+/// is the open group.
+#[derive(Clone)]
+struct NestFrame {
+    tracks: Vec<Track>,
+    track: usize,
+    clip: usize,
+    active: usize,
+    view_start: f64,
+    view_len: f64,
 }
 
 impl Clip {
     fn new(name: impl Into<String>, audio: Arc<Audio>, start: usize) -> Clip {
         let peaks = Arc::new(Peaks::build(&audio));
         let len = audio.frames();
-        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None }
+        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None }
     }
 
     fn end(&self) -> usize {
@@ -117,6 +132,7 @@ impl Track {
 struct Snapshot {
     audio: Option<Arc<Audio>>,
     tracks: Vec<Track>,
+    nest: Vec<NestFrame>,
     active: usize,
     sel_clip: Option<(usize, usize)>,
     cues: Vec<Cue>,
@@ -476,6 +492,10 @@ pub struct App {
     arr_cursor: usize,
     sel_clip: Option<(usize, usize)>,
     clip_drag: Option<ClipDrag>,
+    /// Clips selected besides `sel_clip` (shift-click), for grouping.
+    sel_extra: Vec<(usize, usize)>,
+    /// Open groups, outermost first; empty at the top level (the song).
+    nest: Vec<NestFrame>,
     /// The file being loaded becomes a clip at the playhead (not a new track).
     import_as_clip: bool,
     /// What the player is playing: the active track alone, or the mix of all tracks.
@@ -584,6 +604,8 @@ impl App {
             arr_cursor: 0,
             sel_clip: None,
             clip_drag: None,
+            sel_extra: Vec::new(),
+            nest: Vec::new(),
             import_as_clip: false,
             play_audio: None,
             path: None,
@@ -857,18 +879,51 @@ impl App {
         out
     }
 
-    /// Mix of all audible tracks (solo wins over mute), with their volumes and pan.
+    /// Mix of all audible tracks at the level being shown (solo wins over mute).
     fn mixdown(&self) -> Audio {
-        let any_solo = self.tracks.iter().any(|t| t.solo);
-        let rendered: Vec<(Audio, f32, f32)> = self
-            .tracks
+        let mix = self.render_tracks(&self.tracks);
+        if self.auto_gain { auto_gain(mix) } else { mix }
+    }
+
+    /// The whole song's mix, whichever group is open.
+    fn song_mix(&self) -> Audio {
+        let mix = self.render_tracks(&self.song_tracks());
+        if self.auto_gain { auto_gain(mix) } else { mix }
+    }
+
+    /// The top-level tracks, with the open group(s) folded back in.
+    fn song_tracks(&self) -> Vec<Track> {
+        let mut cur = self.tracks.clone();
+        for f in self.nest.iter().rev() {
+            let mut parent = f.tracks.clone();
+            if let Some(c) = parent.get_mut(f.track).and_then(|t| t.clips.get_mut(f.clip)) {
+                self.set_group_content(c, cur);
+            }
+            cur = parent;
+        }
+        cur
+    }
+
+    /// Put new content into a group clip and re-render it, keeping its trim where possible.
+    fn set_group_content(&self, c: &mut Clip, tracks: Vec<Track>) {
+        let showed_all = c.trim == 0 && c.len >= c.audio.frames();
+        let audio = Arc::new(self.render_tracks(&tracks));
+        c.peaks = Arc::new(Peaks::build(&audio));
+        c.len = if showed_all { audio.frames() } else { c.len.min(audio.frames().saturating_sub(c.trim)) };
+        c.audio = audio;
+        c.group = Some(Arc::new(tracks));
+    }
+
+    /// Mix of a set of tracks (solo wins over mute), with their volumes and pan.
+    fn render_tracks(&self, tracks: &[Track]) -> Audio {
+        let any_solo = tracks.iter().any(|t| t.solo);
+        let rendered: Vec<(Audio, f32, f32)> = tracks
             .iter()
             .filter(|t| if any_solo { t.solo } else { !t.mute })
             .map(|t| (self.render_track(t), t.gain, t.pan))
             .collect();
         let inputs: Vec<(&Audio, f32, f32)> = rendered.iter().map(|(a, g, p)| (a, *g, *p)).collect();
-        let mix = effects::mix_panned(&inputs, self.rate());
-        if self.auto_gain { auto_gain(mix) } else { mix }
+        effects::mix_panned(&inputs, self.rate())
     }
 
     /// Extent of the timeline: the clip's length in the editor, or the end of the last clip
@@ -950,6 +1005,9 @@ impl App {
     /// Open a clip in the waveform editor.
     fn edit_clip(&mut self, (t, c): (usize, usize)) {
         let Some(clip) = self.clip((t, c)).cloned() else { return };
+        if clip.group.is_some() {
+            return self.enter_group((t, c));
+        }
         self.player.stop();
         // Editing works on what the clip shows: bake its trim in first.
         let visible = if clip.trim > 0 || clip.len < clip.audio.frames() { Arc::new(clip.visible()) } else { clip.audio.clone() };
@@ -981,7 +1039,7 @@ impl App {
 
     fn back_to_arrangement(&mut self) {
         if self.view == View::Arrangement {
-            return;
+            return self.leave_group();
         }
         self.player.stop();
         self.sync_clip_markers();
@@ -1017,6 +1075,7 @@ impl App {
     }
 
     fn delete_clip(&mut self) {
+        self.sel_extra.clear();
         let Some((t, c)) = self.sel_clip.filter(|&p| self.clip(p).is_some()) else { return };
         self.push_undo("Delete Clip");
         self.tracks[t].clips.remove(c);
@@ -1025,8 +1084,140 @@ impl App {
         self.refresh_playback();
     }
 
+    /// All selected clips: the main one plus any shift-clicked ones.
+    fn selected_clips(&self) -> Vec<(usize, usize)> {
+        let mut v: Vec<(usize, usize)> = self.sel_clip.into_iter().chain(self.sel_extra.iter().copied()).filter(|&p| self.clip(p).is_some()).collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+
+    /// Open a group clip as its own arrangement.
+    fn enter_group(&mut self, (t, c): (usize, usize)) {
+        let Some(clip) = self.clip((t, c)).cloned() else { return };
+        let Some(inner) = clip.group.clone() else { return };
+        self.player.stop();
+        self.nest.push(NestFrame {
+            tracks: std::mem::replace(&mut self.tracks, (*inner).clone()),
+            track: t,
+            clip: c,
+            active: self.active,
+            view_start: self.arr_view_start,
+            view_len: self.arr_view_len,
+        });
+        self.active = 0;
+        self.sel_clip = None;
+        self.sel_extra.clear();
+        self.arr_cursor = 0;
+        self.arr_fit();
+        self.refresh_playback();
+        self.status = format!("Inside {} — ⌘Return or the path above goes back up", clip.name);
+    }
+
+    /// Close the open group, folding its arrangement back into its clip.
+    fn leave_group(&mut self) {
+        let Some(f) = self.nest.pop() else { return };
+        self.player.stop();
+        let inner = std::mem::replace(&mut self.tracks, f.tracks);
+        if let Some(mut c) = self.tracks.get(f.track).and_then(|t| t.clips.get(f.clip)).cloned() {
+            self.set_group_content(&mut c, inner);
+            self.tracks[f.track].clips[f.clip] = c;
+        }
+        self.active = f.active;
+        self.sel_clip = Some((f.track, f.clip));
+        self.sel_extra.clear();
+        self.arr_view_start = f.view_start;
+        self.arr_view_len = f.view_len;
+        self.refresh_playback();
+    }
+
+    /// Group the selected clips into one clip that holds them, in the same places (⌘G).
+    fn group_clips(&mut self) {
+        let sel = self.selected_clips();
+        if sel.is_empty() {
+            return;
+        }
+        self.push_undo("Group Clips");
+        let start = sel.iter().map(|&p| self.clip(p).unwrap().start).min().unwrap();
+        let first_track = sel[0].0;
+        // One inner track per source track, keeping their mixer settings.
+        let mut inner: Vec<Track> = Vec::new();
+        let mut track_of: Vec<(usize, usize)> = Vec::new();
+        for &(t, c) in &sel {
+            let i = match track_of.iter().find(|(src, _)| *src == t) {
+                Some(&(_, i)) => i,
+                None => {
+                    let mut nt = self.tracks[t].clone();
+                    nt.clips.clear();
+                    nt.solo = false;
+                    inner.push(nt);
+                    track_of.push((t, inner.len() - 1));
+                    inner.len() - 1
+                }
+            };
+            let mut clip = self.tracks[t].clips[c].clone();
+            clip.start -= start;
+            inner[i].clips.push(clip);
+        }
+        // Remove the originals (highest index first so the others stay valid).
+        let mut gone = sel.clone();
+        gone.sort_by(|a, b| b.cmp(a));
+        for (t, c) in gone {
+            self.tracks[t].clips.remove(c);
+        }
+        let n = (1..).find(|i| !self.tracks.iter().flat_map(|t| &t.clips).any(|c| c.name == format!("Group {i}"))).unwrap();
+        let mut g = Clip::new(format!("Group {n}"), Arc::new(Audio { rate: self.rate(), channels: vec![Vec::new()] }), start);
+        self.set_group_content(&mut g, inner);
+        g.trim = 0;
+        g.len = g.audio.frames();
+        self.tracks[first_track].clips.push(g);
+        self.sel_clip = Some((first_track, self.tracks[first_track].clips.len() - 1));
+        self.sel_extra.clear();
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = format!("Grouped {} clip{} into Group {n} — double-click it to open it", sel.len(), if sel.len() == 1 { "" } else { "s" });
+    }
+
+    /// Put a group's clips back onto the tracks where it sits (⇧⌘G).
+    fn ungroup_clip(&mut self) {
+        let Some((t, c)) = self.sel_clip.filter(|&p| self.clip(p).is_some_and(|c| c.group.is_some())) else { return };
+        self.push_undo("Ungroup");
+        let g = self.tracks[t].clips.remove(c);
+        let inner = g.group.clone().unwrap();
+        for (i, it) in inner.iter().enumerate() {
+            let dest = t + i;
+            if dest >= self.tracks.len() {
+                let mut nt = it.clone();
+                nt.clips.clear();
+                self.tracks.push(nt);
+            }
+            for clip in &it.clips {
+                // Only what the group showed (its trim) comes back out.
+                if clip.end() <= g.trim || clip.start >= g.trim + g.len {
+                    continue;
+                }
+                let mut clip = clip.clone();
+                if clip.start < g.trim {
+                    let cut = g.trim - clip.start;
+                    clip.trim += cut;
+                    clip.len -= cut;
+                    clip.start = g.trim;
+                }
+                clip.len = clip.len.min(g.trim + g.len - clip.start);
+                clip.start = g.start + clip.start - g.trim;
+                self.tracks[dest].clips.push(clip);
+            }
+        }
+        self.sel_clip = None;
+        self.sel_extra.clear();
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = format!("Ungrouped {}", g.name);
+    }
+
     /// Duplicate the selected clip, placing the copy right after it (as in Ableton).
     fn duplicate_clip(&mut self) {
+        self.sel_extra.clear();
         let Some((t, c)) = self.sel_clip.filter(|&p| self.clip(p).is_some()) else { return };
         self.push_undo("Duplicate Clip");
         let mut copy = self.tracks[t].clips[c].clone();
@@ -1039,6 +1230,7 @@ impl App {
 
     /// Split the selected clip (or the clip under the playhead on the active track) at the playhead.
     fn split_clip(&mut self) {
+        self.sel_extra.clear();
         let at = self.arr_cursor;
         let pos = self.sel_clip.filter(|&p| self.clip(p).is_some_and(|c| at > c.start && at < c.end())).or_else(|| {
             let t = self.active;
@@ -1073,7 +1265,7 @@ impl App {
             (true, true, Some((s, e)), _) => (Arc::new(self.audio.as_ref().unwrap().slice(s, e)), "-selection"),
             // In the arrangement: the selected clip.
             (true, false, _, Some(c)) => (Arc::new(c.visible()), "-clip"),
-            _ => (Arc::new(self.mixdown()), "-edit"),
+            _ => (Arc::new(self.song_mix()), "-edit"),
         };
         let stem = self
             .path
@@ -1097,7 +1289,7 @@ impl App {
             let mut cues = Vec::new();
             let mut regions = Vec::new();
             let mut lp = None;
-            for t in &self.tracks {
+            for t in &self.song_tracks() {
                 for c in &t.clips {
                     let place = |f: usize| (f >= c.trim && f < c.trim + c.len).then(|| c.start + f - c.trim);
                     cues.extend(c.cues.iter().filter_map(|q| place(q.frame).map(|frame| Cue { frame, name: q.name.clone() })));
@@ -1166,6 +1358,7 @@ impl App {
         self.undo.push(Snapshot {
             audio: self.audio.clone(),
             tracks: self.tracks.clone(),
+            nest: self.nest.clone(),
             active: self.active,
             sel_clip: self.sel_clip,
             cues: self.cues.clone(),
@@ -1277,6 +1470,7 @@ impl App {
         self.redo.push(Snapshot {
             audio: cur,
             tracks: std::mem::replace(&mut self.tracks, snap.tracks),
+            nest: std::mem::replace(&mut self.nest, snap.nest),
             active: std::mem::replace(&mut self.active, snap.active),
             sel_clip: std::mem::replace(&mut self.sel_clip, snap.sel_clip),
             cues: std::mem::replace(&mut self.cues, snap.cues),
@@ -1299,6 +1493,7 @@ impl App {
         self.undo.push(Snapshot {
             audio: cur,
             tracks: std::mem::replace(&mut self.tracks, snap.tracks),
+            nest: std::mem::replace(&mut self.nest, snap.nest),
             active: std::mem::replace(&mut self.active, snap.active),
             sel_clip: std::mem::replace(&mut self.sel_clip, snap.sel_clip),
             cues: std::mem::replace(&mut self.cues, snap.cues),
@@ -1915,6 +2110,10 @@ impl App {
                 Action::Export => doc && self.arrangement_frames() > 0,
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
                 Action::SplitClip => doc,
+                Action::GroupClips => has_clip,
+                Action::Ungroup => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.group.is_some()),
+                Action::SelectAll => doc,
+                Action::BackToArrangement => !self.nest.is_empty(),
                 Action::Paste => self.clipboard.is_some(),
                 Action::Undo => !self.undo.is_empty(),
                 Action::Redo => !self.redo.is_empty(),
@@ -1928,6 +2127,7 @@ impl App {
         match a {
             Action::BackToArrangement => return true,
             Action::EditClip | Action::SplitClip | Action::DuplicateClip | Action::NewClip | Action::ImportClip => return false,
+            Action::GroupClips | Action::Ungroup => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
             Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack => return false,
             _ => {}
@@ -2046,6 +2246,13 @@ impl App {
                     self.arr_cursor = self.arrangement_frames();
                     return;
                 }
+                Action::SelectAll => {
+                    let all: Vec<(usize, usize)> =
+                        self.tracks.iter().enumerate().flat_map(|(t, tr)| (0..tr.clips.len()).map(move |c| (t, c))).collect();
+                    self.sel_clip = all.first().copied();
+                    self.sel_extra = all.into_iter().skip(1).collect();
+                    return;
+                }
                 _ => {}
             }
         }
@@ -2149,6 +2356,8 @@ impl App {
             Action::SplitClip => self.split_clip(),
             Action::DuplicateClip => self.duplicate_clip(),
             Action::NewClip => self.new_clip(),
+            Action::GroupClips => self.group_clips(),
+            Action::Ungroup => self.ungroup_clip(),
             Action::ImportClip => self.import_clip_dialog(ctx),
             Action::NewTrack => self.new_track(),
             Action::ImportTrack => self.import_track_dialog(ctx),
@@ -3272,7 +3481,8 @@ impl App {
             if self.view == View::Arrangement {
                 if !self.tracks.is_empty() {
                     let clips: usize = self.tracks.iter().map(|t| t.clips.len()).sum();
-                    ui.label(format!("{} Hz · {} tracks · {} clips · {}", self.rate(), self.tracks.len(), clips, self.fmt_pos(self.arrangement_frames())));
+                    let plural = |n: usize, w: &str| format!("{n} {w}{}", if n == 1 { "" } else { "s" });
+                    ui.label(format!("{} Hz · {} · {} · {}", self.rate(), plural(self.tracks.len(), "track"), plural(clips, "clip"), self.fmt_pos(self.arrangement_frames())));
                     ui.separator();
                     ui.label(format!("Playhead {}", self.fmt_pos(self.arr_cursor)));
                     ui.separator();
@@ -3984,8 +4194,30 @@ impl App {
         ui.horizontal_centered(|ui| {
             match self.view {
                 View::Arrangement => {
-                    ui.label(egui::RichText::new("Arrangement").strong().color(INK));
-                    ui.label(egui::RichText::new("Double-click a clip to edit it · drag to move · drag its edges to trim").color(MUTED));
+                    // Path: Song ▸ Group ▸ … ; click a level to go back up to it.
+                    let mut names: Vec<String> = vec!["Song".into()];
+                    for f in &self.nest {
+                        names.push(f.tracks.get(f.track).and_then(|t| t.clips.get(f.clip)).map_or("Group".into(), |c| c.name.clone()));
+                    }
+                    let depth = names.len() - 1;
+                    let mut go_up = None;
+                    for (i, n) in names.iter().enumerate() {
+                        if i > 0 {
+                            ui.label(egui::RichText::new("▸").color(MUTED));
+                        }
+                        if i == depth {
+                            ui.label(egui::RichText::new(n).strong().color(INK));
+                        } else if ui.link(egui::RichText::new(n).color(MUTED)).clicked() {
+                            go_up = Some(depth - i);
+                        }
+                    }
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Double-click a clip to open it · drag to move · drag edges to trim · shift-click to select several").color(MUTED));
+                    if let Some(levels) = go_up {
+                        for _ in 0..levels {
+                            self.leave_group();
+                        }
+                    }
                 }
                 View::Editor { track, clip } => {
                     if ui.button("◀ Arrangement").on_hover_text("Back to the arrangement (⌘Return)").clicked() {
@@ -4086,6 +4318,7 @@ impl App {
                     let orig = self.tracks[t].clips[c].clone();
                     let grab = x_to_f(q.x, vs, vl) as i64 - orig.start as i64;
                     self.clip_drag = Some(ClipDrag { track: t, clip: c, mode, grab, orig });
+                    self.sel_extra.clear();
                     self.sel_clip = Some((t, c));
                     self.active = t;
                 }
@@ -4163,12 +4396,26 @@ impl App {
             if let Some(q) = resp.interact_pointer_pos() {
                 match hit(&self.tracks, q, vs, vl) {
                     Some((t, c, _)) => {
+                        if ui.input(|i| i.modifiers.shift) {
+                            // Shift-click adds or removes clips from the selection.
+                            if let Some(prev) = self.sel_clip.filter(|&p| p != (t, c)) {
+                                if !self.sel_extra.contains(&prev) {
+                                    self.sel_extra.push(prev);
+                                }
+                            }
+                            if let Some(i) = self.sel_extra.iter().position(|&p| p == (t, c)) {
+                                self.sel_extra.remove(i);
+                            }
+                        } else {
+                            self.sel_extra.clear();
+                        }
                         self.sel_clip = Some((t, c));
                         self.active = t;
                     }
                     None => {
                         // Clicking empty space moves the playhead (and picks that track).
                         self.sel_clip = None;
+                        self.sel_extra.clear();
                         self.arr_cursor = x_to_f(q.x, vs, vl) as usize;
                         self.play_origin = self.arr_cursor;
                         if q.y > lanes.top() {
@@ -4252,7 +4499,7 @@ impl App {
                     continue;
                 }
                 let r = Rect::from_min_max(Pos2::new(x0, l.top() + 3.0), Pos2::new(x1.max(x0 + 2.0), l.bottom() - 3.0));
-                let selected = self.sel_clip == Some((ti, ci));
+                let selected = self.sel_clip == Some((ti, ci)) || self.sel_extra.contains(&(ti, ci));
                 draw_clip(&painter, r, c, color, selected, muted, lanes);
             }
         }
@@ -4689,7 +4936,14 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
     p.rect_filled(r, 4.0, fill);
     let title = Rect::from_min_max(r.min, Pos2::new(r.right(), (r.top() + 16.0).min(r.bottom())));
     p.rect_filled(title, egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, if muted { Color32::from_gray(225) } else { color.lerp_to_gamma(Color32::WHITE, 0.55) });
-    let name_x = r.left().max(clip_to.left()) + 5.0;
+    let mut name_x = r.left().max(clip_to.left()) + 5.0;
+    if c.group.is_some() && r.right() - name_x > 30.0 {
+        // Group clips get a small stacked-boxes mark before the name.
+        let m = Rect::from_min_size(Pos2::new(name_x, title.center().y - 4.0), Vec2::new(8.0, 6.0));
+        p.rect_stroke(m.translate(Vec2::new(2.0, 2.0)), 1.0, Stroke::new(1.0, INK), egui::StrokeKind::Inside);
+        p.rect_filled(m, 1.0, INK);
+        name_x += 15.0;
+    }
     if r.right() - name_x > 20.0 {
         let galley = p.layout(c.name.clone(), FontId::proportional(11.0), INK, r.right() - name_x - 4.0);
         p.galley(Pos2::new(name_x, title.center().y - galley.size().y / 2.0), galley, INK);

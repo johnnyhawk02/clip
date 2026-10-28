@@ -27,7 +27,13 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   (⌘E), Duplicate Clip (⌘D, placed right after). ⌫ deletes the selected clip; ⌘C / ⌘X / ⌘V copy,
   cut and paste clips (paste goes on the selected track at the playhead). Dropping a file onto
   the arrangement adds it as a clip.
-- Export writes the mix of all tracks. Cues, regions and loops belong to each clip.
+- **Clips within clips:** shift-click clips (or ⌘A for all) and choose Clip ▸ Group into Clip (⌘G).
+  They become one group clip holding them, in the same places and keeping their tracks' settings.
+  Double-click a group to open it as its own arrangement; the path bar (Song ▸ Group 1 ▸ …) or
+  ⌘Return goes back up. Groups can hold groups, can be moved, trimmed, split and duplicated like
+  any clip (copies are independent), and Clip ▸ Ungroup (⌥⌘G) puts the clips back.
+- Export writes the mix of the whole song (even from inside a group). Cues, regions and loops
+  belong to each clip.
 - Shortcut changes: Select None is now ⇧⌘A and Zoom to Selection is ⇧⌘E.
 
 
