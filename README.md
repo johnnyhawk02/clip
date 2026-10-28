@@ -20,7 +20,7 @@ clips on the layers above to patch over parts of it.
 - Recording puts the take on a new top layer. Layers ▸ Flatten Layers turns everything heard
   into one plain clip.
 
-**Guide:** https://johnnyhawk02.github.io/sound-edit/
+**Guide:** https://johnnyhawk02.github.io/photosound/
 
 ## Chopping loops
 
