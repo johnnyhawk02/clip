@@ -814,6 +814,8 @@ pub struct App {
     pencil: Option<PencilStroke>,
     zoom_band: Option<(usize, usize)>,
     show_tools: bool,
+    /// The tool palette sits in the left column instead of floating.
+    palette_docked: bool,
     show_controls: bool,
     show_info: bool,
     meter: Vec<f32>,
@@ -936,6 +938,7 @@ impl App {
             pencil: None,
             zoom_band: None,
             show_tools: true,
+            palette_docked: false,
             show_controls: true,
             show_info: false,
             meter: Vec::new(),
@@ -3374,6 +3377,7 @@ impl App {
             Action::ToolPencil => self.tool == Tool::Pencil,
             Action::ToolSplit => self.tool == Tool::Split,
             Action::ShowTools => self.show_tools,
+            Action::DockPalette => self.palette_docked,
             Action::ShowControls => self.show_controls,
             Action::ShowInfo => self.show_info,
             Action::ShowCues => self.show_cues,
@@ -3555,6 +3559,7 @@ impl App {
             Action::ToolPencil => self.tool = Tool::Pencil,
             Action::ToolSplit => self.tool = Tool::Split,
             Action::ShowTools => self.show_tools = !self.show_tools,
+            Action::DockPalette => self.palette_docked = !self.palette_docked,
             Action::ShowControls => self.show_controls = !self.show_controls,
             Action::ShowInfo => self.show_info = !self.show_info,
             Action::ShowCues => self.show_cues = !self.show_cues,
@@ -3769,6 +3774,66 @@ impl App {
             w.constrain_to(self.desk).default_pos(pos)
         }
     }
+
+    /// The floating palette: a strip of the tools and commands, then the mangler's buttons.
+    fn floating_palette(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for row in actions::PALETTE {
+                match row {
+                    Some(pair) => {
+                        for a in pair {
+                            self.palette_button(ui, *a, Vec2::new(30.0, 26.0));
+                        }
+                    }
+                    None => {
+                        ui.add_space(8.0);
+                    }
+                }
+            }
+        });
+        ui.add_space(4.0);
+        let small = |t: &str| egui::RichText::new(t).size(12.0);
+
+        let buttons: [(&str, Action); 7] = [
+            ("Shuffle", Action::MangleShuffle),
+            ("Reverse", Action::MangleReverse),
+            ("Swap", Action::MangleSwap),
+            ("Stutter", Action::MangleStutter),
+            ("Flip", Action::MangleRandomReverse),
+            ("Drop", Action::MangleDropOut),
+            ("Again", Action::MangleAgain),
+        ];
+        let styles: [(&str, Action); 8] = [
+            ("Jungle", Action::MangleBBCut),
+            ("House", Action::MangleCutHouse),
+            ("Hip-Hop", Action::MangleCutHipHop),
+            ("Dembow", Action::MangleCutDembow),
+            ("Footwork", Action::MangleCutFootwork),
+            ("Trap", Action::MangleCutTrap),
+            ("Breakcore", Action::MangleCutBreakcore),
+            ("Halftime", Action::MangleCutHalftime),
+        ];
+        let ctx = ui.ctx().clone();
+        let mut run = None;
+        let mut row = |ui: &mut egui::Ui, title: &str, items: &[(&str, Action)], this: &Self| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.add_sized(Vec2::new(54.0, 22.0), egui::Label::new(small(title).color(MUTED)));
+                for (label, a) in items {
+                    let b = ui.add_enabled(this.enabled(*a), Button::new(small(label)).min_size(Vec2::new(0.0, 22.0)));
+                    if b.on_hover_text(this.menu_label(*a)).clicked() {
+                        run = Some(*a);
+                    }
+                }
+            });
+        };
+        row(ui, "Mangle", &buttons, self);
+        row(ui, "BBCut", &styles, self);
+        if let Some(a) = run {
+            self.run(a, &ctx);
+        }
+        }
 
     /// Tools column on the left: editing tools on top, common commands below.
     fn tools_panel(&mut self, ui: &mut egui::Ui) {
@@ -6325,7 +6390,15 @@ impl eframe::App for App {
         if self.show_controls {
             egui::Panel::bottom("transport").frame(bar).show(ui, |ui| self.transport_panel(ui));
         }
-        if self.show_tools {
+        // (Wait for the first layout so the palette has somewhere to go.)
+        if self.show_tools && !self.palette_docked && self.desk.is_positive() {
+            // Floating palette: drag it by its title bar; the cross hides it (Window ▸ Tools).
+            let mut open = true;
+            let pos = Pos2::new(self.desk.center().x - 280.0, self.desk.bottom() - 150.0);
+            self.place("Tools", pos).resizable(false).collapsible(true).open(&mut open).show(&ctx, |ui| self.floating_palette(ui));
+            self.show_tools &= open;
+        }
+        if self.show_tools && self.palette_docked {
             egui::Panel::left("tools")
                 .frame(egui::Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(8, 4)))
                 .resizable(false)

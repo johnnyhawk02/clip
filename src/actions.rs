@@ -130,6 +130,7 @@ pub enum Action {
     MangleCutBreakcore,
     MangleCutHalftime,
     MangleAgain,
+    DockPalette,
     CollapseClip,
     CollapseTrack,
     ExportStems,
@@ -150,7 +151,7 @@ pub const ALL: &[Action] = &[
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
     GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
     ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp, SliceClip, ReverseClip,
-    MangleShuffle, MangleReverse, MangleSwap, MangleStutter, MangleRandomReverse, MangleDropOut, MangleBBCut, MangleAgain,
+    MangleShuffle, MangleReverse, MangleSwap, MangleStutter, MangleRandomReverse, MangleDropOut, MangleBBCut, MangleAgain, DockPalette,
     MangleCutHouse, MangleCutHipHop, MangleCutDembow, MangleCutFootwork, MangleCutTrap, MangleCutBreakcore, MangleCutHalftime,
     ExportStems, ExportAbleton,
 ];
@@ -277,7 +278,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
     ),
 ];
 
-pub const WINDOW_MENU: &[Item] = &[Do(ShowTools)];
+pub const WINDOW_MENU: &[Item] = &[Do(ShowTools), Do(DockPalette)];
 
 /// Tools palette layout, two buttons per row; `None` is a gap between groups.
 pub const PALETTE: &[Option<[Action; 2]>] = &[
@@ -308,7 +309,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
+            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
     }
 
     pub fn label(self) -> &'static str {
@@ -340,6 +341,7 @@ impl Action {
             MangleCutBreakcore => "Breakcore",
             MangleCutHalftime => "Halftime",
             MangleAgain => "Mangle Again",
+            DockPalette => "Dock Tools on the Left",
             AutoWarp => "Warp Loops on Import",
             CollapseClip => "Collapse to Audio",
             CollapseTrack => "Collapse Track to One Clip",
