@@ -37,6 +37,7 @@ mod tempo;
 mod timesel;
 mod clipview;
 mod locators;
+mod session;
 
 use self::clip::*;
 use self::chop::*;
@@ -194,6 +195,16 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// The Session view's scene names (its rows).
+    scenes: Vec<String>,
+    /// Showing the Session view instead of the song view (Tab, as in Live).
+    show_session: bool,
+    /// Where each Session slot was drawn this frame, for dropping files onto them.
+    slot_rects: Vec<((usize, usize), Rect)>,
+    /// Files being dropped onto Session slots, and the slot each goes to.
+    slot_drops: HashMap<PathBuf, (usize, usize)>,
+    /// The selected Session slot: (track, scene).
+    sel_slot: Option<(usize, usize)>,
     /// The locator last clicked (Delete removes it, ⌘R renames it).
     selected_locator: Option<usize>,
     /// Dragging this locator along the ruler.
@@ -384,6 +395,11 @@ fn heard(tracks: &[Track]) -> impl Iterator<Item = &Track> {
     tracks.iter().filter(move |t| if any_solo { t.solo } else { !t.mute })
 }
 
+/// A new song's scenes (Session view rows), as Live's: eight, numbered.
+fn default_scenes() -> Vec<String> {
+    (1..=8).map(|i| i.to_string()).collect()
+}
+
 /// The clip in the detail view: (layer, clip), its audio, trim, length and whether it loops.
 type DetailKey = ((usize, usize), usize, usize, usize, bool);
 
@@ -446,6 +462,11 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            scenes: default_scenes(),
+            show_session: false,
+            slot_rects: Vec::new(),
+            slot_drops: HashMap::new(),
+            sel_slot: None,
             selected_locator: None,
             loc_drag: None,
             loc_rename: None,
@@ -982,6 +1003,17 @@ impl App {
             self.drop_queue.extend(files.into_iter().map(|p| (p, (None, 0))));
             return;
         }
+        // Dropped on Session slots: each file fills a slot, down from the one under the pointer.
+        if self.show_session {
+            let Some(((t, s), _)) = drop_pos.and_then(|q| self.slot_rects.iter().find(|(_, r)| r.contains(q)).copied()) else { return };
+            for (k, p) in files.into_iter().enumerate() {
+                if s + k < self.scenes.len() {
+                    self.slot_drops.insert(p.clone(), (t, s + k));
+                    self.drop_queue.push_back((p, (Some(t), self.arr_cursor)));
+                }
+            }
+            return;
+        }
         let (track, frame) = drop_pos.and_then(|q| self.drop_target_at(q)).unwrap_or((Some(self.active), self.arr_cursor));
         for (k, p) in files.into_iter().enumerate() {
             self.drop_queue.push_back((p, (track.map(|t| t + k), frame)));
@@ -1171,7 +1203,7 @@ impl eframe::App for App {
             View::Editor { track, clip } => Some((track, clip)),
             View::Arrangement => self.clip_view_clip().filter(|&p| self.clip(p).is_some_and(|c| c.group.is_none())),
         };
-        self.split = detail.is_some() && !self.tracks.is_empty();
+        self.split = detail.is_some() && !self.tracks.is_empty() && !(self.show_session && self.view == View::Arrangement);
         if let (View::Arrangement, Some(p)) = (self.view, detail) {
             if self.detail_key != self.detail_key_of(p) {
                 self.load_detail(p);
@@ -1204,6 +1236,15 @@ impl eframe::App for App {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(side), |ui| self.clip_view(ui, side));
                 ui.painter().line_segment([Pos2::new(side.right(), bottom.top()), side.right_bottom()], Stroke::new(1.0, LINE));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(wave), |ui| self.waveform(ui));
+            } else if self.show_session && self.view == View::Arrangement && !self.tracks.is_empty() {
+                let full = ui.max_rect();
+                let bar = Rect::from_min_size(full.min, Vec2::new(full.width(), 34.0));
+                ui.painter().rect_filled(bar, 0.0, PANEL);
+                ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, LINE));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(12.0, 4.0))), |ui| self.view_bar(ui));
+                let body = Rect::from_min_max(Pos2::new(full.left(), bar.bottom()), full.max);
+                self.slot_rects.clear();
+                ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| self.session(ui));
             } else if !self.tracks.is_empty() {
                 let full = ui.max_rect();
                 let bar = Rect::from_min_size(full.min, Vec2::new(full.width(), 34.0));

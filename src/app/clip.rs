@@ -380,6 +380,8 @@ pub(super) fn apply_crossfade(a: &mut Audio, (fin, fout): (usize, usize)) {
 pub(super) struct Track {
     pub(super) name: String,
     pub(super) clips: Vec<Clip>,
+    /// The track's Session view slots, one per scene (a slot may be empty).
+    pub(super) slots: Vec<Option<Clip>>,
     /// Linear volume (1 = unchanged).
     pub(super) gain: f32,
     /// Pan, -1 (left) to 1 (right).
@@ -392,7 +394,7 @@ pub(super) struct Track {
 
 impl Track {
     pub(super) fn new(name: impl Into<String>) -> Track {
-        Track { name: name.into(), clips: Vec::new(), gain: 1.0, pan: 0.0, color: 0, mute: false, solo: false }
+        Track { name: name.into(), clips: Vec::new(), slots: Vec::new(), gain: 1.0, pan: 0.0, color: 0, mute: false, solo: false }
     }
 }
 

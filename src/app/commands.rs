@@ -19,7 +19,7 @@ impl App {
                 Action::Quantize | Action::ClipOnOff => has_clip,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
                 Action::Export | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
-                Action::Delete => has_clip || self.time_sel.is_some() || self.selected_locator.is_some(),
+                Action::Delete => has_clip || self.time_sel.is_some() || self.selected_locator.is_some() || (self.show_session && self.sel_slot.is_some()),
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy => has_clip,
                 Action::SplitClip => doc,
                 Action::ToolSelect | Action::ToolSplit => true,
@@ -175,6 +175,7 @@ impl App {
         if self.view == View::Arrangement {
             let mid = self.arr_view_start + self.arr_view_len / 2.0;
             match a {
+                Action::Delete if self.show_session => return self.clear_slot(),
                 Action::Delete if self.time_sel.is_some() => return self.delete_time_sel(),
                 Action::Delete if self.sel_clip.is_none() && self.selected_locator.is_some() => return self.delete_locator(),
                 Action::Delete => return self.delete_clip(),
@@ -596,6 +597,13 @@ impl App {
                     self.arrow_up_down(sign);
                 }
             }
+        }
+        // Tab switches between the Session view and the song view, as in Live.
+        if ctx.input_mut(|i| i.consume_key(none, Key::Tab)) {
+            if self.view != View::Arrangement {
+                self.back_to_arrangement();
+            }
+            self.show_session = !self.show_session;
         }
         // ⇧Tab switches between the arrangement and the clip editor, as in Live.
         if ctx.input_mut(|i| i.consume_key(Modifiers::SHIFT, Key::Tab)) {

@@ -131,7 +131,20 @@ impl App {
                     (c.cues, c.regions, c.loop_points) = (m.cues, m.regions, m.loop_points);
                     self.status = format!("Added {} as a clip", file_name(&path));
                     self.auto_warp(pos);
-                    self.place_over(pos);
+                    match self.slot_drops.remove(&path) {
+                        // Dropped on a Session slot: it goes there instead of into the song.
+                        Some((t, s)) if t < self.tracks.len() => {
+                            let c = self.tracks[pos.0].clips.remove(pos.1);
+                            self.fit_slots();
+                            self.tracks[t].slots[s] = Some(session::slot_clip(c));
+                            self.sel_clip = None;
+                            self.sel_slot = Some((t, s));
+                            self.refresh_playback();
+                        }
+                        _ => {
+                            self.place_over(pos);
+                        }
+                    }
                 }
                 Ok(_) => self.status = format!("{} contains no audio", file_name(&path)),
                 Err(e) => self.status = format!("Couldn't open {}: {e}", file_name(&path)),
@@ -269,39 +282,43 @@ impl App {
                     clips: t
                         .clips
                         .iter()
-                        .map(|c| ClipData {
-                            name: c.name.clone(),
-                            audio: if c.group.is_some() {
-                                None
-                            } else {
-                                Some(pool.iter().position(|a| Arc::ptr_eq(a, &c.audio)).unwrap_or_else(|| {
-                                    pool.push(c.audio.clone());
-                                    pool.len() - 1
-                                }))
-                            },
-                            start: c.start,
-                            trim: c.trim,
-                            len: c.len,
-                            cues: c.cues.iter().map(|q| (q.frame, q.name.clone())).collect(),
-                            regions: c.regions.iter().map(|r| (r.start, r.end, r.name.clone())).collect(),
-                            loop_points: c.loop_points,
-                            looping: c.looping,
-                            origin: c.origin,
-                            gain: c.gain,
-                            fades: (c.fade_in, c.fade_out),
-                            active: c.active,
-                            group: c.group.as_ref().map(|g| tracks_data(g, pool)),
-                            warp: c.warp.as_ref().map(|w| {
-                                let i = pool.iter().position(|a| Arc::ptr_eq(a, &w.source)).unwrap_or_else(|| {
-                                    pool.push(w.source.clone());
-                                    pool.len() - 1
-                                });
-                                (w.bpm, w.tempo, i)
-                            }),
-                        })
+                        .map(|c| clip_data(c, pool))
                         .collect(),
+                    slots: t.slots.iter().map(|s| s.as_ref().map(|c| clip_data(c, pool))).collect(),
                 })
                 .collect()
+        }
+        fn clip_data(c: &Clip, pool: &mut Vec<Arc<Audio>>) -> ClipData {
+            ClipData {
+                name: c.name.clone(),
+                audio: if c.group.is_some() {
+                    None
+                } else {
+                    Some(pool.iter().position(|a| Arc::ptr_eq(a, &c.audio)).unwrap_or_else(|| {
+                        pool.push(c.audio.clone());
+                        pool.len() - 1
+                    }))
+                },
+                start: c.start,
+                trim: c.trim,
+                len: c.len,
+                cues: c.cues.iter().map(|q| (q.frame, q.name.clone())).collect(),
+                regions: c.regions.iter().map(|r| (r.start, r.end, r.name.clone())).collect(),
+                loop_points: c.loop_points,
+                looping: c.looping,
+                origin: c.origin,
+                gain: c.gain,
+                fades: (c.fade_in, c.fade_out),
+                active: c.active,
+                group: c.group.as_ref().map(|g| tracks_data(g, pool)),
+                warp: c.warp.as_ref().map(|w| {
+                    let i = pool.iter().position(|a| Arc::ptr_eq(a, &w.source)).unwrap_or_else(|| {
+                        pool.push(w.source.clone());
+                        pool.len() - 1
+                    });
+                    (w.bpm, w.tempo, i)
+                }),
+            }
         }
         let data = tracks_data(&tracks, &mut pool);
         let file = ProjectFile {
@@ -312,6 +329,7 @@ impl App {
             snap: self.snap,
             arr_loop: self.arr_loop,
             locators: self.locators.clone(),
+            scenes: self.scenes.clone(),
             looping: self.looping,
             master_gain: self.master_gain,
             rate: self.rate(),
@@ -336,6 +354,7 @@ impl App {
         self.laid_out_tempo = self.tempo;
         self.master_gain = file.master_gain;
         self.locators = file.locators.clone();
+        self.scenes = if file.scenes.is_empty() { default_scenes() } else { file.scenes.clone() };
         (self.arr_loop, self.looping) = (file.arr_loop, file.looping);
         // Older projects could hold a loop that ends part-way through a bar.
         self.arr_loop = self.arr_loop.map(|l| self.whole_bars(l));
@@ -344,34 +363,36 @@ impl App {
                 .map(|t| {
                     let mut track = Track::new(t.name.clone());
                     (track.gain, track.pan, track.color, track.mute, track.solo) = (t.gain, t.pan, t.color, t.mute, t.solo);
-                    for c in &t.clips {
-                        let a = c.audio.and_then(|i| audio.get(i).cloned()).unwrap_or_else(|| Arc::new(Audio { rate, channels: vec![Vec::new()] }));
-                        let mut clip = Clip::new(c.name.clone(), a, c.start);
-                        if let Some(g) = &c.group {
-                            let inner = build(app, g, audio, rate);
-                            app.set_group_content(&mut clip, inner);
-                        }
-                        clip.trim = c.trim.min(clip.audio.frames());
-                        clip.len = c.len.min(clip.audio.frames() - clip.trim);
-                        clip.cues = c.cues.iter().map(|(f, n)| Cue { frame: *f, name: n.clone() }).collect();
-                        clip.regions = c.regions.iter().map(|(s, e, n)| Region { start: *s, end: *e, name: n.clone() }).collect();
-                        clip.loop_points = c.loop_points;
-                        clip.looping = c.looping;
-                        clip.origin = c.origin;
-                        clip.gain = c.gain;
-                        (clip.fade_in, clip.fade_out) = c.fades;
-                        clip.active = c.active;
-                        clip.len = if c.looping { c.len } else { clip.len };
-                        if let Some((bpm, tempo, i)) = c.warp {
-                            if let Some(source) = audio.get(i) {
-                                clip.warp = Some(Warp { bpm, source: source.clone(), source_peaks: Arc::new(Peaks::build(source)), tempo, repitch: false });
-                            }
-                        }
-                        track.clips.push(clip);
-                    }
+                    track.clips = t.clips.iter().map(|c| clip_from(app, c, audio, rate)).collect();
+                    track.slots = t.slots.iter().map(|s| s.as_ref().map(|c| clip_from(app, c, audio, rate))).collect();
                     track
                 })
                 .collect()
+        }
+        fn clip_from(app: &App, c: &ClipData, audio: &[Arc<Audio>], rate: u32) -> Clip {
+            let a = c.audio.and_then(|i| audio.get(i).cloned()).unwrap_or_else(|| Arc::new(Audio { rate, channels: vec![Vec::new()] }));
+            let mut clip = Clip::new(c.name.clone(), a, c.start);
+            if let Some(g) = &c.group {
+                let inner = build(app, g, audio, rate);
+                app.set_group_content(&mut clip, inner);
+            }
+            clip.trim = c.trim.min(clip.audio.frames());
+            clip.len = c.len.min(clip.audio.frames() - clip.trim);
+            clip.cues = c.cues.iter().map(|(f, n)| Cue { frame: *f, name: n.clone() }).collect();
+            clip.regions = c.regions.iter().map(|(s, e, n)| Region { start: *s, end: *e, name: n.clone() }).collect();
+            clip.loop_points = c.loop_points;
+            clip.looping = c.looping;
+            clip.origin = c.origin;
+            clip.gain = c.gain;
+            (clip.fade_in, clip.fade_out) = c.fades;
+            clip.active = c.active;
+            clip.len = if c.looping { c.len } else { clip.len };
+            if let Some((bpm, tempo, i)) = c.warp {
+                if let Some(source) = audio.get(i) {
+                    clip.warp = Some(Warp { bpm, source: source.clone(), source_peaks: Arc::new(Peaks::build(source)), tempo, repitch: false });
+                }
+            }
+            clip
         }
         self.player.stop();
         // Group mixes are rendered at the project's rate.

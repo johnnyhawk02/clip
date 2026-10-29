@@ -32,6 +32,9 @@ pub struct ProjectFile {
     /// Named markers in the song (frame, name), as Live's locators.
     #[serde(default)]
     pub locators: Vec<(usize, String)>,
+    /// The Session view's scene names.
+    #[serde(default)]
+    pub scenes: Vec<String>,
     pub rate: u32,
     pub tracks: Vec<TrackData>,
     pub audio: Vec<AudioData>,
@@ -73,6 +76,9 @@ pub struct TrackData {
     pub mute: bool,
     pub solo: bool,
     pub clips: Vec<ClipData>,
+    /// The track's Session view slots (one per scene).
+    #[serde(default)]
+    pub slots: Vec<Option<ClipData>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -172,6 +178,7 @@ mod tests {
             looping: true,
             master_gain: 1.0,
             locators: Vec::new(),
+            scenes: Vec::new(),
             rate: 1000,
             tracks: vec![TrackData {
                 name: "T".into(),
@@ -197,6 +204,7 @@ mod tests {
                     fades: (0, 0),
                     active: true,
                 }],
+                slots: Vec::new(),
             }],
             audio: vec![AudioData { rate: 1000, channels: 2, frames: 3 }],
         };
