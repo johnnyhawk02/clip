@@ -112,7 +112,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <p>A song is a stack of layers, and audio sits on them as clips, laid out much like Ableton's Arrangement view. The top bar sets the tempo, beats per bar, the grid, and whether things snap to it.</p>
   <figure><img src="img/ctxclip.jpg" alt="The arrangement with one clip and its right-click menu open"><figcaption>Right-click a clip for everything you can do to it. Right-click a layer's header or empty lane for layer commands.</figcaption></figure>
   <ul>
-    <li><b>Select time</b> as in Live: drag across empty space, or across a clip's waveform, and a light blue wash marks that stretch on the layers you drag over. <kbd>⌫</kbd> deletes it, <kbd>⌘E</kbd> splits the clips at its ends, and <kbd>⌘L</kbd> loops it. Shift-click clips to select whole clips.</li>
+    <li><b>Select time</b> as in Live: drag across empty space, or across a clip's waveform, and a light blue wash marks that stretch on the layers you drag over. <kbd>⌫</kbd> deletes it, <kbd>⌘E</kbd> splits the clips at its ends, and <kbd>⌘L</kbd> loops it. Mangle, BBCut, Reverse, Swap and the other clip processes work only inside it too. Shift-click clips to select whole clips.</li>
     <li><b>Move</b> a clip by dragging its name strip, along its layer or onto another. Drag below the last layer to make a new one. <kbd>⌥</kbd>-drag drags a copy.</li>
     <li><b>Trim</b> by dragging either edge. The audio underneath is kept, so you can drag it back out.</li>
     <li><b>Phrase lines:</b> a fine line runs across every 4 bars, counting from bar 1. <span class="path">PhotoSound ▸ Preferences</span> <kbd>⌘,</kbd> changes the spacing, or 0 turns them off.</li>
@@ -199,8 +199,10 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 <section id="tempo">
   <h2><span class="n">07</span>Tempo and warping</h2>
   <ul>
-    <li><b>Tempo from names:</b> a clip whose name gives its tempo ("Loop 118bpm 16bar", "Kick - 124 BPM", "Bpm130_Drums") is stretched to the song tempo, keeping its pitch. A bar count in the name gives the exact tempo.</li>
-    <li><b>Change the tempo</b> in the top bar and warped clips re-fit, staying on their beats.</li>
+    <li><b>Tempo from names:</b> a clip whose name gives its tempo ("Loop 118bpm 16bar", "Kick - 124 BPM", "Bpm130_Drums") follows the song tempo. A bar count in the name gives the exact tempo.</li>
+    <li><b>Change the tempo</b> by dragging the BPM box up or down (1 BPM a step, 0.20 with <kbd>⇧</kbd>), or click it to type. Every clip stays on its bar and the view keeps the same bars; only the time each bar takes changes.</li>
+    <li><b>Re-Pitch:</b> warped clips speed up and pitch up with the tempo, like a record, and you hear it live while you drag. <span class="path">PhotoSound ▸ Preferences</span> <kbd>⌘,</kbd> ▸ Keep pitch stretches them instead.</li>
+    <li><b>"no warp"</b> in a clip's name strip means it plays at its own speed and doesn't follow the tempo. Right-click ▸ Warp to Tempo fixes that.</li>
     <li><b>Set Tempo from Clip</b> reads a loop's length as a whole number of bars and sets the song to match.</li>
     <li><b>Warp to Tempo</b> switches warping on or off for the selected clips. <span class="path">Clip ▸ Warp Loops on Import</span> turns the automatic part off.</li>
     <li><b>Grid:</b> Auto, 1 Bar, 1/2 down to 1/32, or Off. With the grid on, the ruler shows bars and beats. <kbd>⌘4</kbd> toggles snapping.</li>
