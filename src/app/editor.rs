@@ -2,10 +2,25 @@
 
 use super::*;
 
+/// What a drag in the clip editor's ruler is doing.
+#[derive(Clone, Copy)]
+pub(super) enum EdRuler {
+    /// Zooming: the frame grabbed, the pointer's height then and the view length then.
+    Zoom(f64, f32, f64),
+    /// Drawing a new loop from this bar line.
+    Draw(usize),
+    /// Moving or resizing the loop: where it was grabbed, the range then, which part.
+    Loop(f64, Sel, LoopGrab),
+    /// Dragging the start flag (1.1.1) to this frame.
+    Start(usize),
+}
+
 /// Where the parts of the editor view sit this frame, and the input state its tools share.
 #[derive(Clone, Copy)]
 struct WaveArea {
     full: Rect,
+    /// The loop strip above the ruler (zero height outside the clip editor).
+    strip: Rect,
     ruler: Rect,
     wave: Rect,
     scroll: Rect,
@@ -361,14 +376,17 @@ impl App {
         let n_ch = self.audio.as_ref().unwrap().num_channels().max(1);
 
         let total = self.timeline_frames();
-        let ruler = Rect::from_min_max(full.min, Pos2::new(full.right(), full.top() + RULER_H));
+        // Editing a clip, the ruler works like the song view's: a loop strip on top, bars below.
+        let clip_mode = matches!(self.view, View::Editor { .. });
+        let strip = Rect::from_min_max(full.min, Pos2::new(full.right(), full.top() + if clip_mode { LOOP_H } else { 0.0 }));
+        let ruler = Rect::from_min_max(Pos2::new(full.left(), strip.bottom()), Pos2::new(full.right(), strip.bottom() + RULER_H));
         let scroll = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - 15.0), full.max);
         let wave = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.right(), scroll.top()));
         let lane_h = wave.height() / n_ch as f32;
         let spp = self.view_len / wave.width() as f64; // frames per pixel
 
         // --- interaction on the waveform ---
-        let resp = ui.allocate_rect(Rect::from_min_max(ruler.min, wave.max), Sense::click_and_drag());
+        let resp = ui.allocate_rect(Rect::from_min_max(strip.min, wave.max), Sense::click_and_drag());
         let n = self.frames();
 
         if resp.hovered() {
@@ -405,7 +423,10 @@ impl App {
             (false, Tool::Split) => Tool::Select,
             (false, t) => t,
         };
-        let a = WaveArea { full, ruler, wave, scroll, rate, n_ch, lane_h, spp, n, press, shift, alt, command };
+        let a = WaveArea { full, strip, ruler, wave, scroll, rate, n_ch, lane_h, spp, n, press, shift, alt, command };
+        if clip_mode && self.clip_ruler(ui, &resp, &a) {
+            // The ruler has this drag.
+        } else {
         match tool {
             Tool::Select | Tool::Split => self.select_tool(ui, &resp, &a),
             Tool::Hand => {
@@ -422,6 +443,7 @@ impl App {
             }
             Tool::Zoom => self.zoom_tool(ui, &resp, &a),
             Tool::Pencil => self.pencil_tool(ui, &resp, &a),
+        }
         }
 
         let thumb = self.wave_scrollbar(ui, scroll, total);
@@ -441,6 +463,159 @@ impl App {
             }
         }
         self.paint_waveform(ui, &a, thumb, resp.hover_pos(), playing, play_pos);
+    }
+
+    /// Spacing of the finest bar-ruler ticks at least 8 px apart (a sixteenth, beat, bar…).
+    fn tick_frames(&self, spp: f64) -> f64 {
+        let mut g = self.beat_frames() / 4.0;
+        while g / spp < 8.0 && g > 0.0 {
+            g *= 2.0;
+        }
+        g
+    }
+
+    /// Drags in the clip editor's ruler, as in the song view: the strip on top draws, moves and
+    /// resizes the loop (always whole bars); the bar numbers zoom (drag down to zoom in, sideways
+    /// to scroll); the start flag sets where 1.1.1 is. Returns whether the ruler has the pointer,
+    /// so the tool leaves it alone.
+    fn clip_ruler(&mut self, ui: &egui::Ui, resp: &egui::Response, a: &WaveArea) -> bool {
+        let WaveArea { strip, ruler, wave, spp, n, press, command, .. } = *a;
+        let (vs, vl) = (self.view_start, self.view_len);
+        let x_of = |f: f64| wave.left() + ((f - vs) / vl) as f32 * wave.width();
+        let f_of = |x: f32| (vs + ((x - wave.left()) / wave.width()) as f64 * vl).max(0.0);
+        let bar = self.bar_frames();
+        let to_bar = |f: f64| ((f / bar).round().max(0.0) * bar) as usize;
+        let bar_n = bar.round() as usize;
+        let start_x = x_of(match self.ed_ruler {
+            Some(EdRuler::Start(f)) => f as f64,
+            _ => 0.0,
+        });
+        let on_start = |q: Pos2| q.y >= ruler.bottom() - 14.0 && q.y < ruler.bottom() && (q.x - start_x).abs() < 6.0;
+        let on_cue = |q: Pos2| q.y <= ruler.top() + 14.0 && self.cues.iter().any(|c| (x_of(c.frame as f64) - q.x).abs() < 6.0);
+        let brace_at = |q: Pos2| -> Option<LoopGrab> {
+            let (ls, le) = self.loop_points?;
+            let (x0, x1) = (x_of(ls as f64), x_of(le as f64));
+            if !strip.contains(q) || q.x < x0 - 4.0 || q.x > x1 + 4.0 {
+                return None;
+            }
+            let edge = 6.0f32.min((x1 - x0) / 3.0);
+            Some(if q.x < x0 + edge { LoopGrab::Start } else if q.x > x1 - edge { LoopGrab::End } else { LoopGrab::Move })
+        };
+        // Cursor: what a drag here would do.
+        if let Some(q) = resp.hover_pos().filter(|q| q.y < ruler.bottom()) {
+            let icon = match (self.ed_ruler, brace_at(q)) {
+                (Some(EdRuler::Zoom(..)), _) => Some(egui::CursorIcon::ZoomIn),
+                (Some(EdRuler::Start(_)) | Some(EdRuler::Loop(_, _, LoopGrab::Start | LoopGrab::End)), _) => Some(egui::CursorIcon::ResizeHorizontal),
+                (Some(_), _) | (None, Some(LoopGrab::Move)) => Some(egui::CursorIcon::Grab),
+                (None, Some(_)) => Some(egui::CursorIcon::ResizeHorizontal),
+                (None, None) if on_start(q) => Some(egui::CursorIcon::ResizeHorizontal),
+                (None, None) if strip.contains(q) || on_cue(q) => None,
+                (None, None) => Some(egui::CursorIcon::ZoomIn),
+            };
+            if let Some(i) = icon {
+                ui.ctx().set_cursor_icon(i);
+            }
+        }
+        if resp.drag_started() {
+            if let Some(q) = press.filter(|q| q.y < ruler.bottom() && !on_cue(*q)) {
+                let f = f_of(q.x);
+                self.ed_ruler = Some(if on_start(q) {
+                    EdRuler::Start(0)
+                } else if strip.contains(q) {
+                    match (brace_at(q), self.loop_points) {
+                        (Some(g), Some(range)) => EdRuler::Loop(f, range, g),
+                        _ => EdRuler::Draw(to_bar(f)),
+                    }
+                } else {
+                    EdRuler::Zoom(f, q.y, vl)
+                });
+            }
+        }
+        let Some(drag) = self.ed_ruler else { return false };
+        if let (true, Some(q)) = (resp.dragged(), resp.interact_pointer_pos()) {
+            let f = f_of(q.x);
+            match drag {
+                EdRuler::Zoom(anchor, y0, len0) => {
+                    // The spot grabbed stays under the pointer while the zoom changes around it.
+                    self.view_len = len0 * ((y0 - q.y) as f64 / 80.0).exp();
+                    self.clamp_view();
+                    self.view_start = anchor - ((q.x - wave.left()) / wave.width()) as f64 * self.view_len;
+                    self.clamp_view();
+                }
+                EdRuler::Draw(a0) => {
+                    let b = to_bar(f);
+                    let b = if b != a0 { b } else if f < a0 as f64 { a0.saturating_sub(bar_n) } else { a0 + bar_n };
+                    if b != a0 {
+                        self.loop_points = Some((a0.min(b), a0.max(b)));
+                        self.looping = true;
+                    }
+                }
+                EdRuler::Loop(at, (ls, le), g) => {
+                    let moved = |p: usize| to_bar(p as f64 + f - at);
+                    self.loop_points = Some(match g {
+                        LoopGrab::Move => {
+                            let s = moved(ls);
+                            (s, s + (le - ls))
+                        }
+                        LoopGrab::Start => (moved(ls).min(le.saturating_sub(bar_n)), le),
+                        LoopGrab::End => (ls, moved(le).max(ls + bar_n)),
+                    });
+                }
+                EdRuler::Start(_) => {
+                    // Snaps to the ruler's ticks (⌘ for anywhere).
+                    let g = self.tick_frames(spp);
+                    let p = if command || g <= 0.0 { f } else { (f / g).round() * g };
+                    self.ed_ruler = Some(EdRuler::Start((p as usize).min(n)));
+                }
+            }
+        }
+        if resp.drag_stopped() {
+            self.ed_ruler = None;
+            match drag {
+                EdRuler::Start(m) if m > 0 && m < n => self.move_start(m),
+                EdRuler::Draw(_) | EdRuler::Loop(..) => {
+                    self.dirty = true;
+                    if self.player.is_playing() {
+                        self.toggle_play();
+                        self.toggle_play();
+                    }
+                }
+                _ => {}
+            }
+        }
+        true
+    }
+
+    /// Make frame `m` the clip's start (1.1.1): the audio before it moves round to the end, so
+    /// a loop keeps all of itself but begins somewhere else. Cues, regions and loop points
+    /// follow the audio.
+    fn move_start(&mut self, m: usize) {
+        let Some(a) = self.audio.clone() else { return };
+        let n = a.frames();
+        if m == 0 || m >= n {
+            return;
+        }
+        self.push_undo("Move Start");
+        let tail = a.slice(m, n);
+        let new = tail.insert(tail.frames(), tail.frames(), &a.slice(0, m));
+        let turn = |f: usize| (f + n - m) % n;
+        for c in &mut self.cues {
+            c.frame = turn(c.frame);
+        }
+        self.cues.sort_by_key(|c| c.frame);
+        self.regions.retain_mut(|r| {
+            let (s, e) = (turn(r.start), turn(r.end.saturating_sub(1)) + 1);
+            (s < e).then(|| (r.start, r.end) = (s, e)).is_some()
+        });
+        self.loop_points = self.loop_points.and_then(|(s, e)| {
+            let (s2, e2) = (turn(s), turn(e.saturating_sub(1)) + 1);
+            (s2 < e2).then_some((s2, e2))
+        });
+        self.sel = None;
+        self.cursor = 0;
+        self.set_audio(Arc::new(new));
+        self.dirty = true;
+        self.status = "Moved the start — the audio before it now plays at the end (⌘Z to undo)".into();
     }
 
     /// Select tool: click to place the cursor, drag to select, drag cue flags, double-click to select
@@ -714,7 +889,7 @@ impl App {
 
     /// Paint the editor: ruler, waveform, selection, cues, regions, loop, cursor and scroll bar.
     fn paint_waveform(&self, ui: &egui::Ui, a: &WaveArea, thumb: Rect, hover: Option<Pos2>, playing: bool, play_pos: usize) {
-        let WaveArea { full, ruler, wave, scroll, rate, spp, .. } = *a;
+        let WaveArea { full, strip, ruler, wave, scroll, rate, spp, .. } = *a;
         let x_to_frame = |x: f32, vs: f64, vl: f64| a.x_to_frame(x, vs, vl);
         // --- painting: dark waveform on white, selection as a grey band ---
         let audio = self.audio.clone().unwrap();
@@ -727,6 +902,20 @@ impl App {
         painter.rect_filled(wave, 0.0, Color32::WHITE);
         painter.rect_filled(ruler, 0.0, PANEL);
         painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0, LINE));
+        if strip.height() > 0.0 {
+            painter.rect_filled(strip, 0.0, PANEL);
+            // The loop: a brace in the strip (black when Loop is on), as in the song view.
+            if let Some((ls, le)) = self.loop_points {
+                let (x0, x1) = (frame_to_x(ls as f64).max(wave.left()), frame_to_x(le as f64).min(wave.right()));
+                if x1 > x0 {
+                    let col = if self.looping { INK } else { Color32::from_gray(175) };
+                    painter.rect_filled(Rect::from_min_max(Pos2::new(x0, strip.top() + 3.0), Pos2::new(x1, strip.bottom() - 3.0)), 2.0, col);
+                    if self.looping {
+                        painter.rect_filled(Rect::from_min_max(Pos2::new(x0, wave.top()), Pos2::new(x1, wave.bottom())), 0.0, Color32::from_black_alpha(8));
+                    }
+                }
+            }
+        }
         if let Some((s, e)) = self.sel {
             let (x0, x1) = (frame_to_x(s as f64).max(wave.left()), frame_to_x(e as f64).min(wave.right()));
             if x1 > x0 {
@@ -905,8 +1094,9 @@ impl App {
                 painter.galley(Pos2::new(rr.left() + 3.0, rr.center().y - label.size().y / 2.0), label, Color32::WHITE);
             }
         }
-        // Loop points: a black bar with end ticks along the bottom of the ruler.
-        if let Some((ls, le)) = self.loop_points {
+        // Loop points: a black bar with end ticks along the bottom of the ruler (in the clip
+        // editor they're the brace in the strip instead).
+        if let Some((ls, le)) = self.loop_points.filter(|_| strip.height() == 0.0) {
             let (x0, x1) = (frame_to_x(ls as f64), frame_to_x(le as f64));
             let y = ruler.bottom() - 4.0;
             let (c0, c1) = (x0.max(wave.left()), x1.min(wave.right()));
@@ -917,6 +1107,24 @@ impl App {
                 if x >= wave.left() && x <= wave.right() {
                     painter.line_segment([Pos2::new(x, y - 5.0), Pos2::new(x, ruler.bottom())], Stroke::new(1.5, black));
                 }
+            }
+        }
+
+        // The start flag at 1.1.1 (where it's being dragged to, while dragged).
+        if strip.height() > 0.0 {
+            let f = match self.ed_ruler {
+                Some(EdRuler::Start(f)) => f,
+                _ => 0,
+            };
+            let x = frame_to_x(f as f64);
+            if x >= wave.left() - 1.0 && x <= wave.right() {
+                let x = x.max(wave.left() + 1.0);
+                painter.add(egui::Shape::convex_polygon(
+                    vec![Pos2::new(x, ruler.bottom() - 13.0), Pos2::new(x + 9.0, ruler.bottom() - 9.0), Pos2::new(x, ruler.bottom() - 5.0)],
+                    INK,
+                    Stroke::NONE,
+                ));
+                painter.line_segment([Pos2::new(x, ruler.bottom() - 13.0), Pos2::new(x, wave.bottom())], Stroke::new(1.0, INK));
             }
         }
 

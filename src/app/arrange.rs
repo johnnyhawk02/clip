@@ -1184,7 +1184,7 @@ impl App {
 }
 
 /// Height of the loop strip along the top of the arrangement ruler.
-const LOOP_H: f32 = 13.0;
+pub(super) const LOOP_H: f32 = 13.0;
 
 /// Which part of the arrangement's loop brace is being dragged.
 #[derive(Clone, Copy, PartialEq)]

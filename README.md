@@ -78,7 +78,10 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
 - Drag a box from empty space to select every clip it touches (hold Shift to add to the selection); ⌫ deletes them all.
 - Click empty space to move the playhead. Space plays the whole arrangement from the playhead.
 - **Double-click a clip (or press Return) to edit it** in the waveform editor below, with every
-  tool and effect. Its ruler shows bars and beats like the song view, counting 1.1.1 from the clip's start. ◀ Arrangement or ⌘Return goes back.
+  tool and effect. Its ruler works like the song view's: bars
+  and beats counting 1.1.1 from the clip's start, a loop strip on top (whole bars), and drag the bar
+  numbers to zoom. The black start flag marks 1.1.1: drag it and the clip starts there, with the audio
+  before it moved round to the end (snaps to the ruler's ticks, ⌘ for anywhere). ◀ Arrangement or ⌘Return goes back.
 - Clip menu: New Clip, Import File as Clip (at the playhead), Edit Clip, Split Clip at Playhead
   (⌘E), Duplicate Clip (⌘D, placed right after). ⌫ deletes the selected clip; ⌘C / ⌘X / ⌘V copy,
   cut and paste clips (paste goes on the selected track at the playhead). Dropping a file onto
