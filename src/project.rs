@@ -88,6 +88,9 @@ pub struct ClipData {
     /// Where bar 1.1.1 is in the clip's audio (frames), for the clip editor's ruler.
     #[serde(default)]
     pub origin: usize,
+    /// The clip's own volume (linear).
+    #[serde(default = "default_master")]
+    pub gain: f32,
 }
 
 pub fn write(path: &Path, project: &ProjectFile, audio: &[&Audio]) -> Result<(), String> {
@@ -176,6 +179,7 @@ mod tests {
                     group: None,
                     warp: None,
                     origin: 0,
+                    gain: 1.0,
                 }],
             }],
             audio: vec![AudioData { rate: 1000, channels: 2, frames: 3 }],

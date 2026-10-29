@@ -35,6 +35,7 @@ mod undo;
 mod clipruler;
 mod tempo;
 mod timesel;
+mod clipview;
 
 use self::clip::*;
 use self::chop::*;
@@ -191,6 +192,8 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// A Clip View edit in progress (one undo step per drag or typed value).
+    clip_view_edit: bool,
     /// The speed last handed to the player for a tempo still being dragged in.
     live_speed: f64,
     /// Warped clips being re-stretched for a new tempo on another thread.
@@ -340,7 +343,7 @@ fn crossfeed_pref() -> PathBuf {
 /// Clip processes that, with a time selection, work on just the part inside it.
 fn on_time_sel(a: Action) -> bool {
     use Action::*;
-    matches!(a, ReverseClip | SwapSection | SliceClip | CollapseClip | WarpClip | LoopClip | DuplicateClip | Copy | Cut | AddToPool | GroupClips)
+    matches!(a, ReverseClip | SwapSection | SliceClip | CollapseClip | WarpClip | LoopClip | Copy | Cut | AddToPool | GroupClips)
 }
 
 /// A file holding the Preferences setting for the phrase lines (bars between them).
@@ -402,6 +405,7 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            clip_view_edit: false,
             live_speed: 1.0,
             stretching: None,
             tempo_drag: None,
@@ -590,7 +594,7 @@ impl App {
             let mut v = c.visible();
             let fades = edge_fades(&v, fades);
             apply_crossfade(&mut v, fades);
-            out = effects::mix_into(&out, c.start, &v, 1.0);
+            out = effects::mix_into(&out, c.start, &v, c.gain);
         }
         out
     }

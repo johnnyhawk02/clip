@@ -19,6 +19,8 @@ clips on the layers above to patch over parts of it.
 - Where a layer cuts in over one that is still sounding, the one cut off fades out over 5 ms so
   there is no click. A clip that starts or ends on its own keeps its edge.
 - Each layer keeps a volume slider and a colour. Solo and pan are gone.
+- Select one clip and the Clip View appears under the layers, as in Live: Warp on/off and the
+  clip's own BPM, Loop, Start and Length (bars.beats.sixteenths), Gain, Reverse and Edit.
 - Playback mixes the layers live as it plays, as Live does, so edits and tempo changes are heard
   at once with nothing to render first. Dragging the tempo re-pitches what you hear straight away.
 - Recording puts the take on a new top layer. Layers ▸ Flatten Layers turns everything heard
@@ -79,7 +81,9 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   to other clips' edges and the playhead; hold ⌘ to turn snapping off.
 - Selecting works like Live's: drag across empty space, or across a clip's waveform, to select a
   stretch of time on one or more layers (a light blue wash, snapped to the grid; ⌘ for free). ⌫
-  deletes that stretch, ⌘E splits the clips at its ends, ⌘L / Set Loop loops it, and Mangle, BBCut
+  deletes that stretch, ⌘E splits the clips at its ends, ⌘L / Set Loop loops it, ⌘D duplicates
+  it right after itself (⇧⌘D Duplicate Time pushes the rest later), Edit ▸ Delete Time (⇧⌘⌫) takes it
+  out and closes the gap, Insert Time (⌘I) opens up empty time, and Mangle, BBCut
   and the clip processes (Reverse, Swap, Slice, Collapse, Warp, Loop, Duplicate, Copy, Cut, Group)
   work only inside it. Drag a clip by
   its name strip to move it; click clips (shift-click for more) to select whole clips.

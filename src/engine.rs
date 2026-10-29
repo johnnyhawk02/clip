@@ -32,6 +32,8 @@ pub struct ClipSrc {
     pub frames: usize,
     /// Fade in and out (crossfades with its neighbours, and edge fades), in song frames.
     pub fades: (usize, usize),
+    /// The clip's own volume.
+    pub gain: f32,
 }
 
 impl ClipSrc {
@@ -67,7 +69,7 @@ impl ClipSrc {
     fn gain(&self, t: usize) -> f32 {
         let i = t - self.start;
         let (fin, fout) = self.fades;
-        let mut g = 1.0;
+        let mut g = self.gain;
         if i < fin {
             g *= (i as f32 / fin as f32 * FRAC_PI_2).sin();
         }
@@ -205,7 +207,7 @@ mod tests {
     fn repitched_clip_reads_its_source_faster() {
         // A ramp 0, 1, 2… read at speed 2: song frame t hears source frame 2t.
         let audio = Arc::new(Audio { rate: 1000, channels: vec![(0..100).map(|i| i as f32).collect()] });
-        let clip = ClipSrc { audio, speed: 2.0, start: 10, len: 40, trim: 0, looping: None, frames: 50, fades: (0, 0) };
+        let clip = ClipSrc { audio, speed: 2.0, start: 10, len: 40, trim: 0, looping: None, frames: 50, fades: (0, 0), gain: 1.0 };
         let song = Song { layers: vec![LayerSrc { gain: 1.0, clips: vec![clip] }], pieces: vec![(0, 10, 50, Ramp::Full)], end: 50, rate: 1000, master: 1.0 };
         let mut out = vec![[0.0; 2]; 4];
         song.render(20.0, 1.0, &mut out);

@@ -75,4 +75,119 @@ impl App {
         self.refresh_playback();
         self.status = "Deleted the selected time — ⌘Z to undo".into();
     }
+
+    /// Cut layer `t`'s clips at frame `at`.
+    fn cut_layer_at(&mut self, t: usize, at: usize) {
+        if let Some(c) = self.tracks[t].clips.iter().position(|c| at > c.start && at < c.end()) {
+            self.split_raw((t, c), at);
+        }
+    }
+
+    /// Copies of what layer `t` plays in `[s, e)`, each cut down to the part inside.
+    fn copy_span(&self, t: usize, (s, e): Sel) -> Vec<Clip> {
+        self.tracks[t]
+            .clips
+            .iter()
+            .filter(|c| c.start < e && c.end() > s)
+            .map(|c| {
+                let (a, b) = (s.max(c.start), e.min(c.end()));
+                let mut piece = c.clone();
+                piece.trim += a - c.start;
+                (piece.start, piece.len) = (a, b - a);
+                piece
+            })
+            .collect()
+    }
+
+    /// Clear `[s, e)` on layer `t`, leaving a gap.
+    fn clear_span(&mut self, t: usize, (s, e): Sel) {
+        self.cut_layer_at(t, s);
+        self.cut_layer_at(t, e);
+        self.tracks[t].clips.retain(|c| c.start < s || c.end() > e);
+    }
+
+    /// Move everything on every layer from `at` on by `d` frames (later if positive), cutting
+    /// clips that straddle `at`.
+    fn shift_from(&mut self, at: usize, d: i64) {
+        for t in 0..self.tracks.len() {
+            self.cut_layer_at(t, at);
+            for c in self.tracks[t].clips.iter_mut().filter(|c| c.start >= at) {
+                c.start = (c.start as i64 + d).max(0) as usize;
+            }
+        }
+        if let Some((ls, le)) = self.arr_loop.filter(|&(ls, _)| ls >= at) {
+            self.arr_loop = Some(((ls as i64 + d).max(0) as usize, (le as i64 + d).max(0) as usize));
+        }
+    }
+
+    /// The layers of the time selection, clamped to the layers there are.
+    fn sel_layers(&self, (t0, t1): (usize, usize)) -> std::ops::RangeInclusive<usize> {
+        t0..=t1.min(self.tracks.len().saturating_sub(1))
+    }
+
+    /// ⌘D with a time selection (Live's Duplicate): a copy of the selected stretch goes right
+    /// after it on the same layers, over whatever was there, and the selection moves onto it.
+    pub(super) fn duplicate_time_sel(&mut self) {
+        let Some(((s, e), layers)) = self.time_sel else { return };
+        self.push_undo("Duplicate");
+        let len = e - s;
+        for t in self.sel_layers(layers) {
+            let pieces = self.copy_span(t, (s, e));
+            self.clear_span(t, (e, e + len));
+            self.tracks[t].clips.extend(pieces.into_iter().map(|mut c| {
+                c.start += len;
+                c
+            }));
+        }
+        self.time_sel = Some(((e, e + len), layers));
+        self.finish_time_edit("Duplicated the selection — ⌘D again for another");
+    }
+
+    /// Edit ▸ Duplicate Time (⇧⌘D): as ⌘D, but the copy is inserted, pushing everything after
+    /// the selection later on every layer.
+    pub(super) fn duplicate_time(&mut self) {
+        let Some(((s, e), layers)) = self.time_sel else { return };
+        self.push_undo("Duplicate Time");
+        let len = e - s;
+        let copies: Vec<(usize, Vec<Clip>)> = self.sel_layers(layers).map(|t| (t, self.copy_span(t, (s, e)))).collect();
+        self.shift_from(e, len as i64);
+        for (t, pieces) in copies {
+            self.tracks[t].clips.extend(pieces.into_iter().map(|mut c| {
+                c.start += len;
+                c
+            }));
+        }
+        self.time_sel = Some(((e, e + len), layers));
+        self.finish_time_edit("Duplicated the selected time, pushing the rest later");
+    }
+
+    /// Edit ▸ Delete Time (⇧⌘⌫): take the selected stretch out of the whole song and close
+    /// the gap.
+    pub(super) fn delete_time(&mut self) {
+        let Some(((s, e), _)) = self.time_sel else { return };
+        self.push_undo("Delete Time");
+        for t in 0..self.tracks.len() {
+            self.clear_span(t, (s, e));
+        }
+        self.shift_from(e, -((e - s) as i64));
+        self.time_sel = None;
+        self.finish_time_edit("Deleted the time and closed the gap — ⌘Z to undo");
+    }
+
+    /// Edit ▸ Insert Time (⌘I): open up an empty stretch the length of the selection at its
+    /// start, on every layer.
+    pub(super) fn insert_time(&mut self) {
+        let Some(((s, e), _)) = self.time_sel else { return };
+        self.push_undo("Insert Time");
+        self.shift_from(s, (e - s) as i64);
+        self.finish_time_edit("Inserted empty time — ⌘Z to undo");
+    }
+
+    fn finish_time_edit(&mut self, status: &str) {
+        self.sel_clip = None;
+        self.sel_extra.clear();
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = status.into();
+    }
 }

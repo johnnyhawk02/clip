@@ -44,6 +44,7 @@ impl App {
                 Action::TrackColor | Action::OffsetTrack => doc,
                 Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack => self.tracks.len() > 1,
                 Action::LayerUp => self.active > 0,
+                Action::DuplicateTime | Action::DeleteTime | Action::InsertTime => self.time_sel.is_some(),
                 Action::LayerDown => self.active + 1 < self.tracks.len(),
                 Action::MergeDown => self.can_merge_down(),
                 _ => false,
@@ -61,7 +62,7 @@ impl App {
             Action::AutoWarp => return true,
             Action::AutoArrange | Action::PrevVariation | Action::NextVariation | Action::SwapSection | Action::AddToPool => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
-            Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown => return false,
+            Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown | Action::DuplicateTime | Action::DeleteTime | Action::InsertTime => return false,
             _ => {}
         }
         let has = self.audio.is_some();
@@ -151,6 +152,9 @@ impl App {
     pub(super) fn run(&mut self, a: Action, ctx: &egui::Context) {
         if !self.enabled(a) {
             return;
+        }
+        if self.view == View::Arrangement && self.time_sel.is_some() && a == Action::DuplicateClip {
+            return self.duplicate_time_sel();
         }
         if self.view == View::Arrangement && self.time_sel.is_some() && on_time_sel(a) {
             return self.run_on_time_sel(a, ctx);
@@ -470,6 +474,9 @@ impl App {
             Action::BatchConvert => self.show_batch = true,
             Action::LayerUp => self.move_layer(true),
             Action::LayerDown => self.move_layer(false),
+            Action::DuplicateTime => self.duplicate_time(),
+            Action::DeleteTime => self.delete_time(),
+            Action::InsertTime => self.insert_time(),
             Action::Preferences => self.prefs_open = Some((self.phrase_bars, repitch_mode())),
             Action::MergeDown => self.merge_down(),
             Action::TrackColor => {

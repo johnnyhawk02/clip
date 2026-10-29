@@ -573,9 +573,12 @@ impl App {
         let ruler_h = 22.0 + LOOP_H;
         let ruler = Rect::from_min_max(Pos2::new(full.left() + header_w, full.top()), Pos2::new(full.right(), full.top() + ruler_h));
         let scroll = Rect::from_min_max(Pos2::new(full.left() + header_w, full.bottom() - 15.0), full.max);
-        // The master channel sits under the tracks, above the scroll bar.
+        // The master channel sits under the tracks, above the scroll bar, with the Clip View
+        // above it while a clip is selected.
         let master = Rect::from_min_max(Pos2::new(full.left(), scroll.top() - MASTER_H), Pos2::new(full.right(), scroll.top()));
-        let lanes = Rect::from_min_max(Pos2::new(full.left() + header_w, ruler.bottom()), Pos2::new(full.right(), master.top()));
+        let clip_view_h = if self.clip_view_clip().is_some() { clipview::CLIP_VIEW_H } else { 0.0 };
+        let clip_view = Rect::from_min_max(Pos2::new(full.left(), master.top() - clip_view_h), Pos2::new(full.right(), master.top()));
+        let lanes = Rect::from_min_max(Pos2::new(full.left() + header_w, ruler.bottom()), Pos2::new(full.right(), clip_view.top()));
         let n_tracks = self.tracks.len().max(1);
         let lane_h = (lanes.height() / n_tracks as f32).min(120.0);
         self.arr_lanes = Some((lanes, lane_h));
@@ -957,6 +960,9 @@ impl App {
             let header = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.left() + header_w, lanes.bottom()));
             self.track_headers(ui, header, self.tracks.len(), &lane);
             self.master_strip(ui, master, header_w);
+            if clip_view_h > 0.0 {
+                self.clip_view(ui, clip_view);
+            }
         }
     }
 

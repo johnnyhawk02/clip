@@ -286,6 +286,7 @@ impl App {
                             loop_points: c.loop_points,
                             looping: c.looping,
                             origin: c.origin,
+                            gain: c.gain,
                             group: c.group.as_ref().map(|g| tracks_data(g, pool)),
                             warp: c.warp.as_ref().map(|w| {
                                 let i = pool.iter().position(|a| Arc::ptr_eq(a, &w.source)).unwrap_or_else(|| {
@@ -352,6 +353,7 @@ impl App {
                         clip.loop_points = c.loop_points;
                         clip.looping = c.looping;
                         clip.origin = c.origin;
+                        clip.gain = c.gain;
                         clip.len = if c.looping { c.len } else { clip.len };
                         if let Some((bpm, tempo, i)) = c.warp {
                             if let Some(source) = audio.get(i) {
