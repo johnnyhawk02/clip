@@ -482,6 +482,10 @@ impl App {
             let place = |f: usize| (f >= old.trim && f < old.trim + old.len).then(|| f - old.trim);
             clip.cues = old.cues.iter().filter_map(|q| place(q.frame).map(|frame| Cue { frame, name: q.name.clone() })).collect();
         }
+        // A warped clip collapses to a warped clip, so it still follows the tempo.
+        if old.warp.is_some() {
+            clip.warp = Some(Warp { bpm: self.tempo, source: clip.audio.clone(), tempo: self.tempo, repitch: repitch_mode() });
+        }
         self.tracks[t].clips[c] = clip;
         self.dirty = true;
         self.refresh_playback();
@@ -496,7 +500,12 @@ impl App {
         let rendered = self.render_track(&track);
         let audio = rendered.slice(start.min(rendered.frames()), rendered.frames());
         let name = track.name.clone();
-        self.tracks[t].clips = vec![Clip::new(name.clone(), Arc::new(audio), start)];
+        let mut clip = Clip::new(name.clone(), Arc::new(audio), start);
+        // Warped clips collapse to a warped clip, so the layer still follows the tempo.
+        if track.clips.iter().any(|c| c.warp.is_some()) {
+            clip.warp = Some(Warp { bpm: self.tempo, source: clip.audio.clone(), tempo: self.tempo, repitch: repitch_mode() });
+        }
+        self.tracks[t].clips = vec![clip];
         self.sel_clip = Some((t, 0));
         self.sel_extra.clear();
         self.dirty = true;

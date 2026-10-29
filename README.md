@@ -130,8 +130,8 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   speed), and the loop and playhead follow. Opening such a file sets the song tempo from it. Clip ▸ Warp to
   Tempo switches warping on or off for the selected clips (clips with no tempo in the name are
   taken as the whole-bar loop closest to the song tempo); Clip ▸ Warp Loops on Import turns the
-  automatic part off. Editing a warped clip in the editor makes it plain audio at its current
-  speed. Warping is saved in projects, and the Ableton export hands Live the original audio with
+  automatic part off. Editing or collapsing a warped clip keeps it warped, so it keeps
+  following the tempo. Warping is saved in projects, and the Ableton export hands Live the original audio with
   warp markers, so the clips follow Live's tempo too.
 - File ▸ Export Ableton Live Set makes a "<name> Project" folder with a Live 12 set (.als) and a
   Samples folder. The layers are flattened onto one audio track: each clip is cut down to the parts
