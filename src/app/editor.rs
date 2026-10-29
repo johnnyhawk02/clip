@@ -322,6 +322,21 @@ impl App {
         self.snap_zero(f, spp)
     }
 
+    /// In the clip editor with Snap on, a selection edge goes to the nearest grid line (the song
+    /// view's grid, counted from the clip's 1.1.1); ⌘ snaps to cues and zero crossings instead.
+    fn snap_edge(&self, f: usize, spp: f64, command: bool) -> usize {
+        if command {
+            return self.snap(f, spp);
+        }
+        match (matches!(self.view, View::Editor { .. }) && self.snap, self.grid_frames(spp)) {
+            (true, Some(g)) => {
+                let o = self.ed_markers().1;
+                ((((f as f64 - o) / g).round() * g + o).max(0.0) as usize).min(self.frames())
+            }
+            _ => f,
+        }
+    }
+
     /// Nearest zero crossing (of all channels summed) within 8 pixels, or `f` if there is none.
     fn snap_zero(&self, f: usize, spp: f64) -> usize {
         let Some(a) = &self.audio else { return f };
@@ -726,7 +741,7 @@ impl App {
                             self.status = "Fine adjust: the edge moves at 1/10 speed".into();
                         }
                         _ => {
-                            let f = if command { self.snap(f, spp) } else { f };
+                            let f = self.snap_edge(f, spp, command);
                             self.drag_anchor = Some(match (shift, self.sel) {
                                 // Shift-drag extends the existing selection from its far end.
                                 (true, Some((s, e))) => {
@@ -758,10 +773,8 @@ impl App {
                         self.view_start += self.view_len * 0.02;
                         self.clamp_view();
                     }
-                    let mut f = x_to_frame(p.x.clamp(wave.left(), wave.right()), self.view_start, self.view_len);
-                    if command {
-                        f = self.snap(f, spp);
-                    }
+                    let f = x_to_frame(p.x.clamp(wave.left(), wave.right()), self.view_start, self.view_len);
+                    let f = self.snap_edge(f, spp, command);
                     let (s, e) = (anchor.min(f), anchor.max(f));
                     if e > s {
                         self.sel = Some((s, e));

@@ -371,7 +371,7 @@ impl App {
     }
 
     /// The grid spacing in frames at the current zoom (`spp` = frames per pixel), if the grid is on.
-    fn grid_frames(&self, spp: f64) -> Option<f64> {
+    pub(super) fn grid_frames(&self, spp: f64) -> Option<f64> {
         let beat = self.beat_frames();
         match GRID[self.grid.min(GRID.len() - 1)].1 {
             0.0 => None,

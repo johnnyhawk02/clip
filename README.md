@@ -83,7 +83,8 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   numbers to zoom. The black flag is the start marker, as in Live: drag it and the clip plays from
   there, looping round so the audio before it comes at the end; the waveform stays put (snaps to
   the ruler's ticks, ⌘ for anywhere). Right-click the flag ▸ Set 1.1.1 Here to count bars from it,
-  with -1, -2… before it. ◀ Arrangement or ⌘Return goes back.
+  with -1, -2… before it. With Snap on, selections snap to the song's grid (⌘ snaps to zero
+  crossings instead). ◀ Arrangement or ⌘Return goes back.
 - Clip menu: New Clip, Import File as Clip (at the playhead), Edit Clip, Split Clip at Playhead
   (⌘E), Duplicate Clip (⌘D, placed right after). ⌫ deletes the selected clip; ⌘C / ⌘X / ⌘V copy,
   cut and paste clips (paste goes on the selected track at the playhead). Dropping a file onto
