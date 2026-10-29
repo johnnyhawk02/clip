@@ -240,6 +240,31 @@ pub(super) fn crossfades(clips: &[Clip]) -> Vec<(usize, usize)> {
         .collect()
 }
 
+/// Longest edge fade, as in Live's clip-edge fades.
+const EDGE_FADE_SECS: f64 = 0.004;
+
+/// Fades for a clip's edges where nothing crossfades them: none where the audio starts or ends
+/// at (or near) a zero crossing, so a transient stays untouched, growing to 4 ms where the edge
+/// cuts through a loud part of the wave and would click.
+pub(super) fn edge_fades(a: &Audio, (fin, fout): (usize, usize)) -> (usize, usize) {
+    let n = a.frames();
+    if n == 0 {
+        return (fin, fout);
+    }
+    let full = (a.rate as f64 * EDGE_FADE_SECS).round();
+    let len = |i: usize| {
+        let level = a.channels.iter().map(|c| c[i].abs()).fold(0.0f32, f32::max);
+        (full * (level as f64 / 0.05).min(1.0)).round() as usize
+    };
+    let fin = if fin == 0 { len(0) } else { fin };
+    let fout = if fout == 0 { len(n - 1) } else { fout };
+    // A very short clip shares its length between the two.
+    if fin + fout > n {
+        return (n / 2, n - n / 2);
+    }
+    (fin, fout)
+}
+
 /// Apply a crossfade's fade in and fade out to rendered clip audio.
 pub(super) fn apply_crossfade(a: &mut Audio, (fin, fout): (usize, usize)) {
     let n = a.frames();

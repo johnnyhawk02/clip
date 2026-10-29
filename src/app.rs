@@ -515,13 +515,14 @@ impl App {
     }
 
     /// One track rendered to audio: its clips placed at their positions, crossfading where
-    /// they overlap.
+    /// they overlap, with a short fade on any other edge that would click.
     fn render_track(&self, t: &Track) -> Audio {
         let rate = self.rate();
         let channels = t.clips.iter().map(|c| c.audio.num_channels()).max().unwrap_or(1);
         let mut out = Audio { rate, channels: vec![Vec::new(); channels] };
         for (c, fades) in t.clips.iter().zip(crossfades(&t.clips)) {
             let mut v = c.visible();
+            let fades = edge_fades(&v, fades);
             apply_crossfade(&mut v, fades);
             out = effects::mix_into(&out, c.start, &v, 1.0);
         }
@@ -1935,6 +1936,16 @@ mod tests {
             assert!((g * g + h * h - 1.0).abs() < 0.02, "frame {k}: {g} {h}");
         }
         assert_eq!(v.channels[0][79], 1.0);
+    }
+
+    #[test]
+    fn edges_fade_only_where_they_would_click() {
+        // At 1 kHz the longest edge fade is 4 frames.
+        let quiet_start = Audio { rate: 1000, channels: vec![vec![0.0, 0.5, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.5]] };
+        assert_eq!(edge_fades(&quiet_start, (0, 0)), (0, 4), "zero crossing at the start, loud cut at the end");
+        assert_eq!(edge_fades(&quiet_start, (0, 2)), (0, 2), "a crossfade is left alone");
+        let soft = Audio { rate: 1000, channels: vec![vec![0.025; 10]] };
+        assert_eq!(edge_fades(&soft, (0, 0)), (2, 2), "half the click level, half the fade");
     }
 
     #[test]
