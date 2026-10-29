@@ -3,6 +3,10 @@
 
 use super::*;
 
+/// Clip indices from here up mean a Session slot (`SLOT + scene`), so a slot's clip can be
+/// edited like any other.
+pub(super) const SLOT: usize = 1 << 30;
+
 /// Width of a track's column.
 const COL_W: f32 = 150.0;
 /// Height of a clip slot.
@@ -206,7 +210,12 @@ impl App {
                 self.dirty = true;
             }
         }
-        if resp.clicked() {
+        if resp.double_clicked() && clip_name.is_some() {
+            // Double-click: the clip opens in full in the audio editor.
+            self.sel_slot = Some((t, s));
+            self.edit_clip((t, SLOT + s));
+            self.full_edit = true;
+        } else if resp.clicked() {
             self.sel_slot = Some((t, s));
             self.set_active(t);
             // A click on a clip's play triangle launches it.

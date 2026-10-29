@@ -399,8 +399,15 @@ impl Track {
 }
 
 impl App {
+    /// The clip at (track, index): one in the song view, or a Session slot's (index `SLOT + scene`).
     pub(super) fn clip(&self, (t, c): (usize, usize)) -> Option<&Clip> {
-        self.tracks.get(t).and_then(|t| t.clips.get(c))
+        let t = self.tracks.get(t)?;
+        if c >= SLOT { t.slots.get(c - SLOT)?.as_ref() } else { t.clips.get(c) }
+    }
+
+    pub(super) fn clip_mut(&mut self, (t, c): (usize, usize)) -> Option<&mut Clip> {
+        let t = self.tracks.get_mut(t)?;
+        if c >= SLOT { t.slots.get_mut(c - SLOT)?.as_mut() } else { t.clips.get_mut(c) }
     }
 
     /// Open a clip in the waveform editor.
@@ -418,7 +425,7 @@ impl App {
         self.active = t;
         self.sel_clip = Some((t, c));
         self.refresh_playback();
-        self.status = format!("Editing {} — click the song above (or ⌘Return) to go back", clip.name);
+        self.status = format!("Editing {} — ⌘Return goes back", clip.name);
     }
 
     /// What identifies the clip shown in the detail view: its place and what it plays. When it
@@ -452,10 +459,9 @@ impl App {
     /// Store the editor's cues, regions and loop with the clip being edited.
     pub(super) fn sync_clip_markers(&mut self) {
         if let View::Editor { track, clip } = self.view {
-            if let Some(c) = self.tracks.get_mut(track).and_then(|t| t.clips.get_mut(clip)) {
-                c.cues = self.cues.clone();
-                c.regions = self.regions.clone();
-                c.loop_points = self.loop_points;
+            let (cues, regions, loop_points) = (self.cues.clone(), self.regions.clone(), self.loop_points);
+            if let Some(c) = self.clip_mut((track, clip)) {
+                (c.cues, c.regions, c.loop_points) = (cues, regions, loop_points);
             }
         }
     }
@@ -467,6 +473,7 @@ impl App {
         self.player.stop();
         self.sync_clip_markers();
         self.view = View::Arrangement;
+        self.full_edit = false;
         self.sel = None;
         self.refresh_playback();
         self.status = "Arrangement — double-click a clip to edit it".into();
@@ -731,7 +738,7 @@ impl App {
 
     /// Clip View ▸ Pitch: transpose clip `p` to `semis` semitones, keeping its length and place.
     pub(super) fn set_transpose(&mut self, (t, ci): (usize, usize), semis: i32) {
-        let Some(c) = self.tracks.get_mut(t).and_then(|t| t.clips.get_mut(ci)) else { return };
+        let Some(c) = self.clip_mut((t, ci)) else { return };
         if c.transpose == semis || c.group.is_some() {
             return;
         }

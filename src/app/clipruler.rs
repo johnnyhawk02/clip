@@ -174,7 +174,7 @@ impl App {
     pub(super) fn set_clip_start(&mut self, m: usize) {
         let Some(((t, ci), off)) = self.ed_clip() else { return };
         self.push_undo("Move Start");
-        let c = &mut self.tracks[t].clips[ci];
+        let Some(c) = self.clip_mut((t, ci)) else { return };
         c.trim = (m + off).min(c.audio.frames().saturating_sub(1));
         c.looping = true;
         self.cursor = m;
@@ -191,7 +191,7 @@ impl App {
     pub(super) fn set_origin_here(&mut self) {
         let Some(((t, ci), _)) = self.ed_clip() else { return };
         self.push_undo("Set 1.1.1");
-        let c = &mut self.tracks[t].clips[ci];
+        let Some(c) = self.clip_mut((t, ci)) else { return };
         c.origin = c.trim;
         self.dirty = true;
         self.status = "1.1.1 is at the start flag now".into();

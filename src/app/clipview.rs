@@ -6,6 +6,11 @@ use super::*;
 impl App {
     /// The clip the Clip View shows: one selected clip, with no time selection.
     pub(super) fn clip_view_clip(&self) -> Option<(usize, usize)> {
+        if self.show_session && self.view == View::Arrangement {
+            // In the Session view: the selected slot's clip.
+            let (t, s) = self.sel_slot?;
+            return self.clip((t, SLOT + s)).map(|_| (t, SLOT + s));
+        }
         let p = self.sel_clip.filter(|_| self.sel_extra.is_empty() && self.time_sel.is_none())?;
         self.clip(p).map(|_| p)
     }
@@ -14,7 +19,7 @@ impl App {
     pub(super) fn clip_view(&mut self, ui: &mut egui::Ui, r: Rect) {
         let Some((t, ci)) = self.clip_view_clip() else { return };
         ui.painter().rect_filled(r, 0.0, PANEL);
-        let c = self.tracks[t].clips[ci].clone();
+        let Some(c) = self.clip((t, ci)).cloned() else { return };
         let bf = self.beat_frames().max(1.0);
         let bpb = self.beats_per_bar.max(1) as f64;
         let (mut start, mut length) = (c.trim as f64 / bf, c.len as f64 / bf);
@@ -138,7 +143,7 @@ impl App {
                 self.push_undo("Clip Settings");
                 self.clip_view_edit = true;
             }
-            let clip = &mut self.tracks[t].clips[ci];
+            let Some(clip) = self.clip_mut((t, ci)) else { return };
             if let (true, Some(w), Some(b)) = (bpm_set, clip.warp.as_mut(), bpm) {
                 // A new clip tempo: the clip plays faster or slower against the song.
                 w.bpm = b;

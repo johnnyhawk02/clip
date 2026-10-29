@@ -46,7 +46,7 @@ use self::files::*;
 use self::look::*;
 use self::automation::Automation;
 use self::autoarrange::{PoolDrag, PoolLoop};
-use self::session::TrackPlay;
+use self::session::{TrackPlay, SLOT};
 use self::arrange::{LoopGrab, LOOP_H, MAX_TICKS};
 use self::editor::EdRuler;
 
@@ -200,6 +200,8 @@ pub struct App {
     scenes: Vec<String>,
     /// Showing the Session view instead of the song view (Tab, as in Live).
     show_session: bool,
+    /// The clip editor fills the window (a double-click), instead of sitting under the song.
+    full_edit: bool,
     /// Where each Session slot was drawn this frame, for dropping files onto them.
     slot_rects: Vec<((usize, usize), Rect)>,
     /// Files being dropped onto Session slots, and the slot each goes to.
@@ -469,6 +471,7 @@ impl App {
             song_edit: false,
             scenes: default_scenes(),
             show_session: false,
+            full_edit: false,
             slot_rects: Vec::new(),
             slot_drops: HashMap::new(),
             sel_slot: None,
@@ -610,7 +613,7 @@ impl App {
         self.peaks = Some(peaks.clone());
         // The editor works on one clip: keep that clip in step with every edit.
         if let View::Editor { track, clip } = self.view {
-            if let Some(c) = self.tracks.get_mut(track).and_then(|t| t.clips.get_mut(clip)).filter(|c| !Arc::ptr_eq(&c.audio, &a)) {
+            if let Some(c) = self.clip_mut((track, clip)).filter(|c| !Arc::ptr_eq(&c.audio, &a)) {
                 c.audio = a.clone();
                 c.peaks = peaks.clone();
                 // An edited warped clip stays warped: the edited audio becomes its new original,
@@ -1214,7 +1217,8 @@ impl eframe::App for App {
             View::Editor { track, clip } => Some((track, clip)),
             View::Arrangement => self.clip_view_clip().filter(|&p| self.clip(p).is_some_and(|c| c.group.is_none())),
         };
-        self.split = detail.is_some() && !self.tracks.is_empty() && !(self.show_session && self.view == View::Arrangement);
+        // A double-click opens the clip in full: the editor fills the window.
+        self.split = detail.is_some() && !self.tracks.is_empty() && !(self.full_edit && matches!(self.view, View::Editor { .. }));
         if let (View::Arrangement, Some(p)) = (self.view, detail) {
             if self.detail_key != self.detail_key_of(p) {
                 self.load_detail(p);
@@ -1240,9 +1244,12 @@ impl eframe::App for App {
                         self.back_to_arrangement();
                     } else if let (true, View::Arrangement, Some(p)) = (wave.contains(q), self.view, detail) {
                         self.edit_clip(p);
+                        self.full_edit = false;
                     }
                 }
-                ui.scope_builder(egui::UiBuilder::new().max_rect(top), |ui| self.arrangement(ui));
+                self.slot_rects.clear();
+                let session = self.show_session;
+                ui.scope_builder(egui::UiBuilder::new().max_rect(top), |ui| if session { self.session(ui) } else { self.arrangement(ui) });
                 ui.painter().rect_filled(Rect::from_min_max(bottom.min, Pos2::new(bottom.right(), bottom.top() + 1.0)), 0.0, LINE);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(side), |ui| self.clip_view(ui, side));
                 ui.painter().line_segment([Pos2::new(side.right(), bottom.top()), side.right_bottom()], Stroke::new(1.0, LINE));

@@ -637,17 +637,18 @@ impl App {
                     }
                 }
                 View::Editor { track, clip } => {
-                    if ui.button("◀ Arrangement").on_hover_text("Back to the arrangement (⌘Return)").clicked() {
+                    let back = if self.show_session { "◀ Session" } else { "◀ Arrangement" };
+                    if ui.button(back).on_hover_text("Back (⌘Return)").clicked() {
                         self.back_to_arrangement();
                         return;
                     }
                     let (tname, cname) = self
                         .tracks
                         .get(track)
-                        .map(|t| (t.name.clone(), t.clips.get(clip).map(|c| c.name.clone()).unwrap_or_default()))
+                        .map(|t| (t.name.clone(), String::new()))
                         .unwrap_or_default();
                     ui.label(egui::RichText::new("Editing").color(MUTED));
-                    if let Some(c) = self.tracks.get_mut(track).and_then(|t| t.clips.get_mut(clip)) {
+                    if let Some(c) = self.clip_mut((track, clip)) {
                         ui.add(egui::TextEdit::singleline(&mut c.name).desired_width(160.0)).on_hover_text("Clip name");
                     } else {
                         ui.label(cname);
@@ -1062,7 +1063,9 @@ impl App {
                 return;
             }
             if let Some((t, c, _)) = resp.interact_pointer_pos().and_then(|q| hit(&self.tracks, q, vs, vl)) {
+                // Double-click: the clip opens in full in the audio editor.
                 self.edit_clip((t, c));
+                self.full_edit = true;
                 return;
             }
         } else if resp.clicked() {
