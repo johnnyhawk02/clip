@@ -670,7 +670,13 @@ impl App {
         }
         if resp.drag_started() && !split_tool && !ruler_drag {
             if let Some(q) = press {
-                if let Some((t, mut c, mode)) = hit(&self.tracks, q, vs, vl) {
+                // As in Live, a clip moves by its name strip; dragging across its waveform selects
+                // time instead (⌥ still drags a copy from anywhere on it).
+                let on_body = |t: usize| q.y > lane(t).top() + 19.0 && !ui.input(|i| i.modifiers.alt);
+                if let Some((t, _, DragMode::Move)) = hit(&self.tracks, q, vs, vl).filter(|h| on_body(h.0)) {
+                    self.set_active(t);
+                    self.start_time_sel(q, &a, vs, vl, spp, ui.input(|i| i.modifiers.command));
+                } else if let Some((t, mut c, mode)) = hit(&self.tracks, q, vs, vl) {
                     // ⌥-drag leaves the original in place and drags a copy (as in Ableton).
                     let copy = mode == DragMode::Move && ui.input(|i| i.modifiers.alt);
                     self.push_undo(match (mode, copy) {
@@ -690,35 +696,19 @@ impl App {
                     self.sel_clip = Some((t, c));
                     self.active = t;
                 } else if q.y > lanes.top() {
-                    // Empty space: drag a box to select the clips it touches.
-                    let keep = if ui.input(|i| i.modifiers.shift) { self.selected_clips() } else { Vec::new() };
-                    self.marquee = Some((q, keep));
+                    // Empty space (or a clip's waveform, above): drag out a time selection.
+                    self.start_time_sel(q, &a, vs, vl, spp, ui.input(|i| i.modifiers.command));
                 }
             }
         }
-        if let (Some((from, keep)), true, Some(q)) = (self.marquee.clone(), resp.dragged(), resp.interact_pointer_pos()) {
-            let r = Rect::from_two_pos(from, q);
-            let mut picked = keep;
-            for (ti, t) in self.tracks.iter().enumerate() {
-                let l = lane(ti);
-                if l.bottom() < r.top() || l.top() > r.bottom() {
-                    continue;
-                }
-                for (ci, c) in t.clips.iter().enumerate() {
-                    let (x0, x1) = (a.f_to_x(c.start as f64, vs, vl), a.f_to_x(c.end() as f64, vs, vl));
-                    if x1 >= r.left() && x0 <= r.right() && !picked.contains(&(ti, ci)) {
-                        picked.push((ti, ci));
-                    }
-                }
-            }
-            self.sel_clip = picked.first().copied();
-            self.sel_extra = picked.iter().skip(1).copied().collect();
-            if let Some((t, _)) = self.sel_clip {
-                self.active = t;
-            }
+        if let (Some((f0, t0)), true, Some(q)) = (self.time_drag, resp.dragged(), resp.interact_pointer_pos()) {
+            let f = x_to_f(q.x, vs, vl);
+            let f = if ui.input(|i| i.modifiers.command) { f } else { self.snap_to_grid(f, spp) } as usize;
+            let t = (((q.y - lanes.top()) / lane_h).max(0.0) as usize).min(self.tracks.len().saturating_sub(1));
+            self.time_sel = (f != f0).then_some(((f0.min(f), f0.max(f)), (t0.min(t), t0.max(t))));
         }
         if resp.drag_stopped() {
-            self.marquee = None;
+            self.time_drag = None;
         }
         if let (true, Some(q)) = (resp.dragged(), resp.interact_pointer_pos()) {
             let drag_grid = if self.snap { self.grid_frames(spp) } else { None };
@@ -822,6 +812,9 @@ impl App {
                 return;
             }
         } else if resp.clicked() {
+            if resp.interact_pointer_pos().is_some_and(|q| q.y > ruler.bottom()) {
+                self.time_sel = None;
+            }
             if let Some(q) = resp.interact_pointer_pos() {
                 match hit(&self.tracks, q, vs, vl) {
                     Some((t, c, _)) => {
@@ -890,15 +883,79 @@ impl App {
         let thumb = Rect::from_min_size(Pos2::new(scroll.left() + thumb_x, scroll.top()), Vec2::new(thumb_w, scroll.height()));
         self.paint_arrangement(ui, &a, thumb, resp.hover_pos(), playing, play_pos);
         self.pool_drop(ui, &resp);
-        if let (Some((from, _)), Some(q)) = (&self.marquee, resp.interact_pointer_pos()) {
-            let r = Rect::from_two_pos(*from, q).intersect(lanes);
-            ui.painter().rect(r, 0.0, INK.gamma_multiply(0.06), Stroke::new(1.0, INK.gamma_multiply(0.6)), egui::StrokeKind::Inside);
+        // The time selection: a light wash over the chosen stretch of the chosen layers, with
+        // marks in the ruler at its ends (as in Live).
+        if let Some(((s0, e0), (t0, t1))) = self.time_sel {
+            let (x0, x1) = (a.f_to_x(s0 as f64, vs, vl).max(lanes.left()), a.f_to_x(e0 as f64, vs, vl).min(lanes.right()));
+            if x1 > x0 {
+                let p = ui.painter_at(Rect::from_min_max(ruler.min, lanes.max));
+                for t in t0..=t1.min(self.tracks.len().saturating_sub(1)) {
+                    let l = lane(t);
+                    p.rect_filled(Rect::from_min_max(Pos2::new(x0, l.top()), Pos2::new(x1, l.bottom())), 0.0, Color32::from_rgba_unmultiplied(90, 200, 225, 70));
+                }
+                for (x, dir) in [(a.f_to_x(s0 as f64, vs, vl), 1.0), (a.f_to_x(e0 as f64, vs, vl), -1.0)] {
+                    if x >= lanes.left() && x <= lanes.right() {
+                        p.add(egui::Shape::convex_polygon(
+                            vec![Pos2::new(x, ruler.bottom() - 7.0), Pos2::new(x + 6.0 * dir, ruler.bottom() - 7.0), Pos2::new(x, ruler.bottom())],
+                            Color32::from_rgb(40, 150, 180),
+                            Stroke::NONE,
+                        ));
+                    }
+                }
+            }
         }
         if !self.tracks.is_empty() {
             let header = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.left() + header_w, lanes.bottom()));
             self.track_headers(ui, header, self.tracks.len(), &lane);
             self.master_strip(ui, master, header_w);
         }
+    }
+
+    /// Begin dragging out a time selection from window point `q` (snapped to the grid unless ⌘).
+    fn start_time_sel(&mut self, q: Pos2, a: &ArrArea, vs: f64, vl: f64, spp: f64, free: bool) {
+        let f = a.x_to_f(q.x, vs, vl);
+        let f = if free { f } else { self.snap_to_grid(f, spp) } as usize;
+        let t = (((q.y - a.lanes.top()) / a.lane_h).max(0.0) as usize).min(self.tracks.len().saturating_sub(1));
+        self.time_drag = Some((f, t));
+        self.time_sel = None;
+        self.sel_clip = None;
+        self.sel_extra.clear();
+    }
+
+    /// Cut the clips on the selected layers at both ends of the time selection.
+    fn cut_at_time_sel(&mut self) -> Option<(Sel, (usize, usize))> {
+        let ((s, e), (t0, t1)) = self.time_sel?;
+        for t in t0..=t1.min(self.tracks.len().saturating_sub(1)) {
+            for at in [s, e] {
+                if let Some(c) = self.tracks[t].clips.iter().position(|c| at > c.start && at < c.end()) {
+                    self.split_raw((t, c), at);
+                }
+            }
+        }
+        Some(((s, e), (t0, t1)))
+    }
+
+    /// ⌘E with a time selection: split the clips it covers at its ends.
+    pub(super) fn split_time_sel(&mut self) {
+        self.push_undo("Split");
+        self.cut_at_time_sel();
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = "Split at the selection's ends — ⌘Z to undo".into();
+    }
+
+    /// ⌫ with a time selection: remove that stretch from the selected layers, leaving a gap.
+    pub(super) fn delete_time_sel(&mut self) {
+        self.push_undo("Delete Time");
+        let Some(((s, e), (t0, t1))) = self.cut_at_time_sel() else { return };
+        for t in t0..=t1.min(self.tracks.len().saturating_sub(1)) {
+            self.tracks[t].clips.retain(|c| c.start < s || c.end() > e);
+        }
+        self.sel_clip = None;
+        self.sel_extra.clear();
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = "Deleted the selected time — ⌘Z to undo".into();
     }
 
     /// The master channel: the whole mix's volume and level, and the headphone crossfeed switch.

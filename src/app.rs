@@ -165,7 +165,11 @@ pub struct App {
     clip_drag: Option<ClipDrag>,
     /// A selection box being dragged from empty space: where it started, and the clips that
     /// were already selected (kept when Shift is held).
-    marquee: Option<(Pos2, Vec<(usize, usize)>)>,
+    /// A time selection in the song view, as in Live: a stretch of time across a run of layers
+    /// (first, last). Delete, Split and Loop work on it.
+    time_sel: Option<(Sel, (usize, usize))>,
+    /// Dragging out a time selection: the frame and layer it started at.
+    time_drag: Option<(usize, usize)>,
     /// Clips selected besides `sel_clip` (shift-click), for grouping.
     sel_extra: Vec<(usize, usize)>,
     /// Open groups, outermost first; empty at the top level (the song).
@@ -364,7 +368,8 @@ impl App {
             arr_cursor: 0,
             sel_clip: None,
             clip_drag: None,
-            marquee: None,
+            time_sel: None,
+            time_drag: None,
             sel_extra: Vec::new(),
             nest: Vec::new(),
             import_as_clip: false,
@@ -731,6 +736,9 @@ impl App {
 
     /// Timeline span covered by the selected clips.
     fn selected_span(&self) -> Option<Sel> {
+        if let (View::Arrangement, Some((range, _))) = (self.view, self.time_sel) {
+            return Some(range);
+        }
         let sel = self.selected_clips();
         let s = sel.iter().filter_map(|&p| self.clip(p)).map(|c| c.start).min()?;
         let e = sel.iter().filter_map(|&p| self.clip(p)).map(|c| c.end()).max()?;
@@ -1052,7 +1060,8 @@ impl App {
                 Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed => true,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
                 Action::Export | Action::ExportStems | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
-                Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy | Action::Delete => has_clip,
+                Action::Delete => has_clip || self.time_sel.is_some(),
+                Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy => has_clip,
                 Action::SplitClip => doc,
                 Action::ToolSelect | Action::ToolSplit => true,
                 Action::GroupClips | Action::TempoFromClip | Action::LoopClip | Action::SetLoop | Action::CollapseClip | Action::WarpClip | Action::SliceClip | Action::ReverseClip => has_clip,
@@ -1192,6 +1201,7 @@ impl App {
         if self.view == View::Arrangement {
             let mid = self.arr_view_start + self.arr_view_len / 2.0;
             match a {
+                Action::Delete if self.time_sel.is_some() => return self.delete_time_sel(),
                 Action::Delete => return self.delete_clip(),
                 Action::Copy | Action::Cut => {
                     if let Some(c) = self.sel_clip.and_then(|p| self.clip(p)) {
@@ -1387,6 +1397,7 @@ impl App {
                 }
             }
             Action::BackToArrangement => self.back_to_arrangement(),
+            Action::SplitClip if self.view == View::Arrangement && self.time_sel.is_some() => self.split_time_sel(),
             Action::SplitClip => self.split_clip(),
             Action::DuplicateClip => self.duplicate_clip(),
             Action::NewClip => self.new_clip(),

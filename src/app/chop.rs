@@ -477,7 +477,7 @@ impl App {
     }
 
     /// Cut a clip in two without undo or refresh; the right piece goes on the end of the track.
-    fn split_raw(&mut self, (t, c): (usize, usize), at: usize) {
+    pub(super) fn split_raw(&mut self, (t, c): (usize, usize), at: usize) {
         let left = &mut self.tracks[t].clips[c];
         let cut = at - left.start;
         let mut right = left.clone();
