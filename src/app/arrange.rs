@@ -594,6 +594,19 @@ impl App {
                         self.metronome = !self.metronome;
                         self.refresh_playback();
                     }
+                    if self.show_session {
+                        // Launch quantization, as Live's.
+                        let qs: [(&str, f64); 7] = [("None", 0.0), ("1/4", 0.25), ("1/2", 0.5), ("1 Bar", 1.0), ("2 Bars", 2.0), ("4 Bars", 4.0), ("8 Bars", 8.0)];
+                        let cur = qs.iter().find(|q| (q.1 - self.launch_q).abs() < 1e-9).map_or("1 Bar", |q| q.0);
+                        egui::ComboBox::from_id_salt("launchq").width(76.0).selected_text(cur).show_ui(ui, |ui| {
+                            for (label, v) in qs {
+                                ui.selectable_value(&mut self.launch_q, v, label);
+                            }
+                        }).response.on_hover_text("When launched clips start: the next bar, beat or none");
+                    }
+                    if self.session_owns_any() && ui.button("Back to Arrangement").on_hover_text("Tracks play their song-view clips again").clicked() {
+                        self.back_to_song_view();
+                    }
                     ui.checkbox(&mut self.snap, "Snap").on_hover_text("Snap moves, trims and the playhead to the grid (hold ⌘ to bypass)");
                     ui.separator();
                     let can_arrange = self.nest.is_empty() && self.tracks.iter().any(|t| !t.clips.is_empty());

@@ -12,6 +12,14 @@ const HEAD_H: f32 = 30.0;
 /// Width of the scene column on the right.
 const SCENE_W: f32 = 150.0;
 
+/// What a track plays from the Session view: whether it has taken the track over from the song
+/// view, and its launched clips as (slot, from, to) in song frames (`to` None while it plays on).
+#[derive(Clone, Default)]
+pub(super) struct TrackPlay {
+    pub(super) owned: bool,
+    pub(super) segments: Vec<(usize, usize, Option<usize>)>,
+}
+
 /// What a Session slot carries while it's dragged to another slot.
 #[derive(Clone, Copy)]
 pub(super) struct SlotDrag(pub(super) usize, pub(super) usize);
@@ -26,12 +34,13 @@ pub(super) fn slot_clip(mut c: Clip) -> Clip {
 }
 
 impl App {
-    /// Every track has one slot per scene.
+    /// Every track has one slot per scene (and a Session play state).
     pub(super) fn fit_slots(&mut self) {
         let n = self.scenes.len();
         for t in &mut self.tracks {
             t.slots.resize_with(n, || None);
         }
+        self.session_play.resize_with(self.tracks.len(), TrackPlay::default);
     }
 
     /// The Session view: track columns of clip slots, stop buttons and mixer, and the scenes on
@@ -147,16 +156,25 @@ impl App {
         let id = ui.scope_id().with(("slot", t, s));
         self.slot_rects.push(((t, s), r));
         let selected = self.sel_slot == Some((t, s));
-        let playing = self.slot_playing(t) == Some(s);
+        let (on, queued) = self.slot_state(t);
+        let playing = on == Some(s);
+        // A launched clip waiting for its bar blinks, as in Live.
+        let waiting = queued == Some(s) && (ui.input(|i| i.time) * 4.0) as i64 % 2 == 0;
+        if queued.is_some() {
+            ui.ctx().request_repaint();
+        }
         let clip_name = self.tracks[t].slots[s].as_ref().map(|c| c.name.clone());
-        let resp = match &clip_name {
-            Some(_) => ui.dnd_drag_source(id, SlotDrag(t, s), |ui| ui.allocate_exact_size(r.size(), Sense::click()).1).inner,
-            None => ui.interact(r, id, Sense::click()),
-        };
+        // A filled slot can be dragged to another; any slot can be clicked.
+        if clip_name.is_some() {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(r), |ui| {
+                ui.dnd_drag_source(id, SlotDrag(t, s), |ui| ui.allocate_exact_size(r.size(), Sense::hover()));
+            });
+        }
+        let resp = ui.interact(r, id.with("click"), Sense::click());
         let p = ui.painter();
         match &clip_name {
             Some(name) => {
-                p.rect_filled(r, 3.0, if playing { color } else { color.lerp_to_gamma(Color32::WHITE, 0.6) });
+                p.rect_filled(r, 3.0, if playing || waiting { color } else { color.lerp_to_gamma(Color32::WHITE, 0.6) });
                 let tri = Rect::from_min_size(r.min, Vec2::new(22.0, r.height()));
                 play_triangle(p, tri.center(), if playing { Color32::WHITE } else { INK });
                 let mut job = egui::text::LayoutJob::simple_singleline(name.clone(), FontId::proportional(11.5), if playing { Color32::WHITE } else { INK });
@@ -223,22 +241,122 @@ impl App {
         }
     }
 
-    /// The slot each track is playing (filled in by launching, phase 2).
-    pub(super) fn slot_playing(&self, _t: usize) -> Option<usize> {
-        None
+    /// Where the transport is (the playhead while playing, else the insert marker).
+    fn now(&self) -> usize {
+        if self.player.is_playing() { self.player.position() } else { self.arr_cursor }
     }
 
+    /// When a launch made now takes effect: the next quantization line while playing (as Live),
+    /// straight away when stopped.
+    fn launch_time(&self) -> usize {
+        let now = self.now();
+        let q = self.launch_q * self.bar_frames();
+        if !self.player.is_playing() || q < 1.0 {
+            return now;
+        }
+        ((now as f64 / q).ceil() * q).round() as usize
+    }
+
+    /// The slot track `t` is playing now, and one waiting to start at the next launch time.
+    pub(super) fn slot_state(&self, t: usize) -> (Option<usize>, Option<usize>) {
+        let Some(p) = self.session_play.get(t) else { return (None, None) };
+        let now = self.now();
+        let playing = self.player.is_playing();
+        let on = p.segments.iter().find(|&&(_, from, to)| playing && from <= now && to.is_none_or(|to| now < to)).map(|s| s.0);
+        let queued = p.segments.iter().find(|&&(_, from, _)| from > now || !playing).map(|s| s.0);
+        (on, queued)
+    }
+
+    /// End track `t`'s open clip at `at`, dropping clips that would never start.
+    fn close_track(&mut self, t: usize, at: usize) {
+        let Some(p) = self.session_play.get_mut(t) else { return };
+        p.segments.retain(|&(_, from, _)| from < at);
+        for seg in &mut p.segments {
+            if seg.2.is_none_or(|to| to > at) {
+                seg.2 = Some(at);
+            }
+        }
+    }
+
+    /// Start the transport (if stopped) for a launch at `at`, and hand the player the new song.
+    fn after_launch(&mut self, at: usize) {
+        self.dirty = true;
+        self.refresh_playback();
+        if !self.player.is_playing() {
+            let end = self.arrangement_frames().max(1) + (1 << 35);
+            self.play_origin = at;
+            self.player.play(at, end, false);
+        }
+    }
+
+    /// Launch the clip in slot `s` of track `t` (an empty slot stops the track), on the next
+    /// launch time. The track then plays from the Session view until Back to Arrangement.
     pub(super) fn launch_slot(&mut self, t: usize, s: usize) {
-        self.status = format!("Launching comes next: slot {} on {}", s + 1, self.tracks[t].name);
+        self.fit_slots();
+        if self.tracks.get(t).and_then(|tr| tr.slots.get(s)).is_none_or(|c| c.is_none()) {
+            return self.stop_track(t);
+        }
+        let at = self.launch_time();
+        self.close_track(t, at);
+        let p = &mut self.session_play[t];
+        p.owned = true;
+        p.segments.push((s, at, None));
+        self.after_launch(at);
     }
 
+    /// Launch row `s`: each track plays its clip in that scene, or stops if the slot is empty.
     pub(super) fn launch_scene(&mut self, s: usize) {
-        self.status = format!("Launching comes next: scene {}", self.scenes[s]);
+        self.fit_slots();
+        let at = self.launch_time();
+        for t in 0..self.tracks.len() {
+            self.close_track(t, at);
+            if self.tracks[t].slots.get(s).is_some_and(|c| c.is_some()) {
+                let p = &mut self.session_play[t];
+                p.owned = true;
+                p.segments.push((s, at, None));
+            }
+        }
+        self.after_launch(at);
     }
 
-    pub(super) fn stop_track(&mut self, _t: usize) {}
+    /// Stop track `t`'s Session clip at the next launch time.
+    pub(super) fn stop_track(&mut self, t: usize) {
+        let at = self.launch_time();
+        self.close_track(t, at);
+        if let Some(p) = self.session_play.get_mut(t) {
+            p.owned = true;
+        }
+        self.refresh_playback();
+    }
 
-    pub(super) fn stop_all_clips(&mut self) {}
+    /// Stop every Session clip at the next launch time.
+    pub(super) fn stop_all_clips(&mut self) {
+        let at = self.launch_time();
+        for t in 0..self.tracks.len() {
+            self.close_track(t, at);
+        }
+        self.refresh_playback();
+    }
+
+    /// The transport stopped: launched clips stop with it (the tracks stay with the Session).
+    pub(super) fn session_stopped(&mut self) {
+        for p in &mut self.session_play {
+            p.segments.clear();
+        }
+    }
+
+    /// Back to Arrangement (as Live): every track plays its song-view clips again.
+    pub(super) fn back_to_song_view(&mut self) {
+        self.session_play.clear();
+        self.fit_slots();
+        self.refresh_playback();
+        self.status = "Back to the song view's clips".into();
+    }
+
+    /// Whether any track is playing from the Session view instead of the song view.
+    pub(super) fn session_owns_any(&self) -> bool {
+        self.session_play.iter().any(|p| p.owned)
+    }
 }
 
 /// A small play triangle centred on `c`.

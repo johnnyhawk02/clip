@@ -6,18 +6,41 @@ use crate::engine;
 
 /// The song as the live engine plays it: the heard tracks' clips, read straight from their audio
 /// (a re-pitched clip from its original, at the speed the tempo needs), mixed as in Live.
-pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32, click: Option<(f64, u32)>) -> engine::Song {
-    let visible: Vec<&Track> = heard(tracks).collect();
-    let layers: Vec<engine::LayerSrc> = visible
+pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32, click: Option<(f64, u32)>, session: &[TrackPlay]) -> engine::Song {
+    let any_solo = tracks.iter().any(|t| t.solo);
+    let mut open = false;
+    let layers: Vec<engine::LayerSrc> = tracks
         .iter()
-        .map(|t| engine::LayerSrc {
-            gain: t.gain,
-            pan: if t.pan == 0.0 { (1.0, 1.0) } else { effects::pan_gains(t.pan) },
-            clips: t.clips.iter().zip(crossfades(&t.clips)).filter(|(c, _)| c.len > 0 && c.active).map(|(c, cross)| clip_src(c, cross, rate)).collect(),
+        .enumerate()
+        .filter(|(_, t)| if any_solo { t.solo } else { !t.mute })
+        .map(|(i, t)| {
+            let play = session.get(i);
+            // A track playing from the Session view leaves its song-view clips silent, as in Live.
+            let mut clips: Vec<engine::ClipSrc> = if play.is_some_and(|p| p.owned) {
+                Vec::new()
+            } else {
+                t.clips.iter().zip(crossfades(&t.clips)).filter(|(c, _)| c.len > 0 && c.active).map(|(c, cross)| clip_src(c, cross, rate)).collect()
+            };
+            // Launched Session clips: each loops from the moment it was launched until stopped.
+            for &(slot, from, to) in play.map_or(&[][..], |p| &p.segments[..]) {
+                if let Some(Some(c)) = t.slots.get(slot) {
+                    let mut c = c.clone();
+                    c.start = from;
+                    c.len = to.unwrap_or(from + FOREVER).saturating_sub(from).max(1);
+                    open |= to.is_none();
+                    clips.push(clip_src(&c, (0, 0), rate));
+                }
+            }
+            engine::LayerSrc { gain: t.gain, pan: if t.pan == 0.0 { (1.0, 1.0) } else { effects::pan_gains(t.pan) }, clips }
         })
         .collect();
+    // While a Session clip plays on, so does the transport.
+    let end = if open { end.max(1) + FOREVER } else { end };
     engine::Song { layers, end, rate, master, click }
 }
+
+/// How long a launched clip can play on for (about a week of frames).
+const FOREVER: usize = 1 << 35;
 
 fn clip_src(c: &Clip, cross: (usize, usize), rate: u32) -> engine::ClipSrc {
     let (audio, speed, frames) = match c.warp.as_ref().filter(|_| repitch_mode()) {

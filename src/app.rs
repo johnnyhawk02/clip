@@ -46,6 +46,7 @@ use self::files::*;
 use self::look::*;
 use self::automation::Automation;
 use self::autoarrange::{PoolDrag, PoolLoop};
+use self::session::TrackPlay;
 use self::arrange::{LoopGrab, LOOP_H, MAX_TICKS};
 use self::editor::EdRuler;
 
@@ -205,6 +206,10 @@ pub struct App {
     slot_drops: HashMap<PathBuf, (usize, usize)>,
     /// The selected Session slot: (track, scene).
     sel_slot: Option<(usize, usize)>,
+    /// What each track is playing from the Session view.
+    session_play: Vec<TrackPlay>,
+    /// Launch quantization in bars (0 = none), as Live's global quantization.
+    launch_q: f64,
     /// The locator last clicked (Delete removes it, ⌘R renames it).
     selected_locator: Option<usize>,
     /// Dragging this locator along the ruler.
@@ -467,6 +472,8 @@ impl App {
             slot_rects: Vec::new(),
             slot_drops: HashMap::new(),
             sel_slot: None,
+            session_play: Vec::new(),
+            launch_q: 1.0,
             selected_locator: None,
             loc_drag: None,
             loc_rename: None,
@@ -641,7 +648,7 @@ impl App {
             View::Arrangement => {
                 // The song is mixed live as it plays: just hand over what to play.
                 let click = self.metronome.then(|| (self.beat_frames(), self.beats_per_bar));
-                let song = tracks::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain, click);
+                let song = tracks::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain, click, &self.session_play);
                 self.player.set_song(Arc::new(song));
                 self.play_audio = None;
                 return;
@@ -872,6 +879,8 @@ impl App {
             if self.player.is_playing() {
                 self.stopped_at = self.player.position();
                 self.player.stop();
+                self.session_stopped();
+                self.refresh_playback();
                 return;
             }
             let end = self.arrangement_frames();
@@ -934,6 +943,8 @@ impl App {
 
     fn stop(&mut self) {
         self.player.stop();
+        self.session_stopped();
+        self.refresh_playback();
         if self.view == View::Arrangement {
             self.arr_cursor = self.play_origin;
             return;

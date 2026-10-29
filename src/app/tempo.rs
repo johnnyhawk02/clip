@@ -29,6 +29,11 @@ impl App {
             self.arr_loop = self.arr_loop.map(|(a, b)| (sc(a), sc(b)));
             self.time_sel = self.time_sel.map(|((a, b), l)| ((sc(a), sc(b)), l));
             self.arr_cursor = sc(self.arr_cursor);
+            for play in &mut self.session_play {
+                for seg in &mut play.segments {
+                    (seg.1, seg.2) = (sc(seg.1), seg.2.map(sc));
+                }
+            }
             // Same bars in view: the zoom doesn't change, only the time each bar takes.
             self.arr_view_start *= r;
             self.arr_view_len *= r;
