@@ -734,14 +734,53 @@ impl App {
             }
         }
 
-        // Time ruler with "nice" tick spacing (~90 px apart) and minor ticks.
-        let secs_per_px = vl / rate / wave.width() as f64;
+        // Bars and beats, as in the song view, counting 1.1.1 from the start of the clip: bar
+        // lines and numbers, beat and sixteenth ticks as zoom allows.
+        let bar = self.bar_frames();
+        let beat = self.beat_frames();
+        let bar_ruler = matches!(self.view, View::Editor { .. }) && bar > 0.0;
+        if bar_ruler {
+            let mut g = beat / 4.0;
+            while g / spp < 8.0 {
+                g *= 2.0;
+            }
+            let mut label_every = 1u64;
+            while bar * label_every as f64 / spp < 40.0 && label_every < 4096 {
+                label_every *= 2;
+            }
+            let on = |f: f64, unit: f64| {
+                let r = (f / unit).fract();
+                r < 1e-6 || r > 1.0 - 1e-6
+            };
+            let mut k = (vs / g).floor().max(0.0) as i64;
+            loop {
+                let f = k as f64 * g;
+                if f > vs + vl {
+                    break;
+                }
+                let x = frame_to_x(f);
+                if x >= wave.left() {
+                    let (on_bar, on_beat) = (on(f, bar), on(f, beat));
+                    let (h, line) = if on_bar { (9.0, 228) } else if on_beat { (5.0, 240) } else { (3.0, 246) };
+                    painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, MUTED));
+                    painter.line_segment([Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, Color32::from_gray(line)));
+                    let bar_no = (f / bar).round() as u64;
+                    if on_bar && bar_no % label_every == 0 {
+                        painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, (bar_no + 1).to_string(), FontId::proportional(11.0), MUTED);
+                    }
+                }
+                k += 1;
+            }
+        }
+
+        // Otherwise a time ruler with "nice" tick spacing (~90 px apart) and minor ticks.
+        let secs_per_px = if bar_ruler { f64::INFINITY } else { vl / rate / wave.width() as f64 };
         let nice = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0];
         let step = *nice.iter().find(|&&s| s / secs_per_px >= 90.0).unwrap_or(&1200.0);
         let minor = step / 5.0;
         let mut t = (vs / rate / minor).floor() * minor;
         let mut k = (t / minor).round() as i64;
-        while t <= (vs + vl) / rate {
+        while !bar_ruler && t <= (vs + vl) / rate {
             let x = frame_to_x(t * rate);
             if x >= wave.left() {
                 let major = k % 5 == 0;
