@@ -142,17 +142,27 @@ impl Clip {
 
     /// Stretch a warped clip to `tempo`, keeping its place and length in beats.
     pub(super) fn fit_to_tempo(&mut self, tempo: f64) -> bool {
+        if !self.fit_place_to_tempo(tempo) {
+            return false;
+        }
+        let w = self.warp.as_ref().unwrap();
+        let (audio, peaks) = stretched(&w.source, w.bpm / tempo);
+        (self.audio, self.peaks) = (audio, peaks);
+        true
+    }
+
+    /// The cheap half of `fit_to_tempo`: move and size the clip for `tempo` straight away, leaving
+    /// its audio to be stretched (see `stretched`). False if it was already fitted.
+    pub(super) fn fit_place_to_tempo(&mut self, tempo: f64) -> bool {
         let Some(w) = self.warp.as_mut() else { return false };
         if (w.tempo - tempo).abs() < 1e-6 || tempo <= 0.0 {
             return false;
         }
         let r = w.tempo / tempo;
-        let factor = w.bpm / tempo;
-        self.audio = if (factor - 1.0).abs() < 1e-6 { w.source.clone() } else { Arc::new(effects::time_stretch(&w.source, factor)) };
         w.tempo = tempo;
-        self.peaks = Arc::new(Peaks::build(&self.audio));
         let sc = |f: usize| (f as f64 * r).round() as usize;
-        let n = self.audio.frames();
+        // The length the audio will have once stretched.
+        let n = (w.source.frames() as f64 * w.bpm / tempo).round() as usize;
         self.start = sc(self.start);
         self.trim = sc(self.trim).min(n.saturating_sub(1));
         self.len = sc(self.len).max(1);
@@ -167,6 +177,13 @@ impl Clip {
             (g.start, g.end) = (sc(g.start).min(n), sc(g.end).min(n));
         }
         true
+    }
+
+    /// Whether this clip still shows audio stretched for an earlier tempo.
+    pub(super) fn awaiting_stretch(&self) -> Option<(usize, f64)> {
+        let w = self.warp.as_ref()?;
+        let n = (w.source.frames() as f64 * w.bpm / w.tempo).round() as usize;
+        (self.audio.frames().abs_diff(n) > 2).then(|| (Arc::as_ptr(&w.source) as usize, w.bpm / w.tempo))
     }
 
     /// Start warping at clip tempo `bpm`: from now on the clip follows the song tempo.
@@ -241,6 +258,13 @@ pub(super) fn crossfades(clips: &[Clip]) -> Vec<(usize, usize)> {
             (fin, fout)
         })
         .collect()
+}
+
+/// A warped clip's source stretched by `factor` (and its peaks for drawing).
+pub(super) fn stretched(source: &Arc<Audio>, factor: f64) -> (Arc<Audio>, Arc<Peaks>) {
+    let audio = if (factor - 1.0).abs() < 1e-6 { source.clone() } else { Arc::new(effects::time_stretch(source, factor)) };
+    let peaks = Arc::new(Peaks::build(&audio));
+    (audio, peaks)
 }
 
 /// Longest edge fade, as in Live's clip-edge fades.
@@ -669,7 +693,7 @@ impl App {
                     c.start = sc(c.start);
                     changed = true;
                 }
-                changed |= c.fit_to_tempo(tempo);
+                changed |= c.fit_place_to_tempo(tempo);
             }
         }
         if moved {
@@ -677,9 +701,67 @@ impl App {
             self.arr_loop = self.arr_loop.map(|(a, b)| (sc(a), sc(b)));
             self.time_sel = self.time_sel.map(|((a, b), l)| ((sc(a), sc(b)), l));
             self.arr_cursor = sc(self.arr_cursor);
+            // Same bars in view: the zoom doesn't change, only the time each bar takes.
+            self.arr_view_start *= r;
+            self.arr_view_len *= r;
+            self.arr_clamp();
         }
         if changed {
             self.dirty = true;
+            self.stretch_in_background();
+        }
+    }
+
+    /// Stretch warped clips' audio for the current tempo on another thread, so the app doesn't
+    /// stop while it works; `poll_stretch` swaps the results in.
+    fn stretch_in_background(&mut self) {
+        let mut jobs: Vec<(Arc<Audio>, f64)> = Vec::new();
+        for c in self.tracks.iter().flat_map(|t| &t.clips) {
+            if let (Some((key, factor)), Some(w)) = (c.awaiting_stretch(), c.warp.as_ref()) {
+                if !jobs.iter().any(|(s, f)| Arc::as_ptr(s) as usize == key && (f - factor).abs() < 1e-9) {
+                    jobs.push((w.source.clone(), factor));
+                }
+            }
+        }
+        if jobs.is_empty() {
+            self.refresh_playback();
+            return;
+        }
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            for (source, factor) in jobs {
+                let (audio, peaks) = stretched(&source, factor);
+                if tx.send((Arc::as_ptr(&source) as usize, factor, audio, peaks)).is_err() {
+                    return;
+                }
+            }
+        });
+        self.stretching = Some(rx);
+    }
+
+    /// Put stretched audio from `stretch_in_background` into the clips still waiting for it
+    /// (results for a tempo that has since changed again are dropped).
+    pub(super) fn poll_stretch(&mut self) {
+        let Some(rx) = &self.stretching else { return };
+        let mut got = false;
+        loop {
+            match rx.try_recv() {
+                Ok((key, factor, audio, peaks)) => {
+                    for c in self.tracks.iter_mut().flat_map(|t| t.clips.iter_mut()) {
+                        if c.awaiting_stretch().is_some_and(|(k, f)| k == key && (f - factor).abs() < 1e-9) {
+                            (c.audio, c.peaks) = (audio.clone(), peaks.clone());
+                            got = true;
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.stretching = None;
+                    break;
+                }
+            }
+        }
+        if got {
             self.refresh_playback();
         }
     }

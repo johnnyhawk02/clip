@@ -186,6 +186,8 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// Warped clips being re-stretched for a new tempo on another thread.
+    stretching: Option<Receiver<(usize, f64, Arc<Audio>, Arc<Peaks>)>>,
     /// Dragging the tempo box: the tempo so far and pixels not yet turned into a step.
     tempo_drag: Option<(f64, f32)>,
     /// The tempo the clips are laid out for: when the tempo changes, every clip moves to keep
@@ -384,6 +386,7 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            stretching: None,
             tempo_drag: None,
             laid_out_tempo: 120.0,
             phrase_bars: std::fs::read_to_string(phrase_pref()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(4),
@@ -1714,6 +1717,7 @@ impl eframe::App for App {
             ctx.request_repaint();
         }
         self.poll_loading();
+        self.poll_stretch();
         // Warped clips follow the tempo once it's been set (not on every step of a drag).
         if self.view == View::Arrangement && !ui.ctx().input(|i| i.pointer.any_down()) {
             self.refit_warped();

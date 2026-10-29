@@ -49,8 +49,9 @@ impl App {
             std::process::exit(2);
         }
         ctx.request_repaint();
-        // Wait for loading, and for scripted pointer input to play out, before the next step.
-        if self.audio.is_none() || self.loading.is_some() || !self.synth.is_empty() {
+        // Wait for loading, background stretching and scripted pointer input to finish before
+        // the next step.
+        if self.audio.is_none() || self.loading.is_some() || self.stretching.is_some() || !self.synth.is_empty() {
             self.automation = Some(auto);
             return;
         }
