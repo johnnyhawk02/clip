@@ -24,7 +24,9 @@ fn main() -> eframe::Result {
             .with_title("PhotoSound")
             .with_inner_size([1100.0, 560.0])
             .with_min_inner_size([640.0, 320.0])
-            .with_drag_and_drop(true),
+            .with_drag_and_drop(true)
+            // Our own icon, or eframe puts its default one in the Dock while the app runs.
+            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).unwrap_or_default()),
         ..Default::default()
     };
     eframe::run_native(
