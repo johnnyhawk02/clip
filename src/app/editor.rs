@@ -490,7 +490,9 @@ impl App {
             Some(EdRuler::Start(f)) => f as f64,
             _ => 0.0,
         });
-        let on_start = |q: Pos2| q.y >= ruler.bottom() - 14.0 && q.y < ruler.bottom() && (q.x - start_x).abs() < 6.0;
+        // The flag can be grabbed anywhere in the ruler's height, from just left of its line to
+        // past the "1" beside it (it often sits right at the left edge).
+        let on_start = |q: Pos2| q.y >= ruler.top() && q.y < ruler.bottom() && q.x >= start_x - 4.0 && q.x <= start_x + 16.0;
         let on_cue = |q: Pos2| q.y <= ruler.top() + 14.0 && self.cues.iter().any(|c| (x_of(c.frame as f64) - q.x).abs() < 6.0);
         let brace_at = |q: Pos2| -> Option<LoopGrab> {
             let (ls, le) = self.loop_points?;
@@ -1123,11 +1125,11 @@ impl App {
             if x >= wave.left() - 1.0 && x <= wave.right() {
                 let x = x.max(wave.left() + 1.0);
                 painter.add(egui::Shape::convex_polygon(
-                    vec![Pos2::new(x, ruler.bottom() - 13.0), Pos2::new(x + 9.0, ruler.bottom() - 9.0), Pos2::new(x, ruler.bottom() - 5.0)],
+                    vec![Pos2::new(x, ruler.bottom() - 15.0), Pos2::new(x + 12.0, ruler.bottom() - 10.0), Pos2::new(x, ruler.bottom() - 5.0)],
                     INK,
                     Stroke::NONE,
                 ));
-                painter.line_segment([Pos2::new(x, ruler.bottom() - 13.0), Pos2::new(x, wave.bottom())], Stroke::new(1.0, INK));
+                painter.line_segment([Pos2::new(x, ruler.bottom() - 15.0), Pos2::new(x, wave.bottom())], Stroke::new(1.5, INK));
             }
         }
 
