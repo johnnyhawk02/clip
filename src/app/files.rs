@@ -131,6 +131,7 @@ impl App {
                     (c.cues, c.regions, c.loop_points) = (m.cues, m.regions, m.loop_points);
                     self.status = format!("Added {} as a clip", file_name(&path));
                     self.auto_warp(pos);
+                    self.place_over(pos);
                 }
                 Ok(_) => self.status = format!("{} contains no audio", file_name(&path)),
                 Err(e) => self.status = format!("Couldn't open {}: {e}", file_name(&path)),

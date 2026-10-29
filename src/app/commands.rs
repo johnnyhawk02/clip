@@ -182,7 +182,8 @@ impl App {
                 }
                 Action::Paste => {
                     if let Some(c) = self.clipboard.clone() {
-                        self.add_clip("Pasted", Arc::new(c), "Paste Clip");
+                        let p = self.add_clip("Pasted", Arc::new(c), "Paste Clip");
+                        self.place_over(p);
                     }
                     return;
                 }

@@ -917,7 +917,13 @@ impl App {
                 }
             }
         }
-        if resp.drag_stopped() && self.clip_drag.take().is_some() {
+        if let (true, Some(d)) = (resp.drag_stopped(), self.clip_drag.as_ref()) {
+            // Dropped (or trimmed out) over other clips on its layer: it cuts them away there.
+            let p = (d.track, d.clip);
+            self.clip_drag = None;
+            if self.clip(p).is_some() {
+                self.place_over(p);
+            }
             self.dirty = true;
             self.refresh_playback();
         }

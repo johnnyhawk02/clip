@@ -100,7 +100,7 @@ impl App {
     }
 
     /// Clear `[s, e)` on layer `t`, leaving a gap.
-    fn clear_span(&mut self, t: usize, (s, e): Sel) {
+    pub(super) fn clear_span(&mut self, t: usize, (s, e): Sel) {
         self.cut_layer_at(t, s);
         self.cut_layer_at(t, e);
         self.tracks[t].clips.retain(|c| c.start < s || c.end() > e);

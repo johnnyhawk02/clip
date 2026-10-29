@@ -201,8 +201,7 @@ impl App {
         });
         self.status = format!("Added {}", clip.name);
         self.tracks[t].clips.push(clip);
-        self.sel_clip = Some((t, self.tracks[t].clips.len() - 1));
-        self.sel_extra.clear();
+        self.place_over((t, self.tracks[t].clips.len() - 1));
         self.active = t;
         self.dirty = true;
         self.refresh_playback();

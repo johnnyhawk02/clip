@@ -465,6 +465,7 @@ impl App {
         let rate = self.rate();
         let ch = self.tracks.iter().flat_map(|t| t.clips.first()).map(|c| c.audio.num_channels()).next().unwrap_or(2);
         let pos = self.add_clip("New clip", Arc::new(effects::silence(rate, ch, 2.0)), "New Clip");
+        let pos = self.place_over(pos);
         self.edit_clip(pos);
     }
 
@@ -676,6 +677,19 @@ impl App {
         self.status = format!("Ungrouped {}", g.name);
     }
 
+    /// Put clip `(t, ci)` down over what's beneath it on its layer, as Live does: the other clips
+    /// there are cut away where it sits, so clips on a layer never overlap (stacking is what
+    /// layers are for). Returns where the clip ends up, and selects it.
+    pub(super) fn place_over(&mut self, (t, ci): (usize, usize)) -> (usize, usize) {
+        let c = self.tracks[t].clips.remove(ci);
+        self.clear_span(t, (c.start, c.end()));
+        self.tracks[t].clips.push(c);
+        let p = (t, self.tracks[t].clips.len() - 1);
+        self.sel_clip = Some(p);
+        self.sel_extra.clear();
+        p
+    }
+
     /// Duplicate the selected clip, placing the copy right after it (as in Ableton).
     pub(super) fn duplicate_clip(&mut self) {
         self.sel_extra.clear();
@@ -684,7 +698,7 @@ impl App {
         let mut copy = self.tracks[t].clips[c].clone();
         copy.start = copy.end();
         self.tracks[t].clips.push(copy);
-        self.sel_clip = Some((t, self.tracks[t].clips.len() - 1));
+        self.place_over((t, self.tracks[t].clips.len() - 1));
         self.dirty = true;
         self.refresh_playback();
     }
