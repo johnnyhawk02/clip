@@ -92,4 +92,41 @@ impl App {
             }
         }
     }
+
+    /// Delete the selected locator (Delete key).
+    pub(super) fn delete_locator(&mut self) {
+        let Some(i) = self.selected_locator.take().filter(|&i| i < self.locators.len()) else { return };
+        self.push_undo("Delete Locator");
+        self.locators.remove(i);
+        self.dirty = true;
+    }
+
+    /// Control ▸ Rename Locator (⌘R): a small box to type the selected locator's new name.
+    pub(super) fn rename_locator_dialog(&mut self, ctx: &egui::Context) {
+        let Some((i, mut name)) = self.loc_rename.take() else { return };
+        let mut ok = false;
+        let mut cancel = false;
+        let resp = dialog_modal("rename-locator").show(ctx, |ui| {
+            ui.set_width(300.0);
+            dialog_header(ui, "Rename Locator", "");
+            let edit = ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY));
+            edit.request_focus();
+            ok = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let (b_ok, b_cancel) = dialog_buttons(ui, "Rename", !name.trim().is_empty(), |_| {});
+            ok |= b_ok;
+            cancel = b_cancel;
+        });
+        if cancel || resp.should_close() {
+            return;
+        }
+        if ok {
+            if i < self.locators.len() && !name.trim().is_empty() {
+                self.push_undo("Rename Locator");
+                self.locators[i].1 = name.trim().to_string();
+                self.dirty = true;
+            }
+            return;
+        }
+        self.loc_rename = Some((i, name));
+    }
 }

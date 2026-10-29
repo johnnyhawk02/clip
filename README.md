@@ -28,6 +28,15 @@ clips on the layers above to patch over parts of it.
   and the Metronome button in the top bar (or Control ▸ Metronome) clicks along on every beat, higher
   on the first of the bar. It's only heard, never exported.
   Clip ▸ Quantize (⌘U) snaps clip starts to the grid (Slice at Grid moved to ⌥⌘U).
+- More Live editing: ⇧⌥-drag a clip's waveform to slide its audio inside it; Edit ▸ Cut / Copy /
+  Paste Time (⇧⌘X ⇧⌘C ⇧⌘V) work on a stretch of every layer; ⇧⌘J crops clips to a time selection
+  and ⌘J consolidates it into one clip per layer; 0 switches clips off and on (an off clip is
+  silent and the layer below shows through). Arrow keys nudge the selected clips or move the insert
+  marker by the grid, ⇧← ⇧→ grow the selection, ↑ ↓ move the loop by its length (Loop on, nothing
+  selected) or change layer, ⌘↑ ⌘↓ double or halve the loop. Double-click the bar numbers to zoom
+  to the selection (or the whole song); H fits the layers to the height. Drag a locator to move it,
+  click it to select it, Delete removes it and ⌘R renames it. The Clip View has Pitch (semitones,
+  keeping the length) and ×2 / ÷2 for the clip's BPM.
 - Select one clip and it opens in the detail view under the song, as in Live: its waveform with the
   bar ruler, start flag and loop strip, and the Clip View down the left (Warp and the clip's BPM,
   Loop, Reverse, Start and Length in bars.beats.sixteenths, Gain). Click in the waveform to work on

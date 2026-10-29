@@ -194,6 +194,12 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// The locator last clicked (Delete removes it, ⌘R renames it).
+    selected_locator: Option<usize>,
+    /// Dragging this locator along the ruler.
+    loc_drag: Option<usize>,
+    /// The Rename Locator box: which locator and the name being typed.
+    loc_rename: Option<(usize, String)>,
     /// Layers share all the song view's height (H) instead of stopping at their usual size.
     fit_height: bool,
     /// Edit ▸ Copy / Cut Time: a stretch of every layer (length, each layer's pieces from 0).
@@ -434,6 +440,9 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            selected_locator: None,
+            loc_drag: None,
+            loc_rename: None,
             fit_height: false,
             time_clip: None,
             synth_mods: Modifiers::NONE,
@@ -1108,7 +1117,7 @@ impl eframe::App for App {
         let title = if self.tracks.is_empty() { "PhotoSound".into() } else { format!("{name}{} — PhotoSound", if self.dirty { " (edited)" } else { "" }) };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        let modal_open = self.pending.is_some() || self.dialog.is_some() || self.curve.is_some();
+        let modal_open = self.pending.is_some() || self.dialog.is_some() || self.curve.is_some() || self.loc_rename.is_some() || self.prefs_open.is_some();
         for a in self.menu.poll() {
             if !modal_open {
                 self.run(a, &ctx);
@@ -1229,6 +1238,7 @@ impl eframe::App for App {
             self.batch_window(&ctx);
         }
         self.prefs_dialog(&ctx);
+        self.rename_locator_dialog(&ctx);
 
         // Highlight when a file is dragged over the window.
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {

@@ -726,15 +726,38 @@ impl App {
         let bar = self.bar_frames();
         let to_bar = |f: f64| ((f / bar).round().max(0.0) * bar) as usize;
         let bar_n = bar.round() as usize;
+        let in_loc_row = |q: Pos2| q.y >= ruler.top() + LOOP_H && q.y < ruler.top() + LOOP_H + LOC_H;
         if resp.drag_started() && ruler_drag {
             let q = press.unwrap();
             let f = x_to_f(q.x, vs, vl);
-            if !in_loop_strip(q) {
+            let loc = in_loc_row(q).then(|| self.locator_at(q.x, &|f| a.f_to_x(f, vs, vl))).flatten();
+            if let Some(i) = loc {
+                // Drag a locator along the ruler.
+                self.push_undo("Move Locator");
+                self.loc_drag = Some(i);
+                self.selected_locator = Some(i);
+            } else if !in_loop_strip(q) {
                 self.ruler_zoom = Some((f, q.y, vl));
             } else if let (Some(g), Some(range)) = (brace_at(q), self.arr_loop) {
                 self.arr_loop_grab = Some((f, range, g));
             } else {
                 self.arr_loop_drag = Some(to_bar(f));
+            }
+        }
+        if let (Some(i), true, Some(q)) = (self.loc_drag, resp.dragged(), resp.interact_pointer_pos()) {
+            let f = x_to_f(q.x, vs, vl);
+            let f = if ui.input(|i| i.modifiers.command) { f } else { self.snap_to_grid(f, spp) };
+            if let Some(l) = self.locators.get_mut(i) {
+                l.0 = f.max(0.0) as usize;
+                self.dirty = true;
+            }
+        }
+        if resp.drag_stopped() {
+            if let Some(i) = self.loc_drag.take() {
+                // Back in time order, keeping it selected.
+                let moved = self.locators.get(i).cloned();
+                self.locators.sort_by_key(|l| l.0);
+                self.selected_locator = moved.and_then(|m| self.locators.iter().position(|l| *l == m));
             }
         }
         if let (Some((anchor, y0, len0)), true, Some(q)) = (self.ruler_zoom, resp.dragged(), resp.interact_pointer_pos()) {
@@ -1029,12 +1052,14 @@ impl App {
                         self.active = t;
                     }
                     None if q.y < lanes.top() && self.locator_at(q.x, &|f| a.f_to_x(f, vs, vl)).is_some() => {
-                        // A click on a locator jumps there.
+                        // A click on a locator jumps there and selects it (Delete, ⌘R).
                         let i = self.locator_at(q.x, &|f| a.f_to_x(f, vs, vl)).unwrap();
                         self.go_to_frame(self.locators[i].0);
+                        self.selected_locator = Some(i);
                     }
                     None => {
                         // Clicking empty space moves the playhead (and picks that track).
+                        self.selected_locator = None;
                         self.sel_clip = None;
                         self.sel_extra.clear();
                         let f = x_to_f(q.x, vs, vl);
@@ -1391,13 +1416,14 @@ impl App {
             }
         }
         // Locators: a flag in the ruler with its name, and a faint line down through the song.
-        for (f, name) in &self.locators {
+        for (li, (f, name)) in self.locators.iter().enumerate() {
             let x = f_to_x(*f as f64, vs, vl);
+            let flag = if self.selected_locator == Some(li) { INK } else { Color32::from_rgb(40, 150, 180) };
             if x < lanes.left() - 1.0 || x > lanes.right() {
                 continue;
             }
             let top = ruler.top() + LOOP_H + 1.0;
-            painter.add(egui::Shape::convex_polygon(vec![Pos2::new(x, top), Pos2::new(x + 8.0, top + 5.0), Pos2::new(x, top + 10.0)], Color32::from_rgb(40, 150, 180), Stroke::NONE));
+            painter.add(egui::Shape::convex_polygon(vec![Pos2::new(x, top), Pos2::new(x + 8.0, top + 5.0), Pos2::new(x, top + 10.0)], flag, Stroke::NONE));
             let label = painter.layout_no_wrap(name.clone(), FontId::proportional(10.5), INK);
             let bg = Rect::from_min_size(Pos2::new(x + 9.0, top), label.size() + Vec2::new(4.0, 0.0));
             painter.rect_filled(bg, 2.0, PANEL);

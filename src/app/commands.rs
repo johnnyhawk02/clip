@@ -15,10 +15,11 @@ impl App {
                 Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed | Action::Follow | Action::Metronome | Action::DockPalette => true,
                 Action::Continue | Action::AddLocator => doc,
                 Action::PrevLocator | Action::NextLocator => !self.locators.is_empty(),
+                Action::RenameLocator => self.selected_locator.is_some(),
                 Action::Quantize | Action::ClipOnOff => has_clip,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
                 Action::Export | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
-                Action::Delete => has_clip || self.time_sel.is_some(),
+                Action::Delete => has_clip || self.time_sel.is_some() || self.selected_locator.is_some(),
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy => has_clip,
                 Action::SplitClip => doc,
                 Action::ToolSelect | Action::ToolSplit => true,
@@ -67,7 +68,7 @@ impl App {
             Action::AutoWarp => return true,
             Action::AutoArrange | Action::PrevVariation | Action::NextVariation | Action::SwapSection | Action::AddToPool => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
-            Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown | Action::DuplicateTime | Action::DeleteTime | Action::InsertTime | Action::CopyTime | Action::CutTime | Action::PasteTime | Action::AddLocator | Action::PrevLocator | Action::NextLocator => return false,
+            Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown | Action::DuplicateTime | Action::DeleteTime | Action::InsertTime | Action::CopyTime | Action::CutTime | Action::PasteTime | Action::AddLocator | Action::RenameLocator | Action::PrevLocator | Action::NextLocator => return false,
             _ => {}
         }
         let has = self.audio.is_some();
@@ -176,6 +177,7 @@ impl App {
             let mid = self.arr_view_start + self.arr_view_len / 2.0;
             match a {
                 Action::Delete if self.time_sel.is_some() => return self.delete_time_sel(),
+                Action::Delete if self.sel_clip.is_none() && self.selected_locator.is_some() => return self.delete_locator(),
                 Action::Delete => return self.delete_clip(),
                 Action::Copy | Action::Cut => {
                     if let Some(c) = self.sel_clip.and_then(|p| self.clip(p)) {
@@ -491,6 +493,7 @@ impl App {
             Action::Quantize => self.quantize(),
             Action::ClipOnOff => self.toggle_clips_on(),
             Action::AddLocator => self.add_locator(self.arr_cursor),
+            Action::RenameLocator => self.loc_rename = self.selected_locator.and_then(|i| self.locators.get(i).map(|l| (i, l.1.clone()))),
             Action::PrevLocator => self.jump_locator(false),
             Action::NextLocator => self.jump_locator(true),
             Action::Continue => self.continue_play(),
