@@ -459,7 +459,8 @@ impl App {
                     // Tempo and beats per bar are undoable: one step per drag or typed value.
                     let (mut tempo, mut bpb) = (self.tempo, self.beats_per_bar);
                     // Drag up or down: 1 BPM per step, 0.20 with Shift. Click to type a value.
-                    let t = ui.add(egui::DragValue::new(&mut tempo).range(20.0..=400.0).speed(0.0).fixed_decimals(2).suffix(" BPM"))
+                    // A fixed width, so the box doesn't change size as the digits change.
+                    let t = ui.add_sized([104.0, ui.spacing().interact_size.y], egui::DragValue::new(&mut tempo).range(20.0..=400.0).speed(0.0).fixed_decimals(2).suffix(" BPM"))
                         .on_hover_text("Song tempo — drag up or down (⇧ for fine steps), or click to type");
                     if t.hovered() || t.dragged() {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
