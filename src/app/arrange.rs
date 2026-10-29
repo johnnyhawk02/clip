@@ -8,12 +8,12 @@ const MASTER_H: f32 = 40.0;
 
 /// Where the parts of the arrangement view sit this frame.
 #[derive(Clone, Copy)]
-struct ArrArea {
-    full: Rect,
-    ruler: Rect,
-    lanes: Rect,
-    scroll: Rect,
-    lane_h: f32,
+pub(super) struct ArrArea {
+    pub(super) full: Rect,
+    pub(super) ruler: Rect,
+    pub(super) lanes: Rect,
+    pub(super) scroll: Rect,
+    pub(super) lane_h: f32,
 }
 
 impl ArrArea {
@@ -21,7 +21,7 @@ impl ArrArea {
         Rect::from_min_size(Pos2::new(self.lanes.left(), self.lanes.top() + i as f32 * self.lane_h), Vec2::new(self.lanes.width(), self.lane_h))
     }
 
-    fn x_to_f(&self, x: f32, vs: f64, vl: f64) -> f64 {
+    pub(super) fn x_to_f(&self, x: f32, vs: f64, vl: f64) -> f64 {
         (vs + ((x - self.lanes.left()) / self.lanes.width()) as f64 * vl).max(0.0)
     }
 
@@ -402,7 +402,7 @@ impl App {
     }
 
     /// Snap a timeline position to the grid (when snapping is on).
-    fn snap_to_grid(&self, f: f64, spp: f64) -> f64 {
+    pub(super) fn snap_to_grid(&self, f: f64, spp: f64) -> f64 {
         match (self.snap, self.grid_frames(spp)) {
             (true, Some(g)) => ((f / g).round() * g).max(0.0),
             _ => f,
@@ -960,76 +960,10 @@ impl App {
         }
     }
 
-    /// Begin dragging out a time selection from window point `q` (snapped to the grid unless ⌘).
-    fn start_time_sel(&mut self, q: Pos2, a: &ArrArea, vs: f64, vl: f64, spp: f64, free: bool) {
-        let f = a.x_to_f(q.x, vs, vl);
-        let f = if free { f } else { self.snap_to_grid(f, spp) } as usize;
-        let t = (((q.y - a.lanes.top()) / a.lane_h).max(0.0) as usize).min(self.tracks.len().saturating_sub(1));
-        self.time_drag = Some((f, t));
-        self.time_sel = None;
-        self.sel_clip = None;
-        self.sel_extra.clear();
-    }
 
-    /// Cut the clips on the selected layers at both ends of the time selection.
-    fn cut_at_time_sel(&mut self) -> Option<(Sel, (usize, usize))> {
-        let ((s, e), (t0, t1)) = self.time_sel?;
-        for t in t0..=t1.min(self.tracks.len().saturating_sub(1)) {
-            for at in [s, e] {
-                if let Some(c) = self.tracks[t].clips.iter().position(|c| at > c.start && at < c.end()) {
-                    self.split_raw((t, c), at);
-                }
-            }
-        }
-        Some(((s, e), (t0, t1)))
-    }
 
-    /// Run clip process `a` on just the stretch inside the time selection: the clips there are
-    /// cut at its ends and selected, `a` runs on them, and the selection stays (one undo step).
-    pub(super) fn run_on_time_sel(&mut self, a: Action, ctx: &egui::Context) {
-        let before = self.undo.len();
-        self.push_undo("Process Selection");
-        let Some(((s, e), (t0, t1))) = self.cut_at_time_sel() else { return };
-        let inside: Vec<(usize, usize)> = (t0..=t1.min(self.tracks.len().saturating_sub(1)))
-            .flat_map(|t| self.tracks[t].clips.iter().enumerate().filter(|(_, c)| c.start >= s && c.end() <= e).map(move |(i, _)| (t, i)).collect::<Vec<_>>())
-            .collect();
-        self.sel_clip = inside.first().copied();
-        self.sel_extra = inside.iter().skip(1).copied().collect();
-        let keep = self.time_sel.take();
-        self.run(a, ctx);
-        self.time_sel = keep;
-        // Fold the process's own undo step into ours, so ⌘Z undoes the cuts too.
-        if self.undo.len() == before + 2 {
-            let top = self.undo.pop().unwrap();
-            if let Some(first) = self.undo.last_mut() {
-                first.label = top.label;
-            }
-        }
-        self.refresh_playback();
-    }
 
-    /// ⌘E with a time selection: split the clips it covers at its ends.
-    pub(super) fn split_time_sel(&mut self) {
-        self.push_undo("Split");
-        self.cut_at_time_sel();
-        self.dirty = true;
-        self.refresh_playback();
-        self.status = "Split at the selection's ends — ⌘Z to undo".into();
-    }
 
-    /// ⌫ with a time selection: remove that stretch from the selected layers, leaving a gap.
-    pub(super) fn delete_time_sel(&mut self) {
-        self.push_undo("Delete Time");
-        let Some(((s, e), (t0, t1))) = self.cut_at_time_sel() else { return };
-        for t in t0..=t1.min(self.tracks.len().saturating_sub(1)) {
-            self.tracks[t].clips.retain(|c| c.start < s || c.end() > e);
-        }
-        self.sel_clip = None;
-        self.sel_extra.clear();
-        self.dirty = true;
-        self.refresh_playback();
-        self.status = "Deleted the selected time — ⌘Z to undo".into();
-    }
 
     /// The master channel: the whole mix's volume and level, and the headphone crossfeed switch.
     fn master_strip(&mut self, ui: &mut egui::Ui, r: Rect, header_w: f32) {

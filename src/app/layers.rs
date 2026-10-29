@@ -206,6 +206,113 @@ pub(super) fn flatten(layers: &[Layer], rate: u32) -> Audio {
     Audio { rate, channels: out }
 }
 
+impl App {
+    pub(super) fn set_active(&mut self, i: usize) {
+        if i < self.tracks.len() {
+            self.active = i;
+        }
+    }
+
+    pub(super) fn add_track(&mut self, track: Track, label: &'static str) {
+        self.push_undo(label);
+        let at = (self.active + 1).min(self.tracks.len());
+        self.tracks.insert(at, track);
+        self.active = at;
+        self.dirty = true;
+        self.refresh_playback();
+    }
+
+    pub(super) fn new_track(&mut self) {
+        let n = (1..).find(|i| !self.tracks.iter().any(|t| t.name == format!("Track {i}"))).unwrap();
+        self.add_track(Track::new(format!("Track {n}")), "New Track");
+        self.status = "New empty track — paste, record or import clips into it".into();
+    }
+
+    pub(super) fn duplicate_track(&mut self) {
+        let Some(t) = self.tracks.get(self.active) else { return };
+        let mut t = t.clone();
+        t.name = format!("{} copy", t.name);
+        t.solo = false;
+        self.add_track(t, "Duplicate Track");
+    }
+
+    pub(super) fn delete_track(&mut self) {
+        if self.tracks.len() < 2 {
+            return;
+        }
+        self.push_undo("Delete Track");
+        self.tracks.remove(self.active);
+        self.active = self.active.min(self.tracks.len() - 1);
+        self.sel_clip = None;
+        self.dirty = true;
+        self.refresh_playback();
+    }
+
+    /// Move the active layer above or below its neighbour, changing which one is heard.
+    pub(super) fn move_layer(&mut self, up: bool) {
+        let a = self.active;
+        let Some(b) = (if up { a.checked_sub(1) } else { Some(a + 1) }).filter(|&b| b < self.tracks.len()) else { return };
+        self.push_undo(if up { "Move Layer Up" } else { "Move Layer Down" });
+        self.tracks.swap(a, b);
+        let swap = |t: usize| if t == a { b } else if t == b { a } else { t };
+        self.sel_clip = self.sel_clip.map(|(t, c)| (swap(t), c));
+        self.sel_extra = self.sel_extra.iter().map(|&(t, c)| (swap(t), c)).collect();
+        self.active = b;
+        self.dirty = true;
+        self.refresh_playback();
+    }
+
+    /// Merge Down needs a layer below, and both layers showing.
+    pub(super) fn can_merge_down(&self) -> bool {
+        let a = self.active;
+        a + 1 < self.tracks.len() && !self.tracks[a].mute && !self.tracks[a + 1].mute
+    }
+
+    /// Merge the active layer into the one below: one layer of clips that sounds like the two
+    /// did, each clip cut down to what was heard. The lower layer's name and settings stay.
+    pub(super) fn merge_down(&mut self) {
+        if !self.can_merge_down() {
+            return;
+        }
+        let a = self.active;
+        self.push_undo("Merge Down");
+        let (top, low) = (self.tracks[a].clone(), self.tracks[a + 1].clone());
+        let gains_differ = (top.gain - low.gain).abs() > 0.001;
+        let fade = layers::switch_fade(self.rate());
+        let flat = layers::flatten_clips(&[top, low.clone()], fade, (fade / 5).max(1));
+        let mut merged = low;
+        merged.clips = flat.clips;
+        self.tracks[a + 1] = merged;
+        self.tracks.remove(a);
+        self.active = a;
+        self.sel_clip = None;
+        self.sel_extra.clear();
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = if gains_differ {
+            "Merged down. The two layers had different volumes; the merged one keeps the lower layer's".into()
+        } else {
+            "Merged down — ⌘Z to undo".into()
+        };
+    }
+
+    pub(super) fn mix_down(&mut self) {
+        if self.tracks.len() < 2 {
+            return;
+        }
+        let mix = Arc::new(self.mixdown());
+        self.push_undo("Mix Down");
+        let mut t = Track::new("Mix");
+        t.clips.push(Clip::new("Mix", mix, 0));
+        self.tracks = vec![t];
+        self.active = 0;
+        self.sel_clip = Some((0, 0));
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = "Mixed all tracks into one — ⌘Z to undo".into();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
