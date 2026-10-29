@@ -339,6 +339,9 @@ impl App {
 
     pub(super) fn arr_clamp(&mut self) {
         let n = (self.arrangement_frames() as f64 * 1.5).max(self.rate() as f64 * 30.0);
+        if !self.arr_view_len.is_finite() || !self.arr_view_start.is_finite() {
+            (self.arr_view_start, self.arr_view_len) = (0.0, n);
+        }
         self.arr_view_len = self.arr_view_len.clamp(32.0, n);
         self.arr_view_start = self.arr_view_start.clamp(0.0, (n - self.arr_view_len).max(0.0));
     }
@@ -1044,9 +1047,9 @@ impl App {
                 label_every *= 2;
             }
             let mut k = (vs / g).floor() as i64;
-            loop {
+            for _ in 0..MAX_TICKS {
                 let f = k as f64 * g;
-                if f > vs + vl {
+                if !(f <= vs + vl) {
                     break;
                 }
                 let x = f_to_x(f, vs, vl);
@@ -1069,7 +1072,7 @@ impl App {
         let step = *nice.iter().find(|&&s| s / secs_per_px >= 90.0).unwrap_or(&1200.0);
         let minor = step / 5.0;
         let mut k = (vs / rate / minor).floor() as i64;
-        loop {
+        for _ in 0..MAX_TICKS {
             let t = k as f64 * minor;
             if t > (vs + vl) / rate || !secs_per_px.is_finite() {
                 break;
@@ -1151,7 +1154,10 @@ impl App {
             let every = self.bar_frames() * self.phrase_bars as f64;
             if every / spp > 6.0 {
                 let mut k = (vs / every).ceil() as i64;
-                while (k as f64 * every) <= vs + vl {
+                for _ in 0..MAX_TICKS {
+                    if !(k as f64 * every <= vs + vl) {
+                        break;
+                    }
                     let x = f_to_x(k as f64 * every, vs, vl);
                     if x >= lanes.left() {
                         painter.line_segment([Pos2::new(x, lanes.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.0, Color32::from_black_alpha(70)));
@@ -1185,6 +1191,10 @@ impl App {
 
 /// Height of the loop strip along the top of the arrangement ruler.
 pub(super) const LOOP_H: f32 = 13.0;
+
+/// Most ticks or lines a ruler draws in one frame. Normally a few hundred at most; the cap means a
+/// bad view value (not a number, say) can never keep a drawing loop going forever.
+pub(super) const MAX_TICKS: usize = 5000;
 
 /// Which part of the arrangement's loop brace is being dragged.
 #[derive(Clone, Copy, PartialEq)]

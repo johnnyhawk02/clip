@@ -930,7 +930,7 @@ impl App {
         let bar_ruler = matches!(self.view, View::Editor { .. }) && bar > 0.0;
         if bar_ruler {
             let mut g = beat / 4.0;
-            while g / spp < 8.0 {
+            while g > 0.0 && g / spp < 8.0 {
                 g *= 2.0;
             }
             let mut label_every = 1u64;
@@ -942,9 +942,9 @@ impl App {
                 r < 1e-6 || r > 1.0 - 1e-6
             };
             let mut k = (vs / g).floor().max(0.0) as i64;
-            loop {
+            for _ in 0..MAX_TICKS {
                 let f = k as f64 * g;
-                if f > vs + vl {
+                if !(f <= vs + vl) {
                     break;
                 }
                 let x = frame_to_x(f);
@@ -969,7 +969,10 @@ impl App {
         let minor = step / 5.0;
         let mut t = (vs / rate / minor).floor() * minor;
         let mut k = (t / minor).round() as i64;
-        while !bar_ruler && t <= (vs + vl) / rate {
+        for _ in 0..if bar_ruler { 0 } else { MAX_TICKS } {
+            if !(t <= (vs + vl) / rate) {
+                break;
+            }
             let x = frame_to_x(t * rate);
             if x >= wave.left() {
                 let major = k % 5 == 0;

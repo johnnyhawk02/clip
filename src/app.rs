@@ -38,7 +38,7 @@ use self::files::*;
 use self::look::*;
 use self::automation::Automation;
 use self::autoarrange::{PoolDrag, PoolLoop};
-use self::arrange::{LoopGrab, LOOP_H};
+use self::arrange::{LoopGrab, LOOP_H, MAX_TICKS};
 use self::editor::EdRuler;
 
 type Sel = (usize, usize);
@@ -1028,6 +1028,10 @@ impl App {
 
     fn clamp_view(&mut self) {
         let n = self.timeline_frames().max(1) as f64;
+        // A view that isn't a number (a zoom gone wrong) shows the whole sound instead.
+        if !self.view_len.is_finite() || !self.view_start.is_finite() {
+            (self.view_start, self.view_len) = (0.0, n);
+        }
         self.view_len = self.view_len.clamp(32f64.min(n), n);
         self.view_start = self.view_start.clamp(0.0, (n - self.view_len).max(0.0));
     }
