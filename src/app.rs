@@ -38,6 +38,7 @@ use self::files::*;
 use self::look::*;
 use self::automation::Automation;
 use self::autoarrange::{PoolDrag, PoolLoop};
+use self::arrange::LoopGrab;
 
 type Sel = (usize, usize);
 
@@ -175,6 +176,9 @@ pub struct App {
     /// The arrangement's loop range (played round when Loop is on), and a ruler drag setting it.
     arr_loop: Option<Sel>,
     arr_loop_drag: Option<usize>,
+    /// Dragging the loop brace: where it was grabbed (frames), the range then, and which part
+    /// (the whole brace moves, an end resizes).
+    arr_loop_grab: Option<(f64, Sel, LoopGrab)>,
     /// Which track a right-click on empty lane space is for (None: the clip menu).
     ctx_menu_track: Option<usize>,
     grid: usize,
@@ -347,6 +351,7 @@ impl App {
             beats_per_bar: 4,
             arr_loop: None,
             arr_loop_drag: None,
+            arr_loop_grab: None,
             ctx_menu_track: None,
             grid: 1,
             snap: true,

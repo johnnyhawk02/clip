@@ -567,9 +567,47 @@ impl App {
 
         let press = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos());
         let split_tool = self.tool == Tool::Split;
-        // Dragging in the ruler draws the arrangement's loop range (and turns Loop on).
+        // Dragging in the ruler draws the arrangement's loop range (and turns Loop on). Grabbing
+        // the brace itself moves the whole loop, or one end of it near the ends.
         let ruler_drag = press.is_some_and(|q| q.y < ruler.bottom());
+        let brace_at = |q: Pos2| -> Option<LoopGrab> {
+            let (ls, le) = self.arr_loop?;
+            let (x0, x1) = (a.f_to_x(ls as f64, vs, vl), a.f_to_x(le as f64, vs, vl));
+            if q.y > ruler.top() + 12.0 || q.x < x0 - 4.0 || q.x > x1 + 4.0 {
+                return None;
+            }
+            let edge = 6.0f32.min((x1 - x0) / 3.0);
+            Some(if q.x < x0 + edge { LoopGrab::Start } else if q.x > x1 - edge { LoopGrab::End } else { LoopGrab::Move })
+        };
+        if let Some(g) = ui.input(|i| i.pointer.hover_pos()).filter(|_| self.clip_drag.is_none()).and_then(|q| brace_at(q)).or(self.arr_loop_grab.map(|g| g.2)) {
+            ui.ctx().set_cursor_icon(if g == LoopGrab::Move { egui::CursorIcon::Grab } else { egui::CursorIcon::ResizeHorizontal });
+        }
         if resp.drag_started() && ruler_drag {
+            if let (Some(g), Some(range)) = (brace_at(press.unwrap()), self.arr_loop) {
+                self.arr_loop_grab = Some((x_to_f(press.unwrap().x, vs, vl), range, g));
+            }
+        }
+        if let (Some((at, (ls, le), g)), true, Some(q)) = (self.arr_loop_grab, resp.dragged(), resp.interact_pointer_pos()) {
+            let d = x_to_f(q.x, vs, vl) - at;
+            let moved = |f: usize| self.snap_to_grid((f as f64 + d).max(0.0), spp) as usize;
+            let range = match g {
+                LoopGrab::Move => {
+                    let s = moved(ls);
+                    (s, s + (le - ls))
+                }
+                LoopGrab::Start => (moved(ls).min(le.saturating_sub(1)), le),
+                LoopGrab::End => (ls, moved(le).max(ls + 1)),
+            };
+            self.arr_loop = Some(range);
+        }
+        if resp.drag_stopped() && self.arr_loop_grab.take().is_some() {
+            self.dirty = true;
+            if self.player.is_playing() {
+                self.toggle_play();
+                self.toggle_play();
+            }
+        }
+        if resp.drag_started() && ruler_drag && self.arr_loop_grab.is_none() {
             let f = x_to_f(press.unwrap().x, vs, vl);
             self.arr_loop_drag = Some(self.snap_to_grid(f, spp) as usize);
         }
@@ -1089,4 +1127,12 @@ impl App {
             painter.text(Pos2::new(lanes.right() - 6.0, ruler.top() + 2.0), Align2::RIGHT_TOP, text, FontId::monospace(11.0), MUTED);
         }
     }
+}
+
+/// Which part of the arrangement's loop brace is being dragged.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum LoopGrab {
+    Move,
+    Start,
+    End,
 }
