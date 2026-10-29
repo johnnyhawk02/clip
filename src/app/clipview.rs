@@ -40,6 +40,9 @@ impl App {
                             let resp = ui.add_sized([86.0, ui.spacing().interact_size.y], egui::DragValue::new(b).range(20.0..=400.0).speed(0.05).fixed_decimals(2).suffix(" BPM"));
                             active |= resp.dragged() || resp.has_focus();
                             bpm_set = resp.changed();
+                            if resp.hovered() || resp.dragged() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                            }
                             resp.on_hover_text("The clip's own tempo");
                         }
                 });
@@ -73,6 +76,10 @@ impl App {
                                 egui::DragValue::new(value).speed(0.05).range(0.0..=100_000.0).custom_formatter(move |v, _| fmt(v, is_pos)).custom_parser(move |s| parse(s, is_pos)),
                             );
                             active |= resp.dragged() || resp.has_focus();
+                            // Number boxes drag up and down, as in Live.
+                            if resp.hovered() || resp.dragged() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                            }
                             if resp.changed() {
                                 if is_pos { start_set = true } else { length_set = true }
                             }

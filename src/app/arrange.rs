@@ -546,6 +546,10 @@ impl App {
                         self.tempo_drag = None;
                     }
                     let b = ui.add(egui::DragValue::new(&mut bpb).range(1..=16).suffix(" / 4")).on_hover_text("Beats per bar");
+                    // Number boxes drag up and down, as in Live.
+                    if b.hovered() || b.dragged() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                    }
                     if tempo != self.tempo || bpb != self.beats_per_bar {
                         if !self.song_edit {
                             self.push_undo(if tempo != self.tempo { "Change Tempo" } else { "Change Time Signature" });
@@ -711,6 +715,9 @@ impl App {
             let hover = ui.input(|i| i.pointer.hover_pos()).filter(|q| ruler.contains(*q));
             if let Some(g) = hover.and_then(|q| brace_at(q)).or(self.arr_loop_grab.map(|g| g.2)) {
                 ui.ctx().set_cursor_icon(if g == LoopGrab::Move { egui::CursorIcon::Grab } else { egui::CursorIcon::ResizeHorizontal });
+            } else if self.ruler_zoom.is_none() && hover.is_some_and(|q| q.y < ruler.top() + LOOP_H + LOC_H && self.locator_at(q.x, &|f| a.f_to_x(f, vs, vl)).is_some()) {
+                // A locator: click to jump there.
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             } else if self.ruler_zoom.is_some() || hover.is_some_and(|q| !in_loop_strip(q)) {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
             }
