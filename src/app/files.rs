@@ -47,7 +47,7 @@ impl App {
     pub(super) fn open_dialog(&mut self, ctx: &egui::Context) {
         let picked = rfd::FileDialog::new()
             .add_filter(
-                "PhotoSound projects and audio",
+                "Clip projects and audio",
                 &["sndproj", "wav", "mp3", "flac", "ogg", "oga", "m4a", "mp4", "aac", "aif", "aiff", "caf", "mkv", "webm"],
             )
             .add_filter("All files", &["*"])
@@ -237,7 +237,7 @@ impl App {
                     .and_then(|p| p.file_stem())
                     .map(|s| s.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "Untitled".into());
-                let mut d = rfd::FileDialog::new().add_filter("PhotoSound project", &["sndproj"]).set_file_name(format!("{stem}.sndproj"));
+                let mut d = rfd::FileDialog::new().add_filter("Clip project", &["sndproj"]).set_file_name(format!("{stem}.sndproj"));
                 if let Some(dir) = self.project_path.as_ref().or(self.path.as_ref()).and_then(|p| p.parent()) {
                     d = d.set_directory(dir);
                 }

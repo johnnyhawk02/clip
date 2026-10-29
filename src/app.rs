@@ -1166,7 +1166,7 @@ impl eframe::App for App {
         }
 
         let name = self.path.as_deref().map(file_name).unwrap_or_else(|| "Untitled".into());
-        let title = if self.tracks.is_empty() { "PhotoSound".into() } else { format!("{name}{} — PhotoSound", if self.dirty { " (edited)" } else { "" }) };
+        let title = if self.tracks.is_empty() { "Clip".into() } else { format!("{name}{} — Clip", if self.dirty { " (edited)" } else { "" }) };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
         let modal_open = self.pending.is_some() || self.dialog.is_some() || self.curve.is_some() || self.loc_rename.is_some() || self.prefs_open.is_some();

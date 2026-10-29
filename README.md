@@ -1,8 +1,8 @@
-# PhotoSound
+# Clip
 
 A desktop audio editor written in Rust (egui + symphonia + cpal + hound), built for one job:
-chopping up loops, keeping the good bits and editing them into a track. (It was called Sound Edit
-until October 2026.)
+chopping up loops, keeping the good bits and editing them into a track. (It was called Sound Edit, then
+PhotoSound, until October 2026.)
 
 ## Tracks, as in Live
 
@@ -36,7 +36,7 @@ Solo, a volume slider, a colour and pan; solo wins over mute.
 - Recording puts the take on the selected track at the insert marker. Tracks ▸ Mix Down to One
   Track mixes everything into one clip.
 
-**Guide:** https://johnnyhawk02.github.io/photosound/
+**Guide:** https://johnnyhawk02.github.io/clip/
 
 ## Session view, as in Live
 
@@ -86,8 +86,8 @@ track, a row per scene (8 to start; + Scene adds more). It holds audio loops onl
 
 ## Run it
 
-- **App:** open `/Applications/PhotoSound.app` (or Spotlight "PhotoSound").
-  A fresh copy is built at `target/release/bundle/osx/PhotoSound.app` (`scripts/install.sh` installs it).
+- **App:** open `/Applications/Clip.app` (or Spotlight "Clip").
+  A fresh copy is built at `target/release/bundle/osx/Clip.app` (`scripts/install.sh` installs it).
 - **Terminal:** `cargo run --release -- path/to/file.wav`
 
 Open a file by dragging it onto the window, with **Open…** (⌘O), or as a command-line argument.
@@ -99,7 +99,7 @@ Try the files in `samples/`.
 **Projects:** File ▸ Save Project (⌘S) / Save Project As (⇧⌘S) saves everything — tracks,
 clips, groups, cues, regions, loops, mixer settings and the audio itself — in one `.sndproj`
 file. Open it again by double-clicking it in Finder, with File ▸ Open, or by dropping it on the
-window. (Audio files can be opened from Finder with Open With ▸ PhotoSound too.) Export (⇧⌘R) writes
+window. (Audio files can be opened from Finder with Open With ▸ Clip too.) Export (⇧⌘R) writes
 what you hear as a WAV/AIFF. The unsaved-changes prompt offers to save the project. When you open the app on its own, it reopens the last project you opened or saved.
 
 **Arrangement and clips (like Ableton's Arrangement view).** A sound is a stack of tracks,
@@ -163,7 +163,7 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   "Bpm130_Drums") is stretched to the song tempo when it's dropped in or imported, keeping its
   pitch. A bar count in the name gives the exact tempo. Change the song tempo and warped clips
   re-fit, staying on their beats: by default they re-pitch like a record (speed and pitch move
-  together, as Live's Re-Pitch), or PhotoSound ▸ Preferences ▸ Keep pitch stretches them instead; unwarped clips move to stay on their bar too (playing at their own
+  together, as Live's Re-Pitch), or Clip ▸ Preferences (the app menu) ▸ Keep pitch stretches them instead; unwarped clips move to stay on their bar too (playing at their own
   speed), and the loop and playhead follow. Opening such a file sets the song tempo from it. Clip ▸ Warp to
   Tempo switches warping on or off for the selected clips (clips with no tempo in the name are
   taken as the whole-bar loop closest to the song tempo); Clip ▸ Warp Loops on Import turns the
@@ -177,7 +177,7 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   speed. Groups come across as their rendered audio. The set is built from Live's own default set
   (`assets/ableton_template.xml`).
 - A fine line runs across the arrangement every 4 bars, counting from bar 1, so phrases are easy to
-  see. PhotoSound ▸ Preferences (⌘,) sets how many bars apart (0 turns them off).
+  see. Clip ▸ Preferences (⌘,, in the app menu) sets how many bars apart (0 turns them off).
 - Shortcuts follow Ableton Live wherever the two apps share a feature: ⌘E split, ⌘D duplicate, ⌘J consolidate (Collapse to Audio), ⌘G / ⇧⌘G group and ungroup, ⌘L loop on/off, R reverse clip, Z zoom to selection, X zoom back, W fit the song in the window, ⌘1 / ⌘2 narrow and widen the grid, ⌘4 snap, B draw (Pencil), ⌘T new track, ⇧⌘J crop (Trim), ⇧⌘R export, F9 record, ⇧Tab switch between the arrangement and the clip editor. Select None is ⇧⌘A.
 
 

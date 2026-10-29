@@ -385,7 +385,7 @@ impl Action {
             FormatPcm16 => "16-bit PCM",
             FormatPcm24 => "24-bit PCM",
             FormatFloat32 => "32-bit Float",
-            Quit => "Quit PhotoSound",
+            Quit => "Quit Clip",
             Undo => "Undo",
             Redo => "Redo",
             Cut => "Cut",

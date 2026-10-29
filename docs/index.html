@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>PhotoSound Guide</title>
+<title>Clip Guide</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
@@ -74,7 +74,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 
 <div class="wrap">
 <nav id="nav">
-  <div class="brand"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M1 10h2M5 6v8M8 3v14M11 7v6M14 4v12M17 8v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>PhotoSound</div>
+  <div class="brand"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M1 10h2M5 6v8M8 3v14M11 7v6M14 4v12M17 8v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Clip</div>
   <a href="#start">Getting started</a>
   <a href="#arrangement">The arrangement</a>
   <a href="#tracks">Tracks</a>
@@ -91,15 +91,15 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 
 <main>
 <header>
-  <h1>PhotoSound</h1>
-  <p>A small Mac sound editor for one job: chopping up loops, keeping the good bits and editing them into a track. (It was called Sound Edit until October 2026.)</p>
+  <h1>Clip</h1>
+  <p>A small Mac sound editor for one job: chopping up loops, keeping the good bits and editing them into a track. (It was called Sound Edit, then PhotoSound, until October 2026.)</p>
   <div class="facts"><span>macOS</span><span>WAV · MP3 · FLAC · OGG · M4A · AIFF · CAF in</span><span>WAV · AIFF out</span><span>Exports to Ableton Live 12</span></div>
 </header>
 
 <section id="start">
   <h2><span class="n">01</span>Getting started</h2>
   <ol class="steps">
-    <li><b>Open the app</b> from Applications, or Spotlight "PhotoSound".</li>
+    <li><b>Open the app</b> from Applications, or Spotlight "Clip".</li>
     <li><b>Drop loops on the window.</b> Each goes on its own track. A tempo in the file name, like "118bpm 16bar" or "124 BPM", sets the song tempo and stretches the loop to fit it.</li>
     <li><b>Press Space</b> to play the whole song from the playhead. Click empty space to move the playhead.</li>
     <li><b>Chop, stack and arrange</b> with the tools below, then <span class="path">File ▸ Save Project</span> <kbd>⌘S</kbd> to keep everything in one file.</li>
@@ -115,7 +115,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <li><b>Select time</b> as in Live: drag across empty space, or across a clip's waveform, and a light blue wash marks that stretch on the tracks you drag over. <kbd>⌫</kbd> deletes it, <kbd>⌘E</kbd> splits the clips at its ends, and <kbd>⌘L</kbd> loops it. Mangle, BBCut, Reverse, Swap and the other clip processes work only inside it too. <kbd>⌘D</kbd> duplicates it right after itself; <span class="path">Edit ▸ Duplicate Time</span> <kbd>⇧⌘D</kbd> pushes the rest of the song later, <span class="path">Delete Time</span> <kbd>⇧⌘⌫</kbd> takes it out and closes the gap, and <span class="path">Insert Time</span> <kbd>⌘I</kbd> opens up empty time. Shift-click clips to select whole clips.</li>
     <li><b>Move</b> a clip by dragging its name strip, along its track or onto another. Drag below the last track to make a new one. <kbd>⌥</kbd>-drag drags a copy.</li>
     <li><b>Trim</b> by dragging either edge. The audio underneath is kept, so you can drag it back out.</li>
-    <li><b>Phrase lines:</b> a fine line runs across every 4 bars, counting from bar 1. <span class="path">PhotoSound ▸ Preferences</span> <kbd>⌘,</kbd> changes the spacing, or 0 turns them off.</li>
+    <li><b>Phrase lines:</b> a fine line runs across every 4 bars, counting from bar 1. <span class="path">Clip ▸ Preferences (the app menu)</span> <kbd>⌘,</kbd> changes the spacing, or 0 turns them off.</li>
     <li><b>Snapping:</b> moves and trims snap to the grid, other clips' edges and the playhead. Hold <kbd>⌘</kbd> to place freely.</li>
     <li><b>Fades:</b> drag the small handles at a clip's top corners to fade it in or out.</li>
     <li><b>Locators:</b> <span class="path">Control ▸ Add Locator</span>, or right-click the ruler, adds a named marker. <kbd>[</kbd> <kbd>]</kbd> jump between them; right-click one to rename it, delete it or loop to the next.</li>
@@ -205,7 +205,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <ul>
     <li><b>Tempo from names:</b> a clip whose name gives its tempo ("Loop 118bpm 16bar", "Kick - 124 BPM", "Bpm130_Drums") follows the song tempo. A bar count in the name gives the exact tempo.</li>
     <li><b>Change the tempo</b> by dragging the BPM box up or down (1 BPM a step, 0.20 with <kbd>⇧</kbd>), or click it to type. Every clip stays on its bar and the view keeps the same bars; only the time each bar takes changes.</li>
-    <li><b>Re-Pitch:</b> warped clips speed up and pitch up with the tempo, like a record, and you hear it live while you drag. <span class="path">PhotoSound ▸ Preferences</span> <kbd>⌘,</kbd> ▸ Keep pitch stretches them instead.</li>
+    <li><b>Re-Pitch:</b> warped clips speed up and pitch up with the tempo, like a record, and you hear it live while you drag. <span class="path">Clip ▸ Preferences (the app menu)</span> <kbd>⌘,</kbd> ▸ Keep pitch stretches them instead.</li>
     <li><b>"no warp"</b> in a clip's name strip means it plays at its own speed and doesn't follow the tempo. Right-click ▸ Warp to Tempo fixes that.</li>
     <li><b>Set Tempo from Clip</b> reads a loop's length as a whole number of bars and sets the song to match.</li>
     <li><b>Warp to Tempo</b> switches warping on or off for the selected clips. <span class="path">Clip ▸ Warp Loops on Import</span> turns the automatic part off.</li>
@@ -257,7 +257,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 
 <section id="keys">
   <h2><span class="n">12</span>Shortcuts</h2>
-  <p>Wherever PhotoSound and Ableton Live share a feature, the key is the same as in Live, so your hands already know them.</p>
+  <p>Wherever Clip and Ableton Live share a feature, the key is the same as in Live, so your hands already know them.</p>
   <div class="table"><table>
     <tr><th>Keys</th><th>Does</th></tr>
     <tr><td><kbd>Space</kbd></td><td>Play / pause. <kbd>Esc</kbd> stops.</td></tr>
@@ -288,7 +288,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   </table></div>
 </section>
 
-<footer>PhotoSound is written in Rust with egui. Source: <a href="https://github.com/johnnyhawk02/photosound" style="color:inherit">github.com/johnnyhawk02/photosound</a>.</footer>
+<footer>Clip is written in Rust with egui. Source: <a href="https://github.com/johnnyhawk02/clip" style="color:inherit">github.com/johnnyhawk02/clip</a>.</footer>
 </main>
 </div>
 

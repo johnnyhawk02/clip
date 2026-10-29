@@ -27,14 +27,14 @@ impl NativeMenu {
         let menu = Menu::new();
         let mut entries = HashMap::new();
 
-        let app_menu = Submenu::new("PhotoSound", true);
+        let app_menu = Submenu::new("Clip", true);
         let quit = MenuItem::with_id(Action::Quit.id(), Action::Quit.label(), true, accel(Action::Quit));
         let prefs = MenuItem::with_id(Action::Preferences.id(), Action::Preferences.label(), true, accel(Action::Preferences));
         let _ = app_menu.append_items(&[
             &PredefinedMenuItem::about(
-                Some("About PhotoSound"),
+                Some("About Clip"),
                 Some(AboutMetadata {
-                    name: Some("PhotoSound".into()),
+                    name: Some("Clip".into()),
                     version: Some(env!("CARGO_PKG_VERSION").into()),
                     ..Default::default()
                 }),
@@ -42,7 +42,7 @@ impl NativeMenu {
             &PredefinedMenuItem::separator(),
             &prefs,
             &PredefinedMenuItem::separator(),
-            &PredefinedMenuItem::hide(Some("Hide PhotoSound")),
+            &PredefinedMenuItem::hide(Some("Hide Clip")),
             &PredefinedMenuItem::hide_others(None),
             &PredefinedMenuItem::show_all(None),
             &PredefinedMenuItem::separator(),

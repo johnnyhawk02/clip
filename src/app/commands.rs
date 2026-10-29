@@ -184,7 +184,7 @@ impl App {
                 Action::Copy | Action::Cut => {
                     if let Some(c) = self.sel_clip.and_then(|p| self.clip(p)) {
                         let clip = c.visible();
-                        ctx.copy_text(format!("[PhotoSound clip, {}]", fmt_time(clip.duration_secs())));
+                        ctx.copy_text(format!("[audio clip, {}]", fmt_time(clip.duration_secs())));
                         self.status = format!("Copied clip {}", c.name);
                         self.clipboard = Some(clip);
                         if a == Action::Cut {

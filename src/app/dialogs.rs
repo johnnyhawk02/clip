@@ -662,7 +662,7 @@ impl App {
         self.show_spectrum = open;
     }
 
-    /// PhotoSound ▸ Preferences (⌘,).
+    /// Clip ▸ Preferences (⌘,).
     pub(super) fn prefs_dialog(&mut self, ctx: &egui::Context) {
         let Some((bars_before, repitch_before)) = self.prefs_open else { return };
         let mut ok = false;
