@@ -13,27 +13,86 @@ pub(super) fn draw_meter(p: &egui::Painter, r: Rect, level: f32) {
     }
 }
 
-/// Dark mode: on while the app draws dark (Preferences ▸ Appearance, or the Mac's setting).
-static DARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// Preferences ▸ Appearance: 0 follows the Mac, 1 light, 2 dark.
-pub(super) static APPEARANCE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
-
-pub(super) fn dark() -> bool {
-    DARK.load(std::sync::atomic::Ordering::Relaxed)
+/// One of Live's colour themes, from its theme file: the colour of its darkest (or lightest)
+/// surface and of its text. Every grey of the light look is placed between the two.
+pub(super) struct Theme {
+    pub(super) name: &'static str,
+    canvas: u32,
+    ink: u32,
 }
 
-/// A grey of the light look, as it shows in the current one. Dark mode turns the scale over
-/// (white surfaces become Live's dark greys, near-black ink its light grey text), so every
-/// contrast in the light look holds in the dark one.
-pub(super) fn gray(v: u8) -> Color32 {
-    if !dark() {
-        return Color32::from_gray(v);
+/// The themes that come with Live 12 (App-Resources/Themes/*.ask).
+pub(super) const THEMES: [Theme; 18] = [
+    Theme { name: "Angst Robot", canvas: 0x221746, ink: 0xe5e6e8 },
+    Theme { name: "Classic Medium Dark", canvas: 0x2a2a2a, ink: 0xe0e0e0 },
+    Theme { name: "Classic Medium Light", canvas: 0xafafaf, ink: 0x000000 },
+    Theme { name: "Default Dark Cool High", canvas: 0x1b1d25, ink: 0xd7d8e1 },
+    Theme { name: "Default Dark Cool Medium", canvas: 0x22242d, ink: 0xb3b4bd },
+    Theme { name: "Default Dark Neutral High", canvas: 0x1d1d1d, ink: 0xd8d8d8 },
+    Theme { name: "Default Dark Neutral Medium", canvas: 0x242424, ink: 0xb5b5b5 },
+    Theme { name: "Default Dark Warm High", canvas: 0x221c17, ink: 0xe2d7c7 },
+    Theme { name: "Default Dark Warm Medium", canvas: 0x29231f, ink: 0xbeb3a5 },
+    Theme { name: "Default Light Cool High", canvas: 0xcbced4, ink: 0x020308 },
+    Theme { name: "Default Light Cool Medium", canvas: 0xc4c6cd, ink: 0x0f121a },
+    Theme { name: "Default Light Neutral High", canvas: 0xcecece, ink: 0x030303 },
+    Theme { name: "Default Light Neutral Medium", canvas: 0xc6c6c6, ink: 0x121212 },
+    Theme { name: "Default Light Warm High", canvas: 0xd4ccc7, ink: 0x060200 },
+    Theme { name: "Default Light Warm Medium", canvas: 0xccc4bf, ink: 0x18110a },
+    Theme { name: "Immaterial", canvas: 0x1d1f23, ink: 0xcbcbcd },
+    Theme { name: "Riparian", canvas: 0x0f2026, ink: 0xd6cda8 },
+    Theme { name: "Twenty-Four Carat", canvas: 0x222222, ink: 0xe1c69c },
+];
+
+/// The theme Match the Mac uses when the Mac is dark (Live's default dark one).
+const MAC_DARK: usize = 6;
+
+/// The look being drawn: 0 is Clip's own light one, `i + 1` is `THEMES[i]`.
+static LOOK: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// Preferences ▸ Appearance: 0 matches the Mac, 1 is Clip's light look, `i + 2` is `THEMES[i]`.
+pub(super) static APPEARANCE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// The Appearance choices, in the order of `APPEARANCE`.
+pub(super) fn appearance_names() -> impl Iterator<Item = &'static str> {
+    ["Match the Mac", "Clip Light"].into_iter().chain(THEMES.iter().map(|t| t.name))
+}
+
+/// Read a saved Appearance: its name (or the numbers older versions saved: 2 was dark).
+pub(super) fn parse_appearance(s: &str) -> usize {
+    match s.trim() {
+        "0" | "Match the Mac" => 0,
+        "1" | "Clip Light" => 1,
+        "2" => MAC_DARK + 2,
+        name => THEMES.iter().position(|t| t.name == name).map_or(0, |i| i + 2),
     }
-    // Surfaces (200..255) land on Live's dark greys (#242424..#505050), ink (0..200) on its
-    // text greys up to #dcdcdc.
+}
+
+fn rgb(c: u32) -> [f32; 3] {
+    [(c >> 16) as u8 as f32, (c >> 8) as u8 as f32, c as u8 as f32]
+}
+
+fn theme() -> Option<&'static Theme> {
+    THEMES.get(LOOK.load(std::sync::atomic::Ordering::Relaxed).wrapping_sub(1))
+}
+
+/// True while the look has light text on dark surfaces.
+pub(super) fn dark() -> bool {
+    theme().is_some_and(|t| {
+        let lum = |c: u32| rgb(c).iter().zip([0.3, 0.59, 0.11]).map(|(v, w)| v * w).sum::<f32>();
+        lum(t.canvas) < lum(t.ink)
+    })
+}
+
+/// A grey of the light look, as it shows in the current one: in a Live theme, white surfaces
+/// become its canvas, near-black ink its text colour and everything between falls in line, so
+/// every contrast of the light look holds.
+pub(super) fn gray(v: u8) -> Color32 {
+    let Some(t) = theme() else { return Color32::from_gray(v) };
+    // Surfaces (200..255) stay near the canvas, ink (0..200) runs on to the text colour.
     let v = v as f32;
-    let d = if v >= 200.0 { 36.0 + (255.0 - v) / 55.0 * 44.0 } else { 80.0 + (200.0 - v) / 200.0 * 140.0 };
-    Color32::from_gray(d.round() as u8)
+    let f = if v >= 200.0 { (255.0 - v) / 55.0 * 0.3 } else { 0.3 + (200.0 - v) / 180.0 * 0.7 };
+    let (c, i) = (rgb(t.canvas), rgb(t.ink));
+    let ch = |k: usize| (c[k] + (i[k] - c[k]) * f).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgb(ch(0), ch(1), ch(2))
 }
 
 /// A light wash over the canvas (a darkening one in dark mode).
@@ -130,25 +189,27 @@ pub(super) fn clean_style(ctx: &egui::Context) {
         }
     }
     ctx.set_fonts(fonts);
-    apply_theme(ctx, false);
+    apply_theme(ctx, 0);
 }
 
 /// Follow Preferences ▸ Appearance (or the Mac's light or dark setting), restyling on a change.
 pub(super) fn update_theme(ctx: &egui::Context) {
     let want = match APPEARANCE.load(std::sync::atomic::Ordering::Relaxed) {
-        1 => false,
-        2 => true,
-        _ => ctx.system_theme() == Some(egui::Theme::Dark),
+        0 if ctx.system_theme() == Some(egui::Theme::Dark) => MAC_DARK + 1,
+        0 | 1 => 0,
+        n => (n - 1).min(THEMES.len()),
     };
-    if want != dark() {
+    if want != LOOK.load(std::sync::atomic::Ordering::Relaxed) {
         apply_theme(ctx, want);
     }
 }
 
-/// The clean look in light or dark: flat surfaces, thin lines, ink-coloured accents.
-fn apply_theme(ctx: &egui::Context, is_dark: bool) {
+/// The clean look in Clip's light colours or a Live theme: flat surfaces, thin lines,
+/// ink-coloured accents.
+fn apply_theme(ctx: &egui::Context, look: usize) {
     use egui::{CornerRadius, Shadow};
-    DARK.store(is_dark, std::sync::atomic::Ordering::Relaxed);
+    LOOK.store(look, std::sync::atomic::Ordering::Relaxed);
+    let is_dark = dark();
     let theme = if is_dark { egui::Theme::Dark } else { egui::Theme::Light };
     ctx.set_theme(theme);
     let mut v = if is_dark { egui::Visuals::dark() } else { egui::Visuals::light() };

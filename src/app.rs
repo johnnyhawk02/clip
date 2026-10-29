@@ -255,7 +255,7 @@ pub struct App {
     /// A fine line across the arrangement every this many bars (0 = none), from Preferences.
     phrase_bars: u32,
     /// Preferences window open, holding the settings to go back to on Cancel.
-    prefs_open: Option<(u32, bool, u8)>,
+    prefs_open: Option<(u32, bool, usize)>,
     /// Dragging the loop brace: where it was grabbed (frames), the range then, and which part
     /// (the whole brace moves, an end resizes).
     arr_loop_grab: Option<(f64, Sel, LoopGrab)>,
@@ -420,7 +420,7 @@ fn keep_pitch_pref() -> PathBuf {
     crossfeed_pref().with_file_name("keep-pitch")
 }
 
-/// A file holding Preferences ▸ Appearance (0 follows the Mac, 1 light, 2 dark).
+/// A file holding Preferences ▸ Appearance, by name.
 fn appearance_pref() -> PathBuf {
     crossfeed_pref().with_file_name("appearance")
 }
@@ -508,7 +508,7 @@ impl App {
             prefs_open: {
                 REPITCH.store(!keep_pitch_pref().exists(), std::sync::atomic::Ordering::Relaxed);
                 let look = std::env::var("SOUND_EDIT_APPEARANCE").ok().or_else(|| std::fs::read_to_string(appearance_pref()).ok());
-                APPEARANCE.store(look.and_then(|s| s.trim().parse().ok()).unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+                APPEARANCE.store(look.map_or(0, |s| parse_appearance(&s)), std::sync::atomic::Ordering::Relaxed);
                 None
             },
             arr_loop_grab: None,

@@ -674,10 +674,12 @@ impl App {
             dialog_header(ui, "Preferences", "");
             dialog_grid("prefsgrid").show(ui, |ui| {
                 ui.label("Appearance");
-                ui.horizontal(|ui| {
-                    ui.radio_value(&mut look, 0, "Match the Mac");
-                    ui.radio_value(&mut look, 1, "Light");
-                    ui.radio_value(&mut look, 2, "Dark");
+                // Live's themes, shown as you pick them.
+                let names: Vec<&str> = appearance_names().collect();
+                egui::ComboBox::from_id_salt("appearance").width(230.0).selected_text(names[look.min(names.len() - 1)]).show_ui(ui, |ui| {
+                    for (i, n) in names.iter().enumerate() {
+                        ui.selectable_value(&mut look, i, *n);
+                    }
                 });
                 ui.end_row();
                 ui.label("Phrase lines");
@@ -711,7 +713,7 @@ impl App {
                     let _ = std::fs::create_dir_all(dir);
                 }
                 let _ = std::fs::write(p, self.phrase_bars.to_string());
-                let _ = std::fs::write(appearance_pref(), look.to_string());
+                let _ = std::fs::write(appearance_pref(), appearance_names().nth(look).unwrap_or_default());
                 if repitch {
                     let _ = std::fs::remove_file(keep_pitch_pref());
                 } else {
