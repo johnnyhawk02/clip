@@ -186,6 +186,9 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// The tempo the clips are laid out for: when the tempo changes, every clip moves to keep
+    /// its bar position (warped clips also stretch).
+    laid_out_tempo: f64,
     /// A fine line across the arrangement every this many bars (0 = none), from Preferences.
     phrase_bars: u32,
     /// Preferences window open, holding the settings to go back to on Cancel.
@@ -379,6 +382,7 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            laid_out_tempo: 120.0,
             phrase_bars: std::fs::read_to_string(phrase_pref()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(4),
             prefs_open: None,
             arr_loop_grab: None,
@@ -838,6 +842,7 @@ impl App {
         });
         self.sel = snap.sel;
         self.cursor = snap.cursor;
+        self.laid_out_tempo = self.tempo;
         self.restore_audio(snap.audio);
         self.dirty = true;
         self.status = format!("Undid {}", snap.label);
@@ -864,6 +869,7 @@ impl App {
         });
         self.sel = snap.sel;
         self.cursor = snap.cursor;
+        self.laid_out_tempo = self.tempo;
         self.restore_audio(snap.audio);
         self.dirty = true;
         self.status = format!("Redid {}", snap.label);

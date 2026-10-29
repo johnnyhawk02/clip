@@ -654,14 +654,29 @@ impl App {
         self.status = if on { format!("Warped to {:.2} BPM: {}", tempo, done.join(", ")) } else { format!("Back to original speed: {}", done.join(", ")) };
     }
 
-    /// Re-stretch warped clips after the song tempo changes.
+    /// After the song tempo changes, keep everything on its bar: warped clips re-stretch (moving
+    /// with it), unwarped clips move to the same bar at their own speed, and the loop, playhead
+    /// and time selection follow.
     pub(super) fn refit_warped(&mut self) {
         let tempo = self.tempo;
         let mut changed = false;
+        let r = self.laid_out_tempo / tempo;
+        let moved = (r - 1.0).abs() > 1e-9 && tempo > 0.0;
+        let sc = |f: usize| (f as f64 * r).round() as usize;
         for t in &mut self.tracks {
             for c in &mut t.clips {
+                if c.warp.is_none() && moved {
+                    c.start = sc(c.start);
+                    changed = true;
+                }
                 changed |= c.fit_to_tempo(tempo);
             }
+        }
+        if moved {
+            self.laid_out_tempo = tempo;
+            self.arr_loop = self.arr_loop.map(|(a, b)| (sc(a), sc(b)));
+            self.time_sel = self.time_sel.map(|((a, b), l)| ((sc(a), sc(b)), l));
+            self.arr_cursor = sc(self.arr_cursor);
         }
         if changed {
             self.dirty = true;

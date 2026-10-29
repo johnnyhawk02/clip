@@ -181,6 +181,7 @@ impl App {
                 // follows any later tempo change.
                 if let Some(bpm) = clip_tempo_from_name(&name, a.frames(), a.rate, self.beats_per_bar).filter(|_| self.auto_warp) {
                     self.tempo = (bpm * 100.0).round() / 100.0;
+                    self.laid_out_tempo = self.tempo;
                     clip.warp = Some(Warp { bpm, source: a.clone(), tempo: bpm });
                     clip.fit_to_tempo(self.tempo);
                 }
@@ -327,6 +328,7 @@ impl App {
         let audio: Vec<Arc<Audio>> = audio.into_iter().map(Arc::new).collect();
         let rate = file.rate;
         (self.tempo, self.beats_per_bar, self.grid, self.snap) = (file.tempo, file.beats_per_bar.max(1), file.grid.min(GRID.len() - 1), file.snap);
+        self.laid_out_tempo = self.tempo;
         self.master_gain = file.master_gain;
         (self.arr_loop, self.looping) = (file.arr_loop, file.looping);
         // Older projects could hold a loop that ends part-way through a bar.

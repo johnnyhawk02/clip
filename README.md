@@ -125,7 +125,8 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
 - Warping: a clip whose file name gives its tempo ("Loop 118bpm 16bar", "Kick - 124 BPM",
   "Bpm130_Drums") is stretched to the song tempo when it's dropped in or imported, keeping its
   pitch. A bar count in the name gives the exact tempo. Change the song tempo and warped clips
-  re-fit, staying on their beats. Opening such a file sets the song tempo from it. Clip ▸ Warp to
+  re-fit, staying on their beats; unwarped clips move to stay on their bar too (playing at their own
+  speed), and the loop and playhead follow. Opening such a file sets the song tempo from it. Clip ▸ Warp to
   Tempo switches warping on or off for the selected clips (clips with no tempo in the name are
   taken as the whole-bar loop closest to the song tempo); Clip ▸ Warp Loops on Import turns the
   automatic part off. Editing a warped clip in the editor makes it plain audio at its current
