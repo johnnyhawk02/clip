@@ -49,6 +49,10 @@ fn default_grid() -> usize {
 fn default_snap() -> bool {
     true
 }
+fn default_true() -> bool {
+    true
+}
+
 fn default_master() -> f32 {
     1.0
 }
@@ -97,6 +101,9 @@ pub struct ClipData {
     /// Fades from the clip's corner handles (frames).
     #[serde(default)]
     pub fades: (usize, usize),
+    /// False for a clip switched off (silent, kept in place).
+    #[serde(default = "default_true")]
+    pub active: bool,
 }
 
 pub fn write(path: &Path, project: &ProjectFile, audio: &[&Audio]) -> Result<(), String> {
@@ -188,6 +195,7 @@ mod tests {
                     origin: 0,
                     gain: 1.0,
                     fades: (0, 0),
+                    active: true,
                 }],
             }],
             audio: vec![AudioData { rate: 1000, channels: 2, frames: 3 }],

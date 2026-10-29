@@ -319,4 +319,23 @@ impl App {
         self.arr_loop = Some(self.whole_bars((ls, ls + n)));
         self.dirty = true;
     }
+
+    /// Clip ▸ Clip On / Off (0): switch the selected clips (or those in the time selection)
+    /// off and on. An off clip stays in place but is silent, so the layer below shows through.
+    pub(super) fn toggle_clips_on(&mut self) {
+        let mut targets = self.selected_clips();
+        if let Some(((s, e), layers)) = self.time_sel {
+            targets.extend(self.sel_layers(layers).flat_map(|t| self.tracks[t].clips.iter().enumerate().filter(|(_, c)| c.start < e && c.end() > s).map(move |(i, _)| (t, i)).collect::<Vec<_>>()));
+        }
+        let Some(on) = targets.first().and_then(|&p| self.clip(p)).map(|c| !c.active) else { return };
+        self.push_undo(if on { "Clip On" } else { "Clip Off" });
+        for (t, c) in targets {
+            if let Some(clip) = self.tracks.get_mut(t).and_then(|t| t.clips.get_mut(c)) {
+                clip.active = on;
+            }
+        }
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = if on { "Clip on".into() } else { "Clip off — it stays in place, silent (0 switches it back on)".into() };
+    }
 }

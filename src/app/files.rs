@@ -289,6 +289,7 @@ impl App {
                             origin: c.origin,
                             gain: c.gain,
                             fades: (c.fade_in, c.fade_out),
+                            active: c.active,
                             group: c.group.as_ref().map(|g| tracks_data(g, pool)),
                             warp: c.warp.as_ref().map(|w| {
                                 let i = pool.iter().position(|a| Arc::ptr_eq(a, &w.source)).unwrap_or_else(|| {
@@ -359,6 +360,7 @@ impl App {
                         clip.origin = c.origin;
                         clip.gain = c.gain;
                         (clip.fade_in, clip.fade_out) = c.fades;
+                        clip.active = c.active;
                         clip.len = if c.looping { c.len } else { clip.len };
                         if let Some((bpm, tempo, i)) = c.warp {
                             if let Some(source) = audio.get(i) {

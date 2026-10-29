@@ -632,7 +632,7 @@ impl App {
         let rate = self.rate();
         let channels = t.clips.iter().map(|c| c.audio.num_channels()).max().unwrap_or(1);
         let mut out = Audio { rate, channels: vec![Vec::new(); channels] };
-        for (c, fades) in t.clips.iter().zip(crossfades(&t.clips)) {
+        for (c, fades) in t.clips.iter().zip(crossfades(&t.clips)).filter(|(c, _)| c.active) {
             let mut v = c.visible();
             let fades = with_clip_fades(c, edge_fades(&v, fades));
             apply_crossfade(&mut v, fades);

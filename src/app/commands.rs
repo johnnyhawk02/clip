@@ -15,7 +15,7 @@ impl App {
                 Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed | Action::Follow | Action::Metronome | Action::DockPalette => true,
                 Action::Continue | Action::AddLocator => doc,
                 Action::PrevLocator | Action::NextLocator => !self.locators.is_empty(),
-                Action::Quantize => has_clip,
+                Action::Quantize | Action::ClipOnOff => has_clip,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
                 Action::Export | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
                 Action::Delete => has_clip || self.time_sel.is_some(),
@@ -482,6 +482,7 @@ impl App {
             Action::LayerUp => self.move_layer(true),
             Action::LayerDown => self.move_layer(false),
             Action::Quantize => self.quantize(),
+            Action::ClipOnOff => self.toggle_clips_on(),
             Action::AddLocator => self.add_locator(self.arr_cursor),
             Action::PrevLocator => self.jump_locator(false),
             Action::NextLocator => self.jump_locator(true),
@@ -530,6 +531,7 @@ impl App {
         let none = Modifiers::NONE;
         let keys: &[(Modifiers, Key, Action)] = &[
             (Modifiers::SHIFT, Key::Space, Action::Continue),
+            (none, Key::Num0, Action::ClipOnOff),
             (none, Key::Delete, Action::Delete),
             (none, Key::Backspace, Action::Delete),
             (none, Key::Home, Action::GoStart),

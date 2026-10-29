@@ -16,7 +16,7 @@ pub(super) struct Layer {
 
 impl Layer {
     pub(super) fn of(t: &Track, audio: Audio) -> Layer {
-        let spans = merge(t.clips.iter().filter(|c| c.len > 0).map(|c| (c.start, c.end())).collect());
+        let spans = merge(t.clips.iter().filter(|c| c.len > 0 && c.active).map(|c| (c.start, c.end())).collect());
         Layer { audio, gain: t.gain, spans }
     }
 
@@ -67,7 +67,7 @@ pub(super) fn flatten_clips(tracks: &[Track], resume: usize, cut: usize) -> Trac
     let mut out = Track::new("Arrangement");
     out.color = visible.first().map_or(0, |t| t.color);
     for (s, e, o) in segments(&layers) {
-        for c in &visible[o].clips {
+        for c in visible[o].clips.iter().filter(|c| c.active) {
             let (mut a, mut b) = (s.max(c.start), e.min(c.end()));
             if b > a {
                 a -= resume.min(a - c.start);
@@ -93,7 +93,7 @@ pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32, click: 
         .iter()
         .map(|t| engine::LayerSrc {
             gain: t.gain,
-            clips: t.clips.iter().zip(crossfades(&t.clips)).filter(|(c, _)| c.len > 0).map(|(c, cross)| clip_src(c, cross, rate)).collect(),
+            clips: t.clips.iter().zip(crossfades(&t.clips)).filter(|(c, _)| c.len > 0 && c.active).map(|(c, cross)| clip_src(c, cross, rate)).collect(),
         })
         .collect();
     engine::Song { layers, pieces: pieces(&plan, rate), end, rate, master, click }
@@ -120,7 +120,7 @@ pub(super) fn covered_above(tracks: &[Track]) -> Vec<Vec<(usize, usize)>> {
     for t in tracks {
         out.push(merge(above.clone()));
         if !t.mute {
-            above.extend(t.clips.iter().filter(|c| c.len > 0).map(|c| (c.start, c.end())));
+            above.extend(t.clips.iter().filter(|c| c.len > 0 && c.active).map(|c| (c.start, c.end())));
         }
     }
     out

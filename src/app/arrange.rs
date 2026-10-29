@@ -1341,7 +1341,7 @@ impl App {
                 let r = Rect::from_min_max(Pos2::new(x0, l.top() + 3.0), Pos2::new(x1.max(x0 + 2.0), l.bottom() - 3.0));
                 let selected = self.sel_clip == Some((ti, ci)) || self.sel_extra.contains(&(ti, ci));
                 let hovered = self.arr_hover.is_some_and(|h| (h.0, h.1) == (ti, ci));
-                draw_clip(&painter, r, c, color, selected, muted, selected || hovered || self.fade_drag.is_some_and(|d| (d.0, d.1) == (ti, ci)), lanes);
+                draw_clip(&painter, r, c, color, selected, muted || !c.active, selected || hovered || self.fade_drag.is_some_and(|d| (d.0, d.1) == (ti, ci)), lanes);
                 // Parts a layer above plays over are washed out: they are not heard.
                 for &(s, e) in &hidden[ti] {
                     let (s, e) = (s.max(c.start), e.min(c.end()));
