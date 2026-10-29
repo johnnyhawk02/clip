@@ -130,6 +130,13 @@ impl App {
                         let last = self.synth.last().unwrap().0;
                         self.synth.push((last + 8, egui::Event::PointerMoved(pos)));
                     }
+                    // mods:shift+alt (or mods:none) — modifier keys held for the scripted input after.
+                    "mods" => {
+                        let has = |k: &str| arg.split('+').any(|m| m == k);
+                        self.synth_mods = Modifiers { alt: has("alt"), shift: has("shift"), command: has("cmd"), mac_cmd: has("cmd"), ctrl: false };
+                        let at = self.synth.last().map_or(self.synth_frame, |l| l.0) + 1;
+                        self.synth.push((at, egui::Event::ModifiersChanged(self.synth_mods)));
+                    }
                     // space: a tap of the Space bar (press, then release a few frames later).
                     "space" => {
                         let at = self.synth.last().map_or(self.synth_frame, |l| l.0) + 1;

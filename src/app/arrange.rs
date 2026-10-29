@@ -824,7 +824,14 @@ impl App {
                 // As in Live, a clip moves by its name strip; dragging across its waveform selects
                 // time instead (⌥ still drags a copy from anywhere on it).
                 let on_body = |t: usize| q.y > lane(t).top() + 19.0 && !ui.input(|i| i.modifiers.alt);
-                if let Some((t, _, DragMode::Move)) = hit(&self.tracks, q, vs, vl).filter(|h| on_body(h.0)) {
+                let slide = ui.input(|i| i.modifiers.shift && i.modifiers.alt);
+                if let (true, Some((t, c, DragMode::Move))) = (slide, hit(&self.tracks, q, vs, vl)) {
+                    // ⇧⌥-drag (as Live): slide the audio inside the clip, which stays put.
+                    self.push_undo("Slide Clip Contents");
+                    self.slide_drag = Some((t, c, self.tracks[t].clips[c].trim, x_to_f(q.x, vs, vl)));
+                    self.sel_clip = Some((t, c));
+                    self.sel_extra.clear();
+                } else if let Some((t, _, DragMode::Move)) = hit(&self.tracks, q, vs, vl).filter(|h| on_body(h.0)) {
                     self.set_active(t);
                     self.start_time_sel(q, &a, vs, vl, spp, ui.input(|i| i.modifiers.command));
                 } else if let Some((t, mut c, mode)) = hit(&self.tracks, q, vs, vl) {
@@ -949,6 +956,27 @@ impl App {
                     }
                 }
             }
+        }
+        if let (Some((t, c, trim0, at)), true, Some(q)) = (self.slide_drag, resp.dragged(), resp.interact_pointer_pos()) {
+            let d = x_to_f(q.x, vs, vl) - at;
+            let d = if ui.input(|i| i.modifiers.command) { d } else { self.snap_to_grid(d.abs(), spp).copysign(d) };
+            if let Some(clip) = self.tracks.get_mut(t).and_then(|t| t.clips.get_mut(c)) {
+                let (_, _, _, frames) = clip.picture();
+                let trim = trim0 as f64 - d;
+                clip.trim = if clip.looping {
+                    // A looping clip wraps round its loop.
+                    let (ls, le) = clip.loop_points.map(|(s, e)| (s.min(frames), e.min(frames))).filter(|(s, e)| e > s).unwrap_or((0, frames));
+                    let n = (le - ls).max(1) as f64;
+                    if trim < ls as f64 { (ls as f64 + (trim - ls as f64).rem_euclid(n)) as usize } else { trim as usize }
+                } else {
+                    trim.clamp(0.0, frames.saturating_sub(clip.len) as f64) as usize
+                };
+                self.dirty = true;
+                self.refresh_playback();
+            }
+        }
+        if resp.drag_stopped() {
+            self.slide_drag = None;
         }
         if let (true, Some(d)) = (resp.drag_stopped(), self.clip_drag.as_ref()) {
             // Dropped over other clips on its layer: it cuts them away there. An edge dragged

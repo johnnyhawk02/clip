@@ -194,6 +194,10 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// Modifier keys held during scripted input (automation `mods:`).
+    synth_mods: Modifiers,
+    /// ⇧⌥-dragging a clip's audio inside it: (layer, clip, trim then, frame grabbed).
+    slide_drag: Option<(usize, usize, usize, f64)>,
     /// The clip loaded in the detail view under the song (see `detail_key_of`).
     detail_key: Option<DetailKey>,
     /// This frame shows the song with the detail view under it.
@@ -426,6 +430,8 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            synth_mods: Modifiers::NONE,
+            slide_drag: None,
             detail_key: None,
             split: false,
             metronome: false,
