@@ -301,6 +301,23 @@ fn crossfeed_pref() -> PathBuf {
     home.join("Library/Application Support/Sound Edit/crossfeed-on")
 }
 
+/// A file holding the path of the project last opened or saved, reopened at launch.
+fn last_project_pref() -> PathBuf {
+    crossfeed_pref().with_file_name("last-project")
+}
+
+/// Remember `path` as the project to reopen next launch (scripted test runs leave it alone).
+fn remember_project(path: &Path) {
+    if std::env::var_os("SOUND_EDIT_ACTIONS").is_some() || std::env::var_os("SOUND_EDIT_SNAPSHOT").is_some() {
+        return;
+    }
+    let pref = last_project_pref();
+    if let Some(dir) = pref.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(pref, path.to_string_lossy().as_bytes());
+}
+
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>) -> App {
         clean_style(&cc.egui_ctx);
@@ -419,6 +436,11 @@ impl App {
             frame_count: 0,
             place_until: HashMap::new(),
         };
+        // With nothing asked for, pick up the last project (not in scripted test runs).
+        let initial = initial.or_else(|| {
+            let p = PathBuf::from(std::fs::read_to_string(last_project_pref()).ok()?.trim());
+            ((app.automation.is_none() || std::env::var_os("SOUND_EDIT_REOPEN").is_some()) && p.is_file()).then_some(p)
+        });
         if let Some(p) = initial {
             app.start_load(p, &cc.egui_ctx);
         }

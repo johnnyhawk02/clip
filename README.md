@@ -62,7 +62,7 @@ Try the files in `samples/`.
 clips, groups, cues, regions, loops, mixer settings and the audio itself — in one `.sndproj`
 file. Open it again by double-clicking it in Finder, with File ▸ Open, or by dropping it on the
 window. (Audio files can be opened from Finder with Open With ▸ PhotoSound too.) Export (⇧⌘R) writes
-what you hear as a WAV/AIFF. The unsaved-changes prompt offers to save the project.
+what you hear as a WAV/AIFF. The unsaved-changes prompt offers to save the project. When you open the app on its own, it reopens the last project you opened or saved.
 
 **Arrangement and clips (like Ableton's Arrangement view).** A sound is a stack of layers,
 and audio sits on them as clips. Opening a file gives one track with one clip.

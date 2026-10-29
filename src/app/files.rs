@@ -237,6 +237,7 @@ impl App {
             Ok(()) => {
                 self.dirty = false;
                 self.status = format!("Saved {}", path.display());
+                remember_project(&path);
                 self.project_path = Some(path.clone());
                 self.path = Some(path);
                 true
@@ -376,6 +377,7 @@ impl App {
         self.regions.clear();
         self.loop_points = None;
         self.dirty = false;
+        remember_project(&path);
         self.project_path = Some(path.clone());
         self.path = Some(path.clone());
         self.refresh_playback();
