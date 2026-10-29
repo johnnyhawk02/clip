@@ -518,11 +518,11 @@ impl App {
         if let View::Editor { track, clip } = self.view {
             if let Some(c) = self.tracks.get_mut(track).and_then(|t| t.clips.get_mut(clip)).filter(|c| !Arc::ptr_eq(&c.audio, &a)) {
                 c.audio = a.clone();
-                c.peaks = peaks;
+                c.peaks = peaks.clone();
                 // An edited warped clip stays warped: the edited audio becomes its new original,
                 // made at the tempo it's fitted to now, so it keeps following tempo changes.
                 if let Some(w) = c.warp.as_mut() {
-                    (w.bpm, w.source) = (w.tempo, a.clone());
+                    (w.bpm, w.source, w.source_peaks) = (w.tempo, a.clone(), peaks.clone());
                 }
                 if c.looping {
                     // A looping clip keeps its length on the timeline; it repeats the new audio.

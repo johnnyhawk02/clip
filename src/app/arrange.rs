@@ -93,26 +93,29 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
         let x0 = body.left().max(clip_to.left());
         let x1 = body.right().min(clip_to.right());
         let fpp = c.len as f64 / body.width().max(1.0) as f64;
+        let (audio, peaks, speed, frames) = c.picture();
         let mut x = x0;
         while x < x1 {
             let i0 = ((x - body.left()) as f64 * fpp) as usize;
             let i1 = (((x + 1.0 - body.left()) as f64 * fpp) as usize).max(i0 + 1);
-            let f0 = c.source(i0);
-            let f1 = c.source(i1 - 1).max(f0) + 1;
-            let f1 = f1.min(c.audio.frames());
+            let f0 = c.source_in(i0, frames);
+            let f1 = (c.source_in(i1 - 1, frames).max(f0) + 1).min(frames);
+            // In the frames of what's drawn from.
+            let f0 = ((f0 as f64 * speed) as usize).min(audio.frames());
+            let f1 = ((f1 as f64 * speed).ceil() as usize).min(audio.frames());
             if f0 >= f1 {
                 break;
             }
             let (mut lo, mut hi) = (0.0f32, 0.0f32);
-            if fpp >= c.peaks.block as f64 * 2.0 {
-                for ch in &c.peaks.data {
-                    for &(l, h) in &ch[f0 / c.peaks.block..(f1 / c.peaks.block).max(f0 / c.peaks.block + 1).min(ch.len())] {
+            if fpp * speed >= peaks.block as f64 * 2.0 {
+                for ch in &peaks.data {
+                    for &(l, h) in &ch[f0 / peaks.block..(f1 / peaks.block).max(f0 / peaks.block + 1).min(ch.len())] {
                         lo = lo.min(l);
                         hi = hi.max(h);
                     }
                 }
             } else {
-                for ch in &c.audio.channels {
+                for ch in &audio.channels {
                     for &v in &ch[f0..f1] {
                         lo = lo.min(v);
                         hi = hi.max(v);

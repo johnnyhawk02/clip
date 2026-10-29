@@ -37,6 +37,9 @@ pub(super) struct Warp {
     pub(super) bpm: f64,
     /// The audio at its original speed.
     pub(super) source: Arc<Audio>,
+    /// `source`'s peaks: the clip is drawn from these, scaled to the tempo, so its picture never
+    /// waits for the audio to be re-stretched.
+    pub(super) source_peaks: Arc<Peaks>,
     /// The song tempo `audio` is currently stretched to.
     pub(super) tempo: f64,
     /// Whether `audio` was made by re-pitching (speed and pitch together) rather than stretching.
@@ -201,7 +204,7 @@ impl Clip {
 
     /// Start warping at clip tempo `bpm`: from now on the clip follows the song tempo.
     pub(super) fn warp_from(&mut self, bpm: f64, song_tempo: f64) {
-        self.warp = Some(Warp { bpm, source: self.audio.clone(), tempo: bpm, repitch: repitch_mode() });
+        self.warp = Some(Warp { bpm, source: self.audio.clone(), source_peaks: self.peaks.clone(), tempo: bpm, repitch: repitch_mode() });
         self.fit_to_tempo(song_tempo);
     }
 
@@ -228,6 +231,28 @@ impl Clip {
     pub(super) fn loop_range(&self) -> (usize, usize) {
         let n = self.audio.frames();
         self.loop_points.map(|(s, e)| (s.min(n), e.min(n))).filter(|(s, e)| e > s).unwrap_or((0, n))
+    }
+
+    /// What to draw the clip from: its audio and peaks, how many of their frames go by per clip
+    /// frame, and how long the audio is in clip frames. A warped clip draws from its original,
+    /// scaled to the tempo, so the picture is right even before its audio is re-stretched.
+    pub(super) fn picture(&self) -> (&Arc<Audio>, &Arc<Peaks>, f64, usize) {
+        match &self.warp {
+            Some(w) => (&w.source, &w.source_peaks, w.tempo / w.bpm, (w.source.frames() as f64 * w.bpm / w.tempo).round() as usize),
+            None => (&self.audio, &self.peaks, 1.0, self.audio.frames()),
+        }
+    }
+
+    /// `source` for audio `frames` long (the length a warped clip's audio will have).
+    pub(super) fn source_in(&self, i: usize, frames: usize) -> usize {
+        let p = self.trim + i;
+        if self.looping {
+            let (ls, le) = self.loop_points.map(|(s, e)| (s.min(frames), e.min(frames))).filter(|(s, e)| e > s).unwrap_or((0, frames));
+            if p >= le && le > ls {
+                return ls + (p - le) % (le - ls);
+            }
+        }
+        p.min(frames.max(1) - 1)
     }
 
     /// The audio frame heard `i` frames into the clip.
@@ -487,7 +512,7 @@ impl App {
         }
         // A warped clip collapses to a warped clip, so it still follows the tempo.
         if old.warp.is_some() {
-            clip.warp = Some(Warp { bpm: self.tempo, source: clip.audio.clone(), tempo: self.tempo, repitch: repitch_mode() });
+            clip.warp = Some(Warp { bpm: self.tempo, source: clip.audio.clone(), source_peaks: clip.peaks.clone(), tempo: self.tempo, repitch: repitch_mode() });
         }
         self.tracks[t].clips[c] = clip;
         self.dirty = true;
@@ -506,7 +531,7 @@ impl App {
         let mut clip = Clip::new(name.clone(), Arc::new(audio), start);
         // Warped clips collapse to a warped clip, so the layer still follows the tempo.
         if track.clips.iter().any(|c| c.warp.is_some()) {
-            clip.warp = Some(Warp { bpm: self.tempo, source: clip.audio.clone(), tempo: self.tempo, repitch: repitch_mode() });
+            clip.warp = Some(Warp { bpm: self.tempo, source: clip.audio.clone(), source_peaks: clip.peaks.clone(), tempo: self.tempo, repitch: repitch_mode() });
         }
         self.tracks[t].clips = vec![clip];
         self.sel_clip = Some((t, 0));
