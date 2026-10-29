@@ -399,15 +399,33 @@ impl App {
             return self.enter_group((t, c));
         }
         self.player.stop();
+        // The detail view may already show this clip; then just give it the focus.
+        if self.detail_key != self.detail_key_of((t, c)) {
+            self.load_detail((t, c));
+        }
+        self.view = View::Editor { track: t, clip: c };
+        self.active = t;
+        self.sel_clip = Some((t, c));
+        self.refresh_playback();
+        self.status = format!("Editing {} — click the song above (or ⌘Return) to go back", clip.name);
+    }
+
+    /// What identifies the clip shown in the detail view: its place and what it plays. When it
+    /// changes, the detail view is loaded again.
+    pub(super) fn detail_key_of(&self, p: (usize, usize)) -> Option<DetailKey> {
+        let c = self.clip(p)?;
+        Some(((p.0, p.1), Arc::as_ptr(&c.audio) as usize, c.trim, c.len, c.looping))
+    }
+
+    /// Load clip `p` into the detail view (the editor below the song) without moving the focus.
+    pub(super) fn load_detail(&mut self, p: (usize, usize)) {
+        let Some(clip) = self.clip(p).cloned() else { return };
         // Editing works on what the clip shows: bake its trim in first.
         let visible = if clip.looping || clip.warp.is_some() || (clip.trim == 0 && clip.len >= clip.audio.frames()) {
             clip.audio.clone()
         } else {
             Arc::new(clip.visible())
         };
-        self.view = View::Editor { track: t, clip: c };
-        self.active = t;
-        self.sel_clip = Some((t, c));
         self.cues = clip.cues;
         self.regions = clip.regions;
         self.loop_points = clip.loop_points;
@@ -415,9 +433,9 @@ impl App {
         self.cursor = 0;
         self.view_start = 0.0;
         self.view_len = visible.frames().max(1) as f64;
+        self.detail_key = self.detail_key_of(p);
         self.set_audio(visible);
         self.zoom_fit();
-        self.status = format!("Editing {} — ⌘Return or ◀ Arrangement to go back", clip.name);
     }
 
     /// Store the editor's cues, regions and loop with the clip being edited.

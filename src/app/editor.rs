@@ -392,7 +392,7 @@ impl App {
 
         let total = self.timeline_frames();
         // Editing a clip, the ruler works like the song view's: a loop strip on top, bars below.
-        let clip_mode = matches!(self.view, View::Editor { .. });
+        let clip_mode = matches!(self.view, View::Editor { .. }) || self.split;
         let strip = Rect::from_min_max(full.min, Pos2::new(full.right(), full.top() + if clip_mode { LOOP_H } else { 0.0 }));
         let ruler = Rect::from_min_max(Pos2::new(full.left(), strip.bottom()), Pos2::new(full.right(), strip.bottom() + RULER_H));
         let scroll = Rect::from_min_max(Pos2::new(full.left(), full.bottom() - 15.0), full.max);
@@ -465,7 +465,8 @@ impl App {
 
 
         // Follow the playhead while playing.
-        let playing = self.player.is_playing();
+        // Song playback isn't shown here: the detail view only follows its own.
+        let playing = self.player.is_playing() && self.view != View::Arrangement;
         let play_pos = self.player.position();
         if playing {
             ui.ctx().request_repaint();
@@ -793,7 +794,7 @@ impl App {
         // lines and numbers, beat and sixteenth ticks as zoom allows.
         let bar = self.bar_frames();
         let beat = self.beat_frames();
-        let bar_ruler = matches!(self.view, View::Editor { .. }) && bar > 0.0;
+        let bar_ruler = (matches!(self.view, View::Editor { .. }) || self.split) && bar > 0.0;
         if bar_ruler {
             let mut g = beat / 4.0;
             while g > 0.0 && g / spp < 8.0 {

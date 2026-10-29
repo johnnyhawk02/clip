@@ -150,7 +150,11 @@ impl App {
     /// The clip being edited, and where the editor's frame 0 sits in its audio (a trimmed clip
     /// is edited as just its visible part).
     pub(super) fn ed_clip(&self) -> Option<((usize, usize), usize)> {
-        let View::Editor { track, clip } = self.view else { return None };
+        let (track, clip) = match self.view {
+            View::Editor { track, clip } => (track, clip),
+            // Previewed under the song, before it has the focus.
+            View::Arrangement => self.detail_key?.0,
+        };
         let c = self.clip((track, clip))?;
         let full = c.looping || c.warp.is_some() || (c.trim == 0 && c.len >= c.audio.frames());
         Some(((track, clip), if full { 0 } else { c.trim }))

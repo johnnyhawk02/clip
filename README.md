@@ -28,8 +28,10 @@ clips on the layers above to patch over parts of it.
   and the Metronome button in the top bar (or Control ▸ Metronome) clicks along on every beat, higher
   on the first of the bar. It's only heard, never exported.
   Clip ▸ Quantize (⌘U) snaps clip starts to the grid (Slice at Grid moved to ⌥⌘U).
-- Select one clip and the Clip View appears under the layers, as in Live: Warp on/off and the
-  clip's own BPM, Loop, Start and Length (bars.beats.sixteenths), Gain, Reverse and Edit.
+- Select one clip and it opens in the detail view under the song, as in Live: its waveform with the
+  bar ruler, start flag and loop strip, and the Clip View down the left (Warp and the clip's BPM,
+  Loop, Reverse, Start and Length in bars.beats.sixteenths, Gain). Click in the waveform to work on
+  the clip there; click the song above to go back. The transport sits along the top.
 - Playback mixes the layers live as it plays, as Live does, so edits and tempo changes are heard
   at once with nothing to render first. Dragging the tempo re-pitches what you hear straight away.
 - Recording puts the take on a new top layer. Layers ▸ Flatten Layers turns everything heard

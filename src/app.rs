@@ -194,6 +194,10 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// The clip loaded in the detail view under the song (see `detail_key_of`).
+    detail_key: Option<DetailKey>,
+    /// This frame shows the song with the detail view under it.
+    split: bool,
     /// The metronome clicks along while the song plays (Control ▸ Metronome).
     metronome: bool,
     /// Named markers in the song (frame, name), in time order, as Live's locators.
@@ -360,6 +364,9 @@ fn on_time_sel(a: Action) -> bool {
     matches!(a, ReverseClip | SwapSection | SliceClip | CollapseClip | WarpClip | LoopClip | Copy | Cut | AddToPool | GroupClips)
 }
 
+/// The clip in the detail view: (layer, clip), its audio, trim, length and whether it loops.
+type DetailKey = ((usize, usize), usize, usize, usize, bool);
+
 /// A file holding the Preferences setting for the phrase lines (bars between them).
 fn phrase_pref() -> PathBuf {
     crossfeed_pref().with_file_name("phrase-bars")
@@ -419,6 +426,8 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            detail_key: None,
+            split: false,
             metronome: false,
             locators: Vec::new(),
             loc_menu: None,
@@ -1104,10 +1113,11 @@ impl eframe::App for App {
         // the right, and the waveform filling the middle.
         self.update_meters(&ctx);
         let bar = egui::Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(10, 6));
-        egui::Panel::bottom("status").frame(bar).show(ui, |ui| self.status_bar(ui));
+        // The transport runs along the top, as in Live.
         if self.show_controls {
-            egui::Panel::bottom("transport").frame(bar).show(ui, |ui| self.transport_panel(ui));
+            egui::Panel::top("transport").frame(bar).show(ui, |ui| self.transport_panel(ui));
         }
+        egui::Panel::bottom("status").frame(bar).show(ui, |ui| self.status_bar(ui));
         // (Wait for the first layout so the palette has somewhere to go.)
         if self.show_tools && !self.palette_docked && self.desk.is_positive() {
             // Floating palette: drag it by its title bar; the cross hides it (Window ▸ Tools).
@@ -1142,9 +1152,45 @@ impl eframe::App for App {
                     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.side_panel(ui));
                 });
         }
+        // The detail view: the selected clip shown under the song, as in Live.
+        let detail = match self.view {
+            View::Editor { track, clip } => Some((track, clip)),
+            View::Arrangement => self.clip_view_clip().filter(|&p| self.clip(p).is_some_and(|c| c.group.is_none())),
+        };
+        self.split = detail.is_some() && !self.tracks.is_empty();
+        if let (View::Arrangement, Some(p)) = (self.view, detail) {
+            if self.detail_key != self.detail_key_of(p) {
+                self.load_detail(p);
+            }
+        }
         egui::CentralPanel::no_frame().show(ui, |ui| {
             self.desk = ui.max_rect();
-            if !self.tracks.is_empty() {
+            if self.split {
+                let full = ui.max_rect();
+                let bar = Rect::from_min_size(full.min, Vec2::new(full.width(), 34.0));
+                ui.painter().rect_filled(bar, 0.0, PANEL);
+                ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, LINE));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(12.0, 4.0))), |ui| self.view_bar(ui));
+                let body = Rect::from_min_max(Pos2::new(full.left(), bar.bottom()), full.max);
+                let detail_h = (body.height() * 0.42).clamp(150.0, 440.0);
+                let top = Rect::from_min_max(body.min, Pos2::new(body.right(), body.bottom() - detail_h));
+                let bottom = Rect::from_min_max(Pos2::new(body.left(), top.bottom()), body.max);
+                let side = Rect::from_min_max(bottom.min, Pos2::new(bottom.left() + 210.0, bottom.bottom()));
+                let wave = Rect::from_min_max(Pos2::new(side.right() + 1.0, bottom.top() + 1.0), bottom.max);
+                // The focus follows a click, as in Live: the song above, or the clip below.
+                if let Some(q) = ui.input(|i| i.pointer.press_origin().filter(|_| i.pointer.any_pressed())) {
+                    if top.contains(q) && self.view != View::Arrangement {
+                        self.back_to_arrangement();
+                    } else if let (true, View::Arrangement, Some(p)) = (wave.contains(q), self.view, detail) {
+                        self.edit_clip(p);
+                    }
+                }
+                ui.scope_builder(egui::UiBuilder::new().max_rect(top), |ui| self.arrangement(ui));
+                ui.painter().rect_filled(Rect::from_min_max(bottom.min, Pos2::new(bottom.right(), bottom.top() + 1.0)), 0.0, LINE);
+                ui.scope_builder(egui::UiBuilder::new().max_rect(side), |ui| self.clip_view(ui, side));
+                ui.painter().line_segment([Pos2::new(side.right(), bottom.top()), side.right_bottom()], Stroke::new(1.0, LINE));
+                ui.scope_builder(egui::UiBuilder::new().max_rect(wave), |ui| self.waveform(ui));
+            } else if !self.tracks.is_empty() {
                 let full = ui.max_rect();
                 let bar = Rect::from_min_size(full.min, Vec2::new(full.width(), 34.0));
                 ui.painter().rect_filled(bar, 0.0, PANEL);
