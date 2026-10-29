@@ -196,7 +196,7 @@ pub struct App {
     /// A fine line across the arrangement every this many bars (0 = none), from Preferences.
     phrase_bars: u32,
     /// Preferences window open, holding the settings to go back to on Cancel.
-    prefs_open: Option<u32>,
+    prefs_open: Option<(u32, bool)>,
     /// Dragging the loop brace: where it was grabbed (frames), the range then, and which part
     /// (the whole brace moves, an end resizes).
     arr_loop_grab: Option<(f64, Sel, LoopGrab)>,
@@ -338,6 +338,12 @@ fn phrase_pref() -> PathBuf {
     crossfeed_pref().with_file_name("phrase-bars")
 }
 
+/// A file whose presence means warped clips keep their pitch when the tempo changes (stretching)
+/// instead of re-pitching.
+fn keep_pitch_pref() -> PathBuf {
+    crossfeed_pref().with_file_name("keep-pitch")
+}
+
 /// A file holding the path of the project last opened or saved, reopened at launch.
 fn last_project_pref() -> PathBuf {
     crossfeed_pref().with_file_name("last-project")
@@ -390,7 +396,10 @@ impl App {
             tempo_drag: None,
             laid_out_tempo: 120.0,
             phrase_bars: std::fs::read_to_string(phrase_pref()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(4),
-            prefs_open: None,
+            prefs_open: {
+                REPITCH.store(!keep_pitch_pref().exists(), std::sync::atomic::Ordering::Relaxed);
+                None
+            },
             arr_loop_grab: None,
             ruler_zoom: None,
             ed_ruler: None,
@@ -1533,7 +1542,7 @@ impl App {
             Action::MixDialog => self.mix_include = Some(vec![true; self.tracks.len()]),
             Action::LayerUp => self.move_layer(true),
             Action::LayerDown => self.move_layer(false),
-            Action::Preferences => self.prefs_open = Some(self.phrase_bars),
+            Action::Preferences => self.prefs_open = Some((self.phrase_bars, repitch_mode())),
             Action::MergeDown => self.merge_down(),
             Action::TrackColor => {
                 let t = &mut self.tracks[self.active];

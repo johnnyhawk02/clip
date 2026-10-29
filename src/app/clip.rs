@@ -39,6 +39,16 @@ pub(super) struct Warp {
     pub(super) source: Arc<Audio>,
     /// The song tempo `audio` is currently stretched to.
     pub(super) tempo: f64,
+    /// Whether `audio` was made by re-pitching (speed and pitch together) rather than stretching.
+    pub(super) repitch: bool,
+}
+
+/// How warped clips follow the song tempo: re-pitched like a record (speed and pitch change
+/// together, as in Live's Re-Pitch), or stretched keeping their pitch. Set in Preferences.
+pub(super) static REPITCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub(super) fn repitch_mode() -> bool {
+    REPITCH.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A tempo and bar count written in a file name, as in "Loop 118bpm 16bar" or "Kick - 124 BPM".
@@ -145,8 +155,10 @@ impl Clip {
         if !self.fit_place_to_tempo(tempo) {
             return false;
         }
-        let w = self.warp.as_ref().unwrap();
-        let (audio, peaks) = stretched(&w.source, w.bpm / tempo);
+        let repitch = repitch_mode();
+        let w = self.warp.as_mut().unwrap();
+        w.repitch = repitch;
+        let (audio, peaks) = stretched(&w.source, w.bpm / tempo, repitch);
         (self.audio, self.peaks) = (audio, peaks);
         true
     }
@@ -179,16 +191,17 @@ impl Clip {
         true
     }
 
-    /// Whether this clip still shows audio stretched for an earlier tempo.
+    /// Whether this clip still shows audio made for an earlier tempo or the other warp mode.
     pub(super) fn awaiting_stretch(&self) -> Option<(usize, f64)> {
         let w = self.warp.as_ref()?;
         let n = (w.source.frames() as f64 * w.bpm / w.tempo).round() as usize;
-        (self.audio.frames().abs_diff(n) > 2).then(|| (Arc::as_ptr(&w.source) as usize, w.bpm / w.tempo))
+        let stale = self.audio.frames().abs_diff(n) > 2 || (w.repitch != repitch_mode() && (w.bpm - w.tempo).abs() > 1e-6);
+        stale.then(|| (Arc::as_ptr(&w.source) as usize, w.bpm / w.tempo))
     }
 
     /// Start warping at clip tempo `bpm`: from now on the clip follows the song tempo.
     pub(super) fn warp_from(&mut self, bpm: f64, song_tempo: f64) {
-        self.warp = Some(Warp { bpm, source: self.audio.clone(), tempo: bpm });
+        self.warp = Some(Warp { bpm, source: self.audio.clone(), tempo: bpm, repitch: repitch_mode() });
         self.fit_to_tempo(song_tempo);
     }
 
@@ -260,9 +273,16 @@ pub(super) fn crossfades(clips: &[Clip]) -> Vec<(usize, usize)> {
         .collect()
 }
 
-/// A warped clip's source stretched by `factor` (and its peaks for drawing).
-pub(super) fn stretched(source: &Arc<Audio>, factor: f64) -> (Arc<Audio>, Arc<Peaks>) {
-    let audio = if (factor - 1.0).abs() < 1e-6 { source.clone() } else { Arc::new(effects::time_stretch(source, factor)) };
+/// A warped clip's source made `factor` times as long, re-pitched or stretched (and its peaks
+/// for drawing).
+pub(super) fn stretched(source: &Arc<Audio>, factor: f64, repitch: bool) -> (Arc<Audio>, Arc<Peaks>) {
+    let audio = if (factor - 1.0).abs() < 1e-6 {
+        source.clone()
+    } else if repitch {
+        Arc::new(source.varispeed(factor))
+    } else {
+        Arc::new(effects::time_stretch(source, factor))
+    };
     let peaks = Arc::new(Peaks::build(&audio));
     (audio, peaks)
 }
@@ -714,7 +734,7 @@ impl App {
 
     /// Stretch warped clips' audio for the current tempo on another thread, so the app doesn't
     /// stop while it works; `poll_stretch` swaps the results in.
-    fn stretch_in_background(&mut self) {
+    pub(super) fn stretch_in_background(&mut self) {
         let mut jobs: Vec<(Arc<Audio>, f64)> = Vec::new();
         for c in self.tracks.iter().flat_map(|t| &t.clips) {
             if let (Some((key, factor)), Some(w)) = (c.awaiting_stretch(), c.warp.as_ref()) {
@@ -728,9 +748,10 @@ impl App {
             return;
         }
         let (tx, rx) = channel();
+        let repitch = repitch_mode();
         std::thread::spawn(move || {
             for (source, factor) in jobs {
-                let (audio, peaks) = stretched(&source, factor);
+                let (audio, peaks) = stretched(&source, factor, repitch);
                 if tx.send((Arc::as_ptr(&source) as usize, factor, audio, peaks)).is_err() {
                     return;
                 }
@@ -750,6 +771,9 @@ impl App {
                     for c in self.tracks.iter_mut().flat_map(|t| t.clips.iter_mut()) {
                         if c.awaiting_stretch().is_some_and(|(k, f)| k == key && (f - factor).abs() < 1e-9) {
                             (c.audio, c.peaks) = (audio.clone(), peaks.clone());
+                            if let Some(w) = c.warp.as_mut() {
+                                w.repitch = repitch_mode();
+                            }
                             got = true;
                         }
                     }

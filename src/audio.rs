@@ -210,7 +210,23 @@ impl Audio {
         if rate == self.rate || self.frames() == 0 {
             return self.clone();
         }
-        let step = self.rate as f64 / rate as f64; // input frames per output frame
+        let step = self.rate as f64 / rate as f64;
+        self.resample_by(step, rate, ((self.frames() as f64) / step).floor() as usize)
+    }
+
+    /// Play `factor` times as long, like slowing a record down: speed and pitch change together
+    /// (Live's Re-Pitch). Same sample rate; exactly `round(frames × factor)` frames long.
+    pub fn varispeed(&self, factor: f64) -> Audio {
+        let out_len = (self.frames() as f64 * factor).round() as usize;
+        if (factor - 1.0).abs() < 1e-9 || self.frames() == 0 || out_len == 0 {
+            return self.clone();
+        }
+        self.resample_by(self.frames() as f64 / out_len as f64, self.rate, out_len)
+    }
+
+    /// The sinc resampler behind `resampled` and `varispeed`: `step` input frames per output
+    /// frame, `out_len` frames out at `rate`.
+    fn resample_by(&self, step: f64, rate: u32, out_len: usize) -> Audio {
         let cutoff = (1.0 / step).min(1.0) * 0.95;
         let half = (24.0 / cutoff).ceil() as usize; // filter half-length, in input frames
         const RES: usize = 256; // kernel table entries per input frame
@@ -236,7 +252,6 @@ impl Audio {
             table[i] * (1.0 - f) + table[i + 1] * f
         };
         let n = self.frames() as i64;
-        let out_len = ((self.frames() as f64) / step).floor() as usize;
         Audio {
             rate,
             channels: self
@@ -768,6 +783,18 @@ mod tests {
         assert_eq!((b.frames(), b.num_channels(), b.rate), (400, 2, 1000));
         assert!((b.channels[1][200] - a.channels[1][200]).abs() < 1e-3);
         std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn varispeed_changes_speed_and_pitch_together() {
+        // A 1 kHz tone played twice as long becomes a 500 Hz tone, exactly twice the length.
+        let n = 44100;
+        let tone = Audio { rate: 44100, channels: vec![(0..n).map(|i| (i as f32 * 1000.0 * 2.0 * std::f32::consts::PI / 44100.0).sin() * 0.5).collect()] };
+        let slow = tone.varispeed(2.0);
+        assert_eq!(slow.frames(), 2 * n);
+        let crossings = |a: &Audio| a.channels[0].windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+        assert!((crossings(&slow) as i64 - crossings(&tone) as i64).abs() <= 2, "same cycles over twice the time: half the pitch");
+        assert!((slow.peak(1000, 80000) - 0.5).abs() < 0.01);
     }
 
     #[test]

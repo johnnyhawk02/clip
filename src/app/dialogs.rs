@@ -664,11 +664,12 @@ impl App {
 
     /// PhotoSound ▸ Preferences (⌘,).
     pub(super) fn prefs_dialog(&mut self, ctx: &egui::Context) {
-        let Some(before) = self.prefs_open else { return };
+        let Some((bars_before, repitch_before)) = self.prefs_open else { return };
         let mut ok = false;
         let mut cancel = false;
+        let mut repitch = repitch_mode();
         let resp = dialog_modal("prefs").show(ctx, |ui| {
-            ui.set_width(380.0);
+            ui.set_width(420.0);
             dialog_header(ui, "Preferences", "");
             dialog_grid("prefsgrid").show(ui, |ui| {
                 ui.label("Phrase lines");
@@ -678,12 +679,20 @@ impl App {
                     ui.label(if self.phrase_bars == 0 { "bars (off)" } else { "bars" });
                 });
                 ui.end_row();
+                ui.label("Tempo changes");
+                ui.vertical(|ui| {
+                    ui.radio_value(&mut repitch, true, "Re-Pitch: speed and pitch follow, like a record");
+                    ui.radio_value(&mut repitch, false, "Keep pitch: stretch the audio");
+                });
+                ui.end_row();
             });
-            ui.label(egui::RichText::new("A fine line across the arrangement, counting from bar 1. 0 turns them off.").color(MUTED));
+            ui.label(egui::RichText::new("Phrase lines are a fine line across the arrangement, counting from bar 1. 0 turns them off. Tempo changes apply to warped clips.").color(MUTED));
             (ok, cancel) = dialog_buttons(ui, "Done", true, |_| {});
         });
+        REPITCH.store(repitch, std::sync::atomic::Ordering::Relaxed);
         if cancel || resp.should_close() {
-            self.phrase_bars = before;
+            self.phrase_bars = bars_before;
+            REPITCH.store(repitch_before, std::sync::atomic::Ordering::Relaxed);
             self.prefs_open = None;
         } else if ok {
             if std::env::var_os("SOUND_EDIT_ACTIONS").is_none() {
@@ -692,8 +701,16 @@ impl App {
                     let _ = std::fs::create_dir_all(dir);
                 }
                 let _ = std::fs::write(p, self.phrase_bars.to_string());
+                if repitch {
+                    let _ = std::fs::remove_file(keep_pitch_pref());
+                } else {
+                    let _ = std::fs::write(keep_pitch_pref(), b"");
+                }
             }
             self.prefs_open = None;
+            if repitch != repitch_before {
+                self.stretch_in_background();
+            }
         }
     }
 

@@ -182,7 +182,7 @@ impl App {
                 if let Some(bpm) = clip_tempo_from_name(&name, a.frames(), a.rate, self.beats_per_bar).filter(|_| self.auto_warp) {
                     self.tempo = (bpm * 100.0).round() / 100.0;
                     self.laid_out_tempo = self.tempo;
-                    clip.warp = Some(Warp { bpm, source: a.clone(), tempo: bpm });
+                    clip.warp = Some(Warp { bpm, source: a.clone(), tempo: bpm, repitch: repitch_mode() });
                     clip.fit_to_tempo(self.tempo);
                 }
                 let mut t = Track::new(name);
@@ -355,7 +355,7 @@ impl App {
                         clip.len = if c.looping { c.len } else { clip.len };
                         if let Some((bpm, tempo, i)) = c.warp {
                             if let Some(source) = audio.get(i) {
-                                clip.warp = Some(Warp { bpm, source: source.clone(), tempo });
+                                clip.warp = Some(Warp { bpm, source: source.clone(), tempo, repitch: false });
                             }
                         }
                         track.clips.push(clip);
@@ -389,6 +389,8 @@ impl App {
         self.refresh_playback();
         self.arr_fit();
         self.status = format!("Opened project {}", file_name(&path));
+        // Warped clips saved in the other warp mode are redone in this one.
+        self.stretch_in_background();
     }
 
     pub(super) fn export(&mut self, selection_only: bool) {
