@@ -130,6 +130,14 @@ impl App {
                         let last = self.synth.last().unwrap().0;
                         self.synth.push((last + 8, egui::Event::PointerMoved(pos)));
                     }
+                    // space: a tap of the Space bar (press, then release a few frames later).
+                    "space" => {
+                        let at = self.synth.last().map_or(self.synth_frame, |l| l.0) + 1;
+                        for (i, pressed) in [(0, true), (3, false)] {
+                            let e = egui::Event::Key { key: egui::Key::Space, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+                            self.synth.push((at + i, e));
+                        }
+                    }
                     // drag:x1|y1|x2|y2 presses at one point, moves to the other and lets go there;
                     // draghold:… stops before letting go (to snapshot a drag in progress).
                     "drag" | "draghold" => {

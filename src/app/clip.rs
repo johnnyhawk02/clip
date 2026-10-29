@@ -577,7 +577,8 @@ impl App {
     fn enter_group(&mut self, (t, c): (usize, usize)) {
         let Some(clip) = self.clip((t, c)).cloned() else { return };
         let Some(inner) = clip.group.clone() else { return };
-        self.player.stop();
+        // Playing on into the group: the same moment, now counted from the group's start.
+        let playing = self.player.is_playing().then(|| self.player.position());
         self.nest.push(NestFrame {
             tracks: std::mem::replace(&mut self.tracks, (*inner).clone()),
             track: t,
@@ -592,13 +593,17 @@ impl App {
         self.arr_cursor = 0;
         self.arr_fit();
         self.refresh_playback();
+        if let Some(pos) = playing {
+            let inside = (pos.saturating_sub(clip.start) + clip.trim).min(self.arrangement_frames());
+            self.go_to_frame(inside);
+        }
         self.status = format!("Inside {} — ⌘Return or the path above goes back up", clip.name);
     }
 
     /// Close the open group, folding its arrangement back into its clip.
     pub(super) fn leave_group(&mut self) {
         let Some(f) = self.nest.pop() else { return };
-        self.player.stop();
+        let playing = self.player.is_playing().then(|| self.player.position());
         let inner = std::mem::replace(&mut self.tracks, f.tracks);
         if let Some(mut c) = self.tracks.get(f.track).and_then(|t| t.clips.get(f.clip)).cloned() {
             self.set_group_content(&mut c, inner);
@@ -610,6 +615,11 @@ impl App {
         self.arr_view_start = f.view_start;
         self.arr_view_len = f.view_len;
         self.refresh_playback();
+        // Playing on back out in the song, at the same moment.
+        if let (Some(pos), Some(c)) = (playing, self.clip((f.track, f.clip))) {
+            let out = c.start + pos.saturating_sub(c.trim);
+            self.go_to_frame(out);
+        }
     }
 
     /// Group the selected clips into one clip that holds them, in the same places (⌘G).
