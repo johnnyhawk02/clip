@@ -191,7 +191,7 @@ impl App {
                 p.rect_stroke(Rect::from_center_size(r.center(), Vec2::splat(7.0)), 1.0, Stroke::new(1.0, Color32::from_gray(200)), egui::StrokeKind::Inside);
             }
         }
-        if selected {
+        if selected || self.sel_slots.contains(&(t, s)) {
             p.rect_stroke(r, 3.0, Stroke::new(2.0, INK), egui::StrokeKind::Inside);
         }
         // Something dragged over the slot: show where it would land.
@@ -215,7 +215,20 @@ impl App {
             self.sel_slot = Some((t, s));
             self.edit_clip((t, SLOT + s));
             self.full_edit = true;
+        } else if resp.clicked() && ui.input(|i| i.modifiers.shift) {
+            // ⇧-click: add or remove slots from the selection (to group them, ⌘G).
+            match self.sel_slots.iter().position(|&p| p == (t, s)) {
+                Some(i) => {
+                    self.sel_slots.remove(i);
+                }
+                None => self.sel_slots.push((t, s)),
+            }
+            if let Some(prev) = self.sel_slot.filter(|&p| p != (t, s) && !self.sel_slots.contains(&p)) {
+                self.sel_slots.push(prev);
+            }
+            self.sel_slot = Some((t, s));
         } else if resp.clicked() {
+            self.sel_slots.clear();
             self.sel_slot = Some((t, s));
             self.set_active(t);
             // A click on a clip's play triangle launches it.
@@ -348,10 +361,41 @@ impl App {
     }
 
     /// The transport stopped: launched clips stop with it (the tracks stay with the Session).
+    /// With Record to Song on, what was played is written into the song view first.
     pub(super) fn session_stopped(&mut self) {
+        if self.session_rec {
+            self.record_session();
+        }
         for p in &mut self.session_play {
             p.segments.clear();
         }
+    }
+
+    /// Write every launched clip, from its launch to where it stopped, into its track in the
+    /// song view (over what was there), as Live's Arrangement Record does.
+    fn record_session(&mut self) {
+        let now = self.stopped_at;
+        let played: Vec<(usize, usize, usize, usize)> = self
+            .session_play
+            .iter()
+            .enumerate()
+            .flat_map(|(t, p)| p.segments.iter().map(move |&(s, from, to)| (t, s, from, to.unwrap_or(now).min(now))))
+            .filter(|&(_, _, from, to)| to > from)
+            .collect();
+        if played.is_empty() {
+            return;
+        }
+        self.push_undo("Record Session");
+        for (t, s, from, to) in played {
+            let Some(mut c) = self.clip((t, SLOT + s)).cloned() else { continue };
+            (c.start, c.len) = (from, to - from);
+            self.tracks[t].clips.push(c);
+            let i = self.tracks[t].clips.len() - 1;
+            self.place_over((t, i));
+        }
+        self.sel_clip = None;
+        self.dirty = true;
+        self.status = "Recorded the session into the song view — Back to Arrangement to hear it there".into();
     }
 
     /// Back to Arrangement (as Live): every track plays its song-view clips again.
@@ -365,6 +409,63 @@ impl App {
     /// Whether any track is playing from the Session view instead of the song view.
     pub(super) fn session_owns_any(&self) -> bool {
         self.session_play.iter().any(|p| p.owned)
+    }
+}
+
+impl App {
+    /// ⌘G in the Session view: the selected slots' clips become one grouped clip, in the first
+    /// of them. Each source track gets a track inside the group; clips from one track play one
+    /// after another, in scene order.
+    pub(super) fn group_slots(&mut self) {
+        let mut picked: Vec<(usize, usize)> = self.sel_slots.iter().copied().chain(self.sel_slot).collect();
+        picked.sort_by_key(|&(t, s)| (s, t));
+        picked.dedup();
+        picked.retain(|&(t, s)| self.clip((t, SLOT + s)).is_some());
+        let Some(&(t0, s0)) = picked.first() else { return };
+        self.push_undo("Group Clips");
+        let mut inner: Vec<Track> = Vec::new();
+        let mut track_of: Vec<(usize, usize)> = Vec::new();
+        for &(t, s) in &picked {
+            let i = match track_of.iter().find(|(src, _)| *src == t) {
+                Some(&(_, i)) => i,
+                None => {
+                    let mut nt = self.tracks[t].clone();
+                    (nt.clips, nt.slots) = (Vec::new(), Vec::new());
+                    inner.push(nt);
+                    track_of.push((t, inner.len() - 1));
+                    inner.len() - 1
+                }
+            };
+            let mut c = self.tracks[t].slots[s].take().unwrap();
+            c.looping = false;
+            c.start = inner[i].clips.last().map_or(0, |l| l.end());
+            inner[i].clips.push(c);
+        }
+        let n = (1..).find(|i| !self.tracks.iter().flat_map(|t| t.slots.iter().flatten().chain(&t.clips)).any(|c| c.name == format!("Group {i}"))).unwrap();
+        let mut g = Clip::new(format!("Group {n}"), Arc::new(Audio { rate: self.rate(), channels: vec![Vec::new()] }), 0);
+        self.set_group_content(&mut g, inner);
+        self.tracks[t0].slots[s0] = Some(slot_clip(g));
+        self.sel_slots.clear();
+        self.sel_slot = Some((t0, s0));
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = format!("Grouped {} clips into Group {n} — double-click it to open it", picked.len());
+    }
+
+    /// Clip ▸ Copy to Session: the selected song-view clip goes into the first empty slot on
+    /// its track.
+    pub(super) fn copy_to_session(&mut self) {
+        let Some((t, c)) = self.sel_clip.filter(|&(_, c)| c < SLOT) else { return };
+        let Some(clip) = self.clip((t, c)).cloned() else { return };
+        self.fit_slots();
+        let Some(s) = self.tracks[t].slots.iter().position(|s| s.is_none()) else {
+            self.status = "No empty slot on that track — add a scene".into();
+            return;
+        };
+        self.push_undo("Copy to Session");
+        self.tracks[t].slots[s] = Some(slot_clip(clip));
+        self.dirty = true;
+        self.status = format!("Copied to the Session view, scene {}", self.scenes[s]);
     }
 }
 

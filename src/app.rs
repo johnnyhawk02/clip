@@ -65,6 +65,8 @@ struct NestFrame {
     active: usize,
     view_start: f64,
     view_len: f64,
+    /// It was opened from the Session view (a group in a slot), which comes back on closing it.
+    from_session: bool,
 }
 
 /// Which view is showing: the arrangement of clips, or one clip open in the waveform editor.
@@ -208,10 +210,14 @@ pub struct App {
     slot_drops: HashMap<PathBuf, (usize, usize)>,
     /// The selected Session slot: (track, scene).
     sel_slot: Option<(usize, usize)>,
+    /// More Session slots selected with ⇧-click.
+    sel_slots: Vec<(usize, usize)>,
     /// What each track is playing from the Session view.
     session_play: Vec<TrackPlay>,
     /// Launch quantization in bars (0 = none), as Live's global quantization.
     launch_q: f64,
+    /// Record to Song: launched Session clips are written into the song view when playback stops.
+    session_rec: bool,
     /// The locator last clicked (Delete removes it, ⌘R renames it).
     selected_locator: Option<usize>,
     /// Dragging this locator along the ruler.
@@ -475,8 +481,10 @@ impl App {
             slot_rects: Vec::new(),
             slot_drops: HashMap::new(),
             sel_slot: None,
+            sel_slots: Vec::new(),
             session_play: Vec::new(),
             launch_q: 1.0,
+            session_rec: false,
             selected_locator: None,
             loc_drag: None,
             loc_rename: None,
@@ -934,6 +942,8 @@ impl App {
         if self.player.is_playing() {
             self.stopped_at = self.player.position();
             self.player.stop();
+            self.session_stopped();
+            self.refresh_playback();
             return;
         }
         let end = self.arrangement_frames();
@@ -945,6 +955,9 @@ impl App {
     }
 
     fn stop(&mut self) {
+        if self.player.is_playing() && self.view == View::Arrangement {
+            self.stopped_at = self.player.position();
+        }
         self.player.stop();
         self.session_stopped();
         self.refresh_playback();

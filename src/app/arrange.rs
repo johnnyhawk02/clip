@@ -233,6 +233,10 @@ impl App {
         chosen = chosen.or(pick(ui, "Slice at Grid", Action::SliceClip));
         chosen = chosen.or(pick(ui, "Reverse", Action::ReverseClip));
         chosen = chosen.or(pick(ui, "Add to Pool", Action::AddToPool));
+        if ui.button("Copy to Session").clicked() {
+            ui.close();
+            self.copy_to_session();
+        }
         ui.menu_button("Mangle", |ui| {
             for (label, a) in [
                 ("Shuffle", Action::MangleShuffle),
@@ -603,6 +607,9 @@ impl App {
                                 ui.selectable_value(&mut self.launch_q, v, label);
                             }
                         }).response.on_hover_text("When launched clips start: the next bar, beat or none");
+                    }
+                    if self.show_session && ui.add(Button::new("● Record to Song").selected(self.session_rec)).on_hover_text("Write the clips you launch into the song view (when playback stops)").clicked() {
+                        self.session_rec = !self.session_rec;
                     }
                     if self.session_owns_any() && ui.button("Back to Arrangement").on_hover_text("Tracks play their song-view clips again").clicked() {
                         self.back_to_song_view();

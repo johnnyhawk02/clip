@@ -12,10 +12,11 @@ impl App {
                 Action::New | Action::Open | Action::Quit | Action::Preferences | Action::BatchConvert | Action::Record | Action::NewClip | Action::ImportClip => true,
                 Action::SaveProject | Action::SaveProjectAs => doc,
                 Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Dither | Action::AutoGain => true,
-                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed | Action::Follow | Action::Metronome | Action::DockPalette => true,
+                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed | Action::Follow | Action::Metronome | Action::DockPalette | Action::RecordToSong => true,
                 Action::Continue | Action::AddLocator => doc,
                 Action::PrevLocator | Action::NextLocator => !self.locators.is_empty(),
                 Action::RenameLocator => self.selected_locator.is_some(),
+                Action::GroupClips if self.show_session => self.sel_slot.is_some(),
                 Action::Quantize | Action::ClipOnOff => has_clip,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
                 Action::Export | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
@@ -138,6 +139,7 @@ impl App {
             Action::Crossfeed => self.crossfeed,
             Action::Follow => self.follow,
             Action::Metronome => self.metronome,
+            Action::RecordToSong => self.session_rec,
             Action::ToggleSnap => self.snap,
             Action::AutoWarp => self.auto_warp,
             Action::WarpClip => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.warp.is_some()),
@@ -378,6 +380,7 @@ impl App {
             Action::SplitClip => self.split_clip(),
             Action::DuplicateClip => self.duplicate_clip(),
             Action::NewClip => self.new_clip(),
+            Action::GroupClips if self.show_session && self.view == View::Arrangement => self.group_slots(),
             Action::GroupClips => self.group_clips(),
             Action::TempoFromClip => self.tempo_from_clip(),
             Action::LoopClip => self.toggle_clip_loop(),
@@ -498,6 +501,7 @@ impl App {
             Action::NextLocator => self.jump_locator(true),
             Action::Continue => self.continue_play(),
             Action::Follow => self.follow = !self.follow,
+            Action::RecordToSong => self.session_rec = !self.session_rec,
             Action::Metronome => {
                 self.metronome = !self.metronome;
                 self.refresh_playback();

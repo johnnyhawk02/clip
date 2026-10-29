@@ -137,6 +137,14 @@ impl App {
                         let at = self.synth.last().map_or(self.synth_frame, |l| l.0) + 1;
                         self.synth.push((at, egui::Event::ModifiersChanged(self.synth_mods)));
                     }
+                    // editslot:t|s — what double-clicking a Session slot does.
+                    "editslot" => {
+                        let (t, sl) = arg.split_once('|').unwrap_or(("0", "0"));
+                        let (t, sl) = (t.parse().unwrap_or(0), sl.parse().unwrap_or(0));
+                        self.sel_slot = Some((t, sl));
+                        self.edit_clip((t, session::SLOT + sl));
+                        self.full_edit = true;
+                    }
                     // space: a tap of the Space bar (press, then release a few frames later).
                     // key:ArrowLeft (any egui key name) — a tap of that key, with the `mods:` held.
                     "space" | "key" => {

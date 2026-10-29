@@ -111,6 +111,7 @@ pub enum Action {
     AddLocator,
     RenameLocator,
     Metronome,
+    RecordToSong,
     PrevLocator,
     NextLocator,
     ShowRegions,
@@ -172,7 +173,7 @@ pub const ALL: &[Action] = &[
     ZoomIn, ZoomOut, ZoomSel, ZoomFit, ZoomBack, Crossfeed, NarrowGrid, WidenGrid, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
     ShowControls, ShowInfo, Convert, Equalizer, Envelope, Bender, Record, AddCue, NextCue, PrevCue,
     ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, NextTrack,
-    PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, OffsetTrack, TrackColor, LayerUp, LayerDown, Preferences, DuplicateTime, DeleteTime, InsertTime, CopyTime, CutTime, PasteTime, Quantize, ClipOnOff, Continue, Follow, Metronome, AddLocator, RenameLocator, PrevLocator, NextLocator, ShowRegions, Dither, CutGaps,
+    PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, OffsetTrack, TrackColor, LayerUp, LayerDown, Preferences, DuplicateTime, DeleteTime, InsertTime, CopyTime, CutTime, PasteTime, Quantize, ClipOnOff, Continue, Follow, Metronome, RecordToSong, AddLocator, RenameLocator, PrevLocator, NextLocator, ShowRegions, Dither, CutGaps,
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
     GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
     ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp, SliceClip, ReverseClip,
@@ -254,7 +255,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(CollapseTrack),
         ],
     ),
-    ("Control", &[Do(PlayPause), Do(Continue), Do(Stop), Do(Loop), Do(Follow), Do(Metronome), Separator, Do(GoStart), Do(GoEnd), Separator, Do(AddLocator), Do(RenameLocator), Do(PrevLocator), Do(NextLocator), Separator, Do(Crossfeed)]),
+    ("Control", &[Do(PlayPause), Do(Continue), Do(Stop), Do(Loop), Do(Follow), Do(Metronome), Do(RecordToSong), Separator, Do(GoStart), Do(GoEnd), Separator, Do(AddLocator), Do(RenameLocator), Do(PrevLocator), Do(NextLocator), Separator, Do(Crossfeed)]),
     ("View", &[Do(ZoomIn), Do(ZoomOut), Do(ZoomSel), Do(ZoomBack), Do(ZoomFit), Separator, Do(ToolSelect), Do(ToolSplit)]),
     // Everything from the sound-editor days, out of the way.
     (
@@ -339,7 +340,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | ShowPool | Crossfeed | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues | Follow | Metronome)
+            || matches!(self, Loop | MuteTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | ShowPool | Crossfeed | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues | Follow | Metronome | RecordToSong)
     }
 
     pub fn label(self) -> &'static str {
@@ -485,6 +486,7 @@ impl Action {
             AddLocator => "Add Locator",
             RenameLocator => "Rename Locator…",
             Metronome => "Metronome",
+            RecordToSong => "Record Session to Song",
             PrevLocator => "Previous Locator",
             NextLocator => "Next Locator",
             ShowRegions => "Regions",

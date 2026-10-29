@@ -604,14 +604,18 @@ impl App {
             active: self.active,
             view_start: self.arr_view_start,
             view_len: self.arr_view_len,
+            from_session: self.show_session,
         });
+        // A group opens as its own arrangement, whichever view it was launched from.
+        self.show_session = false;
+        self.full_edit = false;
         self.active = 0;
         self.sel_clip = None;
         self.sel_extra.clear();
         self.arr_cursor = 0;
         self.arr_fit();
         self.refresh_playback();
-        if let Some(pos) = playing {
+        if let Some(pos) = playing.filter(|_| c < SLOT) {
             let inside = (pos.saturating_sub(clip.start) + clip.trim).min(self.arrangement_frames());
             self.go_to_frame(inside);
         }
@@ -623,18 +627,30 @@ impl App {
         let Some(f) = self.nest.pop() else { return };
         let playing = self.player.is_playing().then(|| self.player.position());
         let inner = std::mem::replace(&mut self.tracks, f.tracks);
-        if let Some(mut c) = self.tracks.get(f.track).and_then(|t| t.clips.get(f.clip)).cloned() {
+        if let Some(mut c) = self.clip((f.track, f.clip)).cloned() {
             self.set_group_content(&mut c, inner);
-            self.tracks[f.track].clips[f.clip] = c;
+            if f.clip >= SLOT {
+                c = session::slot_clip(c);
+            }
+            if let Some(slot) = self.clip_mut((f.track, f.clip)) {
+                *slot = c;
+            }
         }
         self.active = f.active;
-        self.sel_clip = Some((f.track, f.clip));
+        self.show_session = f.from_session;
+        self.status = "Closed the group".into();
+        if f.clip >= SLOT {
+            self.sel_slot = Some((f.track, f.clip - SLOT));
+            self.sel_clip = None;
+        } else {
+            self.sel_clip = Some((f.track, f.clip));
+        }
         self.sel_extra.clear();
         self.arr_view_start = f.view_start;
         self.arr_view_len = f.view_len;
         self.refresh_playback();
         // Playing on back out in the song, at the same moment.
-        if let (Some(pos), Some(c)) = (playing, self.clip((f.track, f.clip))) {
+        if let (Some(pos), Some(c)) = (playing.filter(|_| f.clip < SLOT), self.clip((f.track, f.clip))) {
             let out = c.start + pos.saturating_sub(c.trim);
             self.go_to_frame(out);
         }
