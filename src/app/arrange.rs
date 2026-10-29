@@ -75,7 +75,10 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
     }
     // The name stays on one line, cut short with "…" when the clip is narrow (and leaves room
     // for the loop mark).
-    let max_w = r.right().min(clip_to.right()) - name_x - if c.looping { 20.0 } else { 4.0 };
+    // Clips that don't follow the tempo (warp off) say so in the strip.
+    let no_warp = c.warp.is_none() && c.group.is_none();
+    let badge_w = if no_warp { 50.0 } else { 0.0 };
+    let max_w = r.right().min(clip_to.right()) - name_x - badge_w - if c.looping { 20.0 } else { 4.0 };
     if max_w > 12.0 {
         let mut job = egui::text::LayoutJob::simple_singleline(c.name.clone(), FontId::proportional(11.0), INK);
         job.wrap = egui::text::TextWrapping { max_width: max_w, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
@@ -140,6 +143,14 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
             let ctr = Pos2::new(r.right().min(clip_to.right()) - 10.0, title.center().y);
             p.circle_stroke(ctr, 3.5, Stroke::new(1.2, INK));
             p.add(egui::Shape::convex_polygon(vec![ctr + Vec2::new(1.5, -5.5), ctr + Vec2::new(4.5, -3.5), ctr + Vec2::new(1.0, -1.5)], INK, Stroke::NONE));
+        }
+    }
+    if no_warp && r.width() > 70.0 {
+        let right = r.right().min(clip_to.right()) - if c.looping { 20.0 } else { 4.0 };
+        let badge = Rect::from_min_max(Pos2::new(right - 46.0, title.top() + 2.0), Pos2::new(right, title.bottom() - 2.0));
+        if badge.left() > r.left().max(clip_to.left()) + 20.0 {
+            p.rect_filled(badge, 3.0, Color32::WHITE.gamma_multiply(0.7));
+            p.text(badge.center(), Align2::CENTER_CENTER, "no warp", FontId::proportional(9.5), INK);
         }
     }
     let stroke = if selected { Stroke::new(2.0, INK) } else { Stroke::new(1.0, color.lerp_to_gamma(Color32::WHITE, 0.3)) };
