@@ -13,7 +13,9 @@ clips on the layers above to patch over parts of it.
 
 - Parts of a clip that a layer above plays over are washed out, so the screen shows what you hear.
 - The eye beside each layer hides it; the layers below then show through.
-- Right-click a layer (or the Layers menu) for Move Layer Up / Down, which changes what wins.
+- Right-click a layer (or the Layers menu) for Move Layer Up / Down, which changes what wins,
+  and Merge Down, which joins a layer with the one below into one layer of clips that sounds the
+  same: each clip is cut down to the part that was heard, with short crossfades at the joins.
 - Where a layer cuts in over one that is still sounding, the one cut off fades out over 5 ms so
   there is no click. A clip that starts or ends on its own keeps its edge.
 - Each layer keeps a volume slider and a colour. Solo and pan are gone.

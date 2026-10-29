@@ -56,16 +56,21 @@ pub(super) fn segments(layers: &[Layer]) -> Vec<(usize, usize, usize)> {
 }
 
 /// The heard pieces of the visible layers as one layer of clips: each clip cut down to the
-/// stretches where it wins. Used where the result has to be clips (a Live Set).
-pub(super) fn flatten_clips(tracks: &[Track]) -> Track {
+/// stretches where it wins. Where a piece is cut off mid-sound it runs on under its neighbour so
+/// the two crossfade instead of clicking: `resume` frames where it comes back in after a layer
+/// above ends, `cut` frames where a layer above cuts in (kept short, so that clip's attack stays
+/// sharp). Both are 0 for a Live Set, where clips on a track can't overlap.
+pub(super) fn flatten_clips(tracks: &[Track], resume: usize, cut: usize) -> Track {
     let visible: Vec<&Track> = tracks.iter().filter(|t| !t.mute).collect();
     let layers: Vec<Layer> = visible.iter().map(|t| Layer::of(t, Audio { rate: 1, channels: Vec::new() })).collect();
     let mut out = Track::new("Arrangement");
     out.color = visible.first().map_or(0, |t| t.color);
     for (s, e, o) in segments(&layers) {
         for c in &visible[o].clips {
-            let (a, b) = (s.max(c.start), e.min(c.end()));
+            let (mut a, mut b) = (s.max(c.start), e.min(c.end()));
             if b > a {
+                a -= resume.min(a - c.start);
+                b += cut.min(c.end() - b);
                 let mut piece = c.clone();
                 piece.trim += a - c.start;
                 piece.start = a;
@@ -102,6 +107,11 @@ fn merge(mut v: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     spans
 }
 
+/// Frames of the fade where one layer cuts off another, at `rate`.
+pub(super) fn switch_fade(rate: u32) -> usize {
+    ((rate as f64 * SWITCH_FADE_SECS).round() as usize).max(1)
+}
+
 #[derive(Clone, Copy)]
 enum Ramp {
     Full,
@@ -116,7 +126,7 @@ pub(super) fn flatten(layers: &[Layer], rate: u32) -> Audio {
     let segs = segments(layers);
     let frames = segs.last().map_or(0, |s| s.1);
     let channels = layers.iter().map(|l| l.audio.num_channels()).max().unwrap_or(1).max(1);
-    let fade = ((rate as f64 * SWITCH_FADE_SECS).round() as usize).max(1);
+    let fade = switch_fade(rate);
     let mut pieces: Vec<(usize, usize, usize, Ramp)> = segs.iter().map(|&(s, e, o)| (o, s, e, Ramp::Full)).collect();
     for k in 1..segs.len() {
         let (ps, s, p) = segs[k - 1];
@@ -199,7 +209,7 @@ mod tests {
         top.clips[0].len = 20;
         let mut low = Track::new("low");
         low.clips.push(Clip::new("b", audio, 0));
-        let flat = flatten_clips(&[top, low]);
+        let flat = flatten_clips(&[top, low], 0, 0);
         let got: Vec<(usize, usize, usize)> = flat.clips.iter().map(|c| (c.start, c.len, c.trim)).collect();
         assert_eq!(got, vec![(0, 20, 0), (20, 20, 0), (40, 60, 40)]);
     }

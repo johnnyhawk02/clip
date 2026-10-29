@@ -643,6 +643,40 @@ impl App {
         self.refresh_playback();
     }
 
+    /// Merge Down needs a layer below, and both layers showing.
+    fn can_merge_down(&self) -> bool {
+        let a = self.active;
+        a + 1 < self.tracks.len() && !self.tracks[a].mute && !self.tracks[a + 1].mute
+    }
+
+    /// Merge the active layer into the one below: one layer of clips that sounds like the two
+    /// did, each clip cut down to what was heard. The lower layer's name and settings stay.
+    fn merge_down(&mut self) {
+        if !self.can_merge_down() {
+            return;
+        }
+        let a = self.active;
+        self.push_undo("Merge Down");
+        let (top, low) = (self.tracks[a].clone(), self.tracks[a + 1].clone());
+        let gains_differ = (top.gain - low.gain).abs() > 0.001;
+        let fade = layers::switch_fade(self.rate());
+        let flat = layers::flatten_clips(&[top, low.clone()], fade, (fade / 5).max(1));
+        let mut merged = low;
+        merged.clips = flat.clips;
+        self.tracks[a + 1] = merged;
+        self.tracks.remove(a);
+        self.active = a;
+        self.sel_clip = None;
+        self.sel_extra.clear();
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = if gains_differ {
+            "Merged down. The two layers had different volumes; the merged one keeps the lower layer's".into()
+        } else {
+            "Merged down — ⌘Z to undo".into()
+        };
+    }
+
     fn mix_down(&mut self) {
         if self.tracks.len() < 2 {
             return;
@@ -1000,6 +1034,7 @@ impl App {
                 Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack | Action::MixDialog => self.tracks.len() > 1,
                 Action::LayerUp => self.active > 0,
                 Action::LayerDown => self.active + 1 < self.tracks.len(),
+                Action::MergeDown => self.can_merge_down(),
                 _ => false,
             };
         }
@@ -1015,7 +1050,7 @@ impl App {
             Action::AutoWarp => return true,
             Action::AutoArrange | Action::PrevVariation | Action::NextVariation | Action::SwapSection | Action::AddToPool => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
-            Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown => return false,
+            Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown => return false,
             _ => {}
         }
         let has = self.audio.is_some();
@@ -1428,6 +1463,7 @@ impl App {
             Action::MixDialog => self.mix_include = Some(vec![true; self.tracks.len()]),
             Action::LayerUp => self.move_layer(true),
             Action::LayerDown => self.move_layer(false),
+            Action::MergeDown => self.merge_down(),
             Action::TrackColor => {
                 let t = &mut self.tracks[self.active];
                 t.color = (t.color + 1) % TRACK_COLORS.len();

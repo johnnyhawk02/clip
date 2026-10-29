@@ -535,7 +535,7 @@ impl App {
         // Live's palette indices closest to each track colour (grey, blue, green, amber, red, purple).
         const LIVE_COLORS: [u32; 6] = [27, 22, 19, 15, 14, 24];
         // Live gets what is heard: the layers flattened onto one track.
-        let flat = [layers::flatten_clips(tracks)];
+        let flat = [layers::flatten_clips(tracks, 0, 0)];
         let tracks = &flat[..];
         let samples = dir.join("Samples").join("Imported");
         std::fs::create_dir_all(&samples).map_err(|e| e.to_string())?;

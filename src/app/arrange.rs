@@ -242,6 +242,9 @@ impl App {
         if item(ui, "Move Layer Down", t + 1 < self.tracks.len()) {
             chosen = Some(Action::LayerDown);
         }
+        if item(ui, "Merge Down", self.can_merge_down()) {
+            chosen = Some(Action::MergeDown);
+        }
         if item(ui, if mute { "Show Layer" } else { "Hide Layer" }, true) {
             chosen = Some(Action::MuteTrack);
         }
