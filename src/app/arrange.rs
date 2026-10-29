@@ -458,8 +458,30 @@ impl App {
                     ui.separator();
                     // Tempo and beats per bar are undoable: one step per drag or typed value.
                     let (mut tempo, mut bpb) = (self.tempo, self.beats_per_bar);
-                    let t = ui.add(egui::DragValue::new(&mut tempo).range(20.0..=400.0).speed(0.1).fixed_decimals(2).suffix(" BPM"))
-                        .on_hover_text("Song tempo — drag or type");
+                    // Drag up or down: 1 BPM per step, 0.20 with Shift. Click to type a value.
+                    let t = ui.add(egui::DragValue::new(&mut tempo).range(20.0..=400.0).speed(0.0).fixed_decimals(2).suffix(" BPM"))
+                        .on_hover_text("Song tempo — drag up or down (⇧ for fine steps), or click to type");
+                    if t.hovered() || t.dragged() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                    }
+                    if t.drag_started() {
+                        self.tempo_drag = Some((self.tempo, 0.0));
+                    }
+                    if let (true, Some((start, acc))) = (t.dragged(), self.tempo_drag.as_mut()) {
+                        *acc -= t.drag_delta().y;
+                        let fine = ui.input(|i| i.modifiers.shift);
+                        let steps = (*acc / 4.0).round() as f64;
+                        tempo = (*start + steps * if fine { 0.2 } else { 1.0 }).clamp(20.0, 400.0);
+                        // Each step taken becomes the new base, so pressing or letting go of
+                        // Shift mid-drag never makes the value jump.
+                        if steps != 0.0 {
+                            (*start, *acc) = (tempo, *acc - steps as f32 * 4.0);
+                        }
+                        tempo = (tempo * 100.0).round() / 100.0;
+                    }
+                    if t.drag_stopped() {
+                        self.tempo_drag = None;
+                    }
                     let b = ui.add(egui::DragValue::new(&mut bpb).range(1..=16).suffix(" / 4")).on_hover_text("Beats per bar");
                     if tempo != self.tempo || bpb != self.beats_per_bar {
                         if !self.song_edit {

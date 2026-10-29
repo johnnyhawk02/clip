@@ -186,6 +186,8 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// Dragging the tempo box: the tempo so far and pixels not yet turned into a step.
+    tempo_drag: Option<(f64, f32)>,
     /// The tempo the clips are laid out for: when the tempo changes, every clip moves to keep
     /// its bar position (warped clips also stretch).
     laid_out_tempo: f64,
@@ -382,6 +384,7 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            tempo_drag: None,
             laid_out_tempo: 120.0,
             phrase_bars: std::fs::read_to_string(phrase_pref()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(4),
             prefs_open: None,
