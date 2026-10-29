@@ -558,6 +558,11 @@ impl App {
             if ctx.input_mut(|i| i.consume_key(m, k)) {
                 // [ and ] step between cue points in the clip editor, and locators in the song.
                 let a = match (a, self.view) {
+                    (Action::ToolHand, View::Arrangement) => {
+                        // H in the song: layers fill the height, or go back to their usual size.
+                        self.fit_height = !self.fit_height;
+                        continue;
+                    }
                     (Action::PrevCue, View::Arrangement) => Action::PrevLocator,
                     (Action::NextCue, View::Arrangement) => Action::NextLocator,
                     _ => a,

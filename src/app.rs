@@ -194,6 +194,8 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// Layers share all the song view's height (H) instead of stopping at their usual size.
+    fit_height: bool,
     /// Edit ▸ Copy / Cut Time: a stretch of every layer (length, each layer's pieces from 0).
     time_clip: Option<(usize, Vec<Vec<Clip>>)>,
     /// Modifier keys held during scripted input (automation `mods:`).
@@ -432,6 +434,7 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            fit_height: false,
             time_clip: None,
             synth_mods: Modifiers::NONE,
             slide_drag: None,

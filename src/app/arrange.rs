@@ -633,7 +633,8 @@ impl App {
         let master = Rect::from_min_max(Pos2::new(full.left(), scroll.top() - MASTER_H), Pos2::new(full.right(), scroll.top()));
         let lanes = Rect::from_min_max(Pos2::new(full.left() + header_w, ruler.bottom()), Pos2::new(full.right(), master.top()));
         let n_tracks = self.tracks.len().max(1);
-        let lane_h = (lanes.height() / n_tracks as f32).min(120.0);
+        // Layers are up to 120 points tall, or share all the height (H, as Live's Optimize Height).
+        let lane_h = if self.fit_height { lanes.height() / n_tracks as f32 } else { (lanes.height() / n_tracks as f32).min(120.0) };
         self.arr_lanes = Some((lanes, lane_h));
         let rate = self.rate() as f64;
         let spp = self.arr_view_len / lanes.width() as f64;
@@ -993,6 +994,13 @@ impl App {
         if split_tool {
             // Handled above.
         } else if resp.double_clicked() {
+            // Double-click the bar numbers: zoom to the selection, or out to the whole song.
+            if resp.interact_pointer_pos().is_some_and(|q| q.y < lanes.top() && q.y > ruler.top() + LOOP_H + LOC_H) {
+                let ctx = ui.ctx().clone();
+                let a = if self.time_sel.is_some() || self.sel_clip.is_some() { Action::ZoomSel } else { Action::ZoomFit };
+                self.run(a, &ctx);
+                return;
+            }
             if let Some((t, c, _)) = resp.interact_pointer_pos().and_then(|q| hit(&self.tracks, q, vs, vl)) {
                 self.edit_clip((t, c));
                 return;
