@@ -820,7 +820,8 @@ impl App {
             }
         };
         if self.fade_drag.is_some() || resp.hover_pos().and_then(|q| fade_at(&self.tracks, q)).is_some() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+            // The plain pointer over a fade handle, as in Live (it wins over the edge's arrows).
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
         }
         if resp.drag_started() && !split_tool && !ruler_drag {
             if let Some(f) = press.and_then(|q| fade_at(&self.tracks, q)) {
