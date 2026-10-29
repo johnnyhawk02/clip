@@ -157,7 +157,7 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
         }
     }
     // Fades: a line from silence at the edge up to full level, as in Live.
-    let (fi, fo) = fade_handle_xs(r, c);
+    let (fi, fo) = fade_xs(r, c);
     let body_top = (r.top() + 18.0).min(r.bottom());
     if c.fade_in > 0 {
         p.line_segment([Pos2::new(r.left(), r.bottom() - 2.0), Pos2::new(fi, body_top)], Stroke::new(1.0, INK.gamma_multiply(0.7)));
@@ -167,8 +167,9 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
     }
     // The handles that set them, on the selected or hovered clip.
     if handles && r.width() > 24.0 && r.height() > 30.0 {
-        for x in [fi, fo] {
-            let h = Rect::from_center_size(Pos2::new(x, body_top + 3.0), Vec2::splat(7.0));
+        let (hi, ho) = fade_handle_xs(r, c);
+        for x in [hi, ho] {
+            let h = Rect::from_center_size(Pos2::new(x, body_top + 5.0), Vec2::splat(7.0));
             p.rect_filled(h, 1.0, Color32::WHITE);
             p.rect_stroke(h, 1.0, Stroke::new(1.0, INK), egui::StrokeKind::Inside);
         }
@@ -177,10 +178,17 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
     p.rect_stroke(r, 4.0, stroke, egui::StrokeKind::Inside);
 }
 
-/// Where a clip's fade-in and fade-out handles sit (x), in its rect `r`.
-fn fade_handle_xs(r: Rect, c: &Clip) -> (f32, f32) {
+/// Where a clip's fades end (x), in its rect `r`.
+fn fade_xs(r: Rect, c: &Clip) -> (f32, f32) {
     let px = |f: usize| f as f32 / c.len.max(1) as f32 * r.width();
     (r.left() + px(c.fade_in), r.right() - px(c.fade_out))
+}
+
+/// Where its fade handles sit: at the fades' ends, kept inside the clip's border.
+fn fade_handle_xs(r: Rect, c: &Clip) -> (f32, f32) {
+    let (fi, fo) = fade_xs(r, c);
+    let (lo, hi) = (r.left() + 5.0, (r.right() - 5.0).max(r.left() + 5.0));
+    (fi.clamp(lo, hi), fo.clamp(lo, hi))
 }
 
 impl App {
@@ -753,7 +761,7 @@ impl App {
             let clip = &tracks[t].clips[c];
             let l = lane(t);
             let r = Rect::from_min_max(Pos2::new(a.f_to_x(clip.start as f64, vs, vl), l.top() + 3.0), Pos2::new(a.f_to_x(clip.end() as f64, vs, vl), l.bottom() - 3.0));
-            let y = (r.top() + 18.0).min(r.bottom()) + 3.0;
+            let y = (r.top() + 18.0).min(r.bottom()) + 5.0;
             let (fi, fo) = fade_handle_xs(r, clip);
             if (q.y - y).abs() > 6.0 || r.width() <= 24.0 {
                 return None;
