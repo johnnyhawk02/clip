@@ -484,11 +484,13 @@ impl App {
         let x_of = |f: f64| wave.left() + ((f - vs) / vl) as f32 * wave.width();
         let f_of = |x: f32| (vs + ((x - wave.left()) / wave.width()) as f64 * vl).max(0.0);
         let bar = self.bar_frames();
-        let to_bar = |f: f64| ((f / bar).round().max(0.0) * bar) as usize;
+        let (start, origin) = self.ed_markers();
+        // Bar lines count from 1.1.1, wherever that is.
+        let to_bar = |f: f64| (((f - origin) / bar).round() * bar + origin).max(0.0) as usize;
         let bar_n = bar.round() as usize;
         let start_x = x_of(match self.ed_ruler {
             Some(EdRuler::Start(f)) => f as f64,
-            _ => 0.0,
+            _ => start as f64,
         });
         // The flag can be grabbed anywhere in the ruler's height, from just left of its line to
         // past the "1" beside it (it often sits right at the left edge).
@@ -522,7 +524,7 @@ impl App {
             if let Some(q) = press.filter(|q| q.y < ruler.bottom() && !on_cue(*q)) {
                 let f = f_of(q.x);
                 self.ed_ruler = Some(if on_start(q) {
-                    EdRuler::Start(0)
+                    EdRuler::Start(start)
                 } else if strip.contains(q) {
                     match (brace_at(q), self.loop_points) {
                         (Some(g), Some(range)) => EdRuler::Loop(f, range, g),
@@ -531,6 +533,23 @@ impl App {
                 } else {
                     EdRuler::Zoom(f, q.y, vl)
                 });
+            }
+        }
+        // Right-click the flag for Set 1.1.1 Here.
+        if resp.secondary_clicked() {
+            self.flag_menu = resp.interact_pointer_pos().is_some_and(on_start);
+        }
+        if self.flag_menu {
+            let mut set = false;
+            resp.context_menu(|ui| {
+                if ui.button("Set 1.1.1 Here").clicked() {
+                    set = true;
+                    ui.close();
+                }
+            });
+            if set {
+                self.flag_menu = false;
+                self.set_origin_here();
             }
         }
         let Some(drag) = self.ed_ruler else { return false };
@@ -566,15 +585,15 @@ impl App {
                 EdRuler::Start(_) => {
                     // Snaps to the ruler's ticks (⌘ for anywhere).
                     let g = self.tick_frames(spp);
-                    let p = if command || g <= 0.0 { f } else { (f / g).round() * g };
-                    self.ed_ruler = Some(EdRuler::Start((p as usize).min(n)));
+                    let p = if command || g <= 0.0 { f } else { ((f - origin) / g).round() * g + origin };
+                    self.ed_ruler = Some(EdRuler::Start((p.max(0.0) as usize).min(n.saturating_sub(1))));
                 }
             }
         }
         if resp.drag_stopped() {
             self.ed_ruler = None;
             match drag {
-                EdRuler::Start(m) if m > 0 && m < n => self.move_start(m),
+                EdRuler::Start(m) if m != start => self.set_clip_start(m),
                 EdRuler::Draw(_) | EdRuler::Loop(..) => {
                     self.dirty = true;
                     if self.player.is_playing() {
@@ -588,36 +607,50 @@ impl App {
         true
     }
 
-    /// Make frame `m` the clip's start (1.1.1): the audio before it moves round to the end, so
-    /// a loop keeps all of itself but begins somewhere else. Cues, regions and loop points
-    /// follow the audio.
-    fn move_start(&mut self, m: usize) {
-        let Some(a) = self.audio.clone() else { return };
-        let n = a.frames();
-        if m == 0 || m >= n {
-            return;
+    /// The clip being edited, and where the editor's frame 0 sits in its audio (a trimmed clip
+    /// is edited as just its visible part).
+    pub(super) fn ed_clip(&self) -> Option<((usize, usize), usize)> {
+        let View::Editor { track, clip } = self.view else { return None };
+        let c = self.clip((track, clip))?;
+        let full = c.looping || c.warp.is_some() || (c.trim == 0 && c.len >= c.audio.frames());
+        Some(((track, clip), if full { 0 } else { c.trim }))
+    }
+
+    /// The clip's start marker and its 1.1.1 point, in editor frames (1.1.1 can lie before the
+    /// part shown).
+    fn ed_markers(&self) -> (usize, f64) {
+        match self.ed_clip().and_then(|(p, off)| Some((self.clip(p)?, off))) {
+            Some((c, off)) => (c.trim.saturating_sub(off), c.origin as f64 - off as f64),
+            None => (0, 0.0),
         }
+    }
+
+    /// Start the clip at editor frame `m`, as Live's start marker does: the waveform stays put and
+    /// the clip plays from there, the audio before it coming round at the end (the clip loops).
+    fn set_clip_start(&mut self, m: usize) {
+        let Some(((t, ci), off)) = self.ed_clip() else { return };
         self.push_undo("Move Start");
-        let tail = a.slice(m, n);
-        let new = tail.insert(tail.frames(), tail.frames(), &a.slice(0, m));
-        let turn = |f: usize| (f + n - m) % n;
-        for c in &mut self.cues {
-            c.frame = turn(c.frame);
-        }
-        self.cues.sort_by_key(|c| c.frame);
-        self.regions.retain_mut(|r| {
-            let (s, e) = (turn(r.start), turn(r.end.saturating_sub(1)) + 1);
-            (s < e).then(|| (r.start, r.end) = (s, e)).is_some()
-        });
-        self.loop_points = self.loop_points.and_then(|(s, e)| {
-            let (s2, e2) = (turn(s), turn(e.saturating_sub(1)) + 1);
-            (s2 < e2).then_some((s2, e2))
-        });
-        self.sel = None;
-        self.cursor = 0;
-        self.set_audio(Arc::new(new));
+        let c = &mut self.tracks[t].clips[ci];
+        c.trim = (m + off).min(c.audio.frames().saturating_sub(1));
+        c.looping = true;
+        self.cursor = m;
         self.dirty = true;
-        self.status = "Moved the start — the audio before it now plays at the end (⌘Z to undo)".into();
+        if off != 0 {
+            // It was shown trimmed; show the whole audio now that it loops.
+            self.edit_clip((t, ci));
+        }
+        self.status = "Moved the start — the clip plays from the flag and loops round (⌘Z to undo)".into();
+    }
+
+    /// Right-click on the start flag ▸ Set 1.1.1 Here: the ruler counts bars from the flag, with
+    /// -1, -2… before it.
+    fn set_origin_here(&mut self) {
+        let Some(((t, ci), _)) = self.ed_clip() else { return };
+        self.push_undo("Set 1.1.1");
+        let c = &mut self.tracks[t].clips[ci];
+        c.origin = c.trim;
+        self.dirty = true;
+        self.status = "1.1.1 is at the start flag now".into();
     }
 
     /// Select tool: click to place the cursor, drag to select, drag cue flags, double-click to select
@@ -940,24 +973,27 @@ impl App {
                 label_every *= 2;
             }
             let on = |f: f64, unit: f64| {
-                let r = (f / unit).fract();
+                let r = (f / unit).rem_euclid(1.0);
                 r < 1e-6 || r > 1.0 - 1e-6
             };
-            let mut k = (vs / g).floor().max(0.0) as i64;
+            // Counting from 1.1.1, which may not be the start: bars before it are -1, -2…
+            let origin = self.ed_markers().1;
+            let mut k = ((vs - origin) / g).floor() as i64;
             for _ in 0..MAX_TICKS {
-                let f = k as f64 * g;
+                let f = origin + k as f64 * g;
                 if !(f <= vs + vl) {
                     break;
                 }
                 let x = frame_to_x(f);
-                if x >= wave.left() {
-                    let (on_bar, on_beat) = (on(f, bar), on(f, beat));
+                if f >= -0.5 && x >= wave.left() - 0.5 {
+                    let (on_bar, on_beat) = (on(f - origin, bar), on(f - origin, beat));
                     let (h, line) = if on_bar { (9.0, 228) } else if on_beat { (5.0, 240) } else { (3.0, 246) };
                     painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, MUTED));
                     painter.line_segment([Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, Color32::from_gray(line)));
-                    let bar_no = (f / bar).round() as u64;
-                    if on_bar && bar_no % label_every == 0 {
-                        painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, (bar_no + 1).to_string(), FontId::proportional(11.0), MUTED);
+                    let bar_no = ((f - origin) / bar).round() as i64;
+                    if on_bar && bar_no.rem_euclid(label_every as i64) == 0 {
+                        let label = if bar_no >= 0 { bar_no + 1 } else { bar_no };
+                        painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, label.to_string(), FontId::proportional(11.0), MUTED);
                     }
                 }
                 k += 1;
@@ -1119,7 +1155,7 @@ impl App {
         if strip.height() > 0.0 {
             let f = match self.ed_ruler {
                 Some(EdRuler::Start(f)) => f,
-                _ => 0,
+                _ => self.ed_markers().0,
             };
             let x = frame_to_x(f as f64);
             if x >= wave.left() - 1.0 && x <= wave.right() {

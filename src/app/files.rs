@@ -284,6 +284,7 @@ impl App {
                             regions: c.regions.iter().map(|r| (r.start, r.end, r.name.clone())).collect(),
                             loop_points: c.loop_points,
                             looping: c.looping,
+                            origin: c.origin,
                             group: c.group.as_ref().map(|g| tracks_data(g, pool)),
                             warp: c.warp.as_ref().map(|w| {
                                 let i = pool.iter().position(|a| Arc::ptr_eq(a, &w.source)).unwrap_or_else(|| {
@@ -348,6 +349,7 @@ impl App {
                         clip.regions = c.regions.iter().map(|(s, e, n)| Region { start: *s, end: *e, name: n.clone() }).collect();
                         clip.loop_points = c.loop_points;
                         clip.looping = c.looping;
+                        clip.origin = c.origin;
                         clip.len = if c.looping { c.len } else { clip.len };
                         if let Some((bpm, tempo, i)) = c.warp {
                             if let Some(source) = audio.get(i) {

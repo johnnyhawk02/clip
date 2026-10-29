@@ -85,6 +85,9 @@ pub struct ClipData {
     /// Warped clips: (clip tempo, song tempo it's stretched to, index of the original audio).
     #[serde(default)]
     pub warp: Option<(f64, f64, usize)>,
+    /// Where bar 1.1.1 is in the clip's audio (frames), for the clip editor's ruler.
+    #[serde(default)]
+    pub origin: usize,
 }
 
 pub fn write(path: &Path, project: &ProjectFile, audio: &[&Audio]) -> Result<(), String> {
@@ -172,6 +175,7 @@ mod tests {
                     looping: true,
                     group: None,
                     warp: None,
+                    origin: 0,
                 }],
             }],
             audio: vec![AudioData { rate: 1000, channels: 2, frames: 3 }],

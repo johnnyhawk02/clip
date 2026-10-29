@@ -80,8 +80,10 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
 - **Double-click a clip (or press Return) to edit it** in the waveform editor below, with every
   tool and effect. Its ruler works like the song view's: bars
   and beats counting 1.1.1 from the clip's start, a loop strip on top (whole bars), and drag the bar
-  numbers to zoom. The black start flag marks 1.1.1: drag it and the clip starts there, with the audio
-  before it moved round to the end (snaps to the ruler's ticks, ⌘ for anywhere). ◀ Arrangement or ⌘Return goes back.
+  numbers to zoom. The black flag is the start marker, as in Live: drag it and the clip plays from
+  there, looping round so the audio before it comes at the end; the waveform stays put (snaps to
+  the ruler's ticks, ⌘ for anywhere). Right-click the flag ▸ Set 1.1.1 Here to count bars from it,
+  with -1, -2… before it. ◀ Arrangement or ⌘Return goes back.
 - Clip menu: New Clip, Import File as Clip (at the playhead), Edit Clip, Split Clip at Playhead
   (⌘E), Duplicate Clip (⌘D, placed right after). ⌫ deletes the selected clip; ⌘C / ⌘X / ⌘V copy,
   cut and paste clips (paste goes on the selected track at the playhead). Dropping a file onto

@@ -25,6 +25,9 @@ pub(super) struct Clip {
     pub(super) looping: bool,
     /// A warped clip plays its source audio stretched to the song tempo (keeping its pitch),
     /// as in Ableton; `audio` is then the stretched version.
+    /// Where bar 1.1.1 is in the audio (frames): the clip editor's ruler counts from here, with
+    /// -1, -2… before it.
+    pub(super) origin: usize,
     pub(super) warp: Option<Warp>,
 }
 
@@ -130,7 +133,7 @@ impl Clip {
     pub(super) fn new(name: impl Into<String>, audio: Arc<Audio>, start: usize) -> Clip {
         let peaks = Arc::new(Peaks::build(&audio));
         let len = audio.frames();
-        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None, looping: false, warp: None }
+        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None, looping: false, warp: None, origin: 0 }
     }
 
     pub(super) fn end(&self) -> usize {

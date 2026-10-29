@@ -194,6 +194,8 @@ pub struct App {
     ruler_zoom: Option<(f64, f32, f64)>,
     /// A drag in the clip editor's ruler: zooming, drawing or moving the loop, or the start flag.
     ed_ruler: Option<EdRuler>,
+    /// The last right-click in the clip editor was on the start flag (its menu is showing).
+    flag_menu: bool,
     /// Which track a right-click on empty lane space is for (None: the clip menu).
     ctx_menu_track: Option<usize>,
     grid: usize,
@@ -377,6 +379,7 @@ impl App {
             arr_loop_grab: None,
             ruler_zoom: None,
             ed_ruler: None,
+            flag_menu: false,
             ctx_menu_track: None,
             grid: 1,
             snap: true,
