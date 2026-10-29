@@ -451,9 +451,22 @@ impl App {
                     }
                     ui.add_space(16.0);
                     ui.separator();
-                    ui.add(egui::DragValue::new(&mut self.tempo).range(20.0..=400.0).speed(0.1).fixed_decimals(2).suffix(" BPM"))
+                    // Tempo and beats per bar are undoable: one step per drag or typed value.
+                    let (mut tempo, mut bpb) = (self.tempo, self.beats_per_bar);
+                    let t = ui.add(egui::DragValue::new(&mut tempo).range(20.0..=400.0).speed(0.1).fixed_decimals(2).suffix(" BPM"))
                         .on_hover_text("Song tempo — drag or type");
-                    ui.add(egui::DragValue::new(&mut self.beats_per_bar).range(1..=16).suffix(" / 4")).on_hover_text("Beats per bar");
+                    let b = ui.add(egui::DragValue::new(&mut bpb).range(1..=16).suffix(" / 4")).on_hover_text("Beats per bar");
+                    if tempo != self.tempo || bpb != self.beats_per_bar {
+                        if !self.song_edit {
+                            self.push_undo(if tempo != self.tempo { "Change Tempo" } else { "Change Time Signature" });
+                            self.song_edit = true;
+                        }
+                        (self.tempo, self.beats_per_bar) = (tempo, bpb);
+                        self.dirty = true;
+                    }
+                    if self.song_edit && ![&t, &b].iter().any(|r| r.dragged() || r.has_focus()) {
+                        self.song_edit = false;
+                    }
                     ui.label(egui::RichText::new("Grid").color(MUTED));
                     egui::ComboBox::from_id_salt("grid").width(80.0).selected_text(GRID[self.grid].0).show_ui(ui, |ui| {
                         for (i, (label, _)) in GRID.iter().enumerate() {

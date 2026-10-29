@@ -111,6 +111,9 @@ struct Snapshot {
     loop_points: Option<Sel>,
     sel: Option<Sel>,
     cursor: usize,
+    tempo: f64,
+    beats_per_bar: u32,
+    arr_loop: Option<Sel>,
     label: &'static str,
 }
 
@@ -176,6 +179,8 @@ pub struct App {
     /// The arrangement's loop range (played round when Loop is on), and a ruler drag setting it.
     arr_loop: Option<Sel>,
     arr_loop_drag: Option<usize>,
+    /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
+    song_edit: bool,
     /// Dragging the loop brace: where it was grabbed (frames), the range then, and which part
     /// (the whole brace moves, an end resizes).
     arr_loop_grab: Option<(f64, Sel, LoopGrab)>,
@@ -354,6 +359,7 @@ impl App {
             beats_per_bar: 4,
             arr_loop: None,
             arr_loop_drag: None,
+            song_edit: false,
             arr_loop_grab: None,
             ruler_zoom: None,
             ctx_menu_track: None,
@@ -747,6 +753,9 @@ impl App {
             loop_points: self.loop_points,
             sel: self.sel,
             cursor: self.cursor,
+            tempo: self.tempo,
+            beats_per_bar: self.beats_per_bar,
+            arr_loop: self.arr_loop,
             label,
         });
         self.redo.clear();
@@ -796,6 +805,9 @@ impl App {
             loop_points: std::mem::replace(&mut self.loop_points, snap.loop_points),
             sel: self.sel,
             cursor: self.cursor,
+            tempo: std::mem::replace(&mut self.tempo, snap.tempo),
+            beats_per_bar: std::mem::replace(&mut self.beats_per_bar, snap.beats_per_bar),
+            arr_loop: std::mem::replace(&mut self.arr_loop, snap.arr_loop),
             label: snap.label,
         });
         self.sel = snap.sel;
@@ -819,6 +831,9 @@ impl App {
             loop_points: std::mem::replace(&mut self.loop_points, snap.loop_points),
             sel: self.sel,
             cursor: self.cursor,
+            tempo: std::mem::replace(&mut self.tempo, snap.tempo),
+            beats_per_bar: std::mem::replace(&mut self.beats_per_bar, snap.beats_per_bar),
+            arr_loop: std::mem::replace(&mut self.arr_loop, snap.arr_loop),
             label: snap.label,
         });
         self.sel = snap.sel;
