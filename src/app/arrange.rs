@@ -354,8 +354,10 @@ impl App {
         self.arr_clamp();
     }
 
+    /// A beat in frames at the tempo the clips are laid out for. While a new tempo is still being
+    /// dragged in, the bars stay where the clips are; they all move together once it's set.
     pub(super) fn beat_frames(&self) -> f64 {
-        self.rate() as f64 * 60.0 / self.tempo.max(1.0)
+        self.rate() as f64 * 60.0 / self.laid_out_tempo.max(1.0)
     }
 
     pub(super) fn bar_frames(&self) -> f64 {

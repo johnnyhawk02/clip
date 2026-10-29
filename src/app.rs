@@ -1712,7 +1712,7 @@ impl eframe::App for App {
         }
         self.poll_loading();
         // Warped clips follow the tempo once it's been set (not on every step of a drag).
-        if self.view == View::Arrangement && !ui.ctx().input(|i| i.pointer.any_down()) && ui.ctx().memory(|m| m.focused().is_none()) {
+        if self.view == View::Arrangement && !ui.ctx().input(|i| i.pointer.any_down()) {
             self.refit_warped();
         }
 
