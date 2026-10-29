@@ -190,4 +190,27 @@ impl App {
         self.refresh_playback();
         self.status = status.into();
     }
+
+    /// Clip ▸ Quantize (⌘U): move the selected clips' starts (or those starting inside the time
+    /// selection) to the nearest grid line, or beat when the grid is off.
+    pub(super) fn quantize(&mut self) {
+        let mut targets = self.selected_clips();
+        if let Some(((s, e), layers)) = self.time_sel {
+            targets.extend(self.sel_layers(layers).flat_map(|t| self.tracks[t].clips.iter().enumerate().filter(|(_, c)| c.start >= s && c.start < e).map(move |(i, _)| (t, i)).collect::<Vec<_>>()));
+        }
+        if targets.is_empty() {
+            return;
+        }
+        let spp = self.arr_lanes.map_or(1.0, |(l, _)| self.arr_view_len / l.width().max(1.0) as f64);
+        let g = self.grid_frames(spp).unwrap_or_else(|| self.beat_frames());
+        self.push_undo("Quantize");
+        for (t, c) in targets {
+            if let Some(clip) = self.tracks.get_mut(t).and_then(|t| t.clips.get_mut(c)) {
+                clip.start = ((clip.start as f64 / g).round() * g) as usize;
+            }
+        }
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = "Quantized to the grid — ⌘Z to undo".into();
+    }
 }

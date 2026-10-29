@@ -12,7 +12,10 @@ impl App {
                 Action::New | Action::Open | Action::Quit | Action::Preferences | Action::BatchConvert | Action::Record | Action::NewClip | Action::ImportClip => true,
                 Action::SaveProject | Action::SaveProjectAs => doc,
                 Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Dither | Action::AutoGain => true,
-                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed => true,
+                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed | Action::Follow => true,
+                Action::Continue | Action::AddLocator => doc,
+                Action::PrevLocator | Action::NextLocator => !self.locators.is_empty(),
+                Action::Quantize => has_clip,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
                 Action::Export | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
                 Action::Delete => has_clip || self.time_sel.is_some(),
@@ -62,7 +65,7 @@ impl App {
             Action::AutoWarp => return true,
             Action::AutoArrange | Action::PrevVariation | Action::NextVariation | Action::SwapSection | Action::AddToPool => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
-            Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown | Action::DuplicateTime | Action::DeleteTime | Action::InsertTime => return false,
+            Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown | Action::DuplicateTime | Action::DeleteTime | Action::InsertTime | Action::AddLocator | Action::PrevLocator | Action::NextLocator => return false,
             _ => {}
         }
         let has = self.audio.is_some();
@@ -70,7 +73,7 @@ impl App {
         let not_empty = self.frames() > 0;
         match a {
             Action::New | Action::Open | Action::Quit | Action::Preferences => true,
-            Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop | Action::Crossfeed => true,
+            Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop | Action::Crossfeed | Action::Follow | Action::Continue => true,
             Action::ShowCues | Action::Record => true,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack => has,
             Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack => has && self.tracks.len() > 1,
@@ -131,6 +134,7 @@ impl App {
             Action::ShowRegions => self.show_regions,
             Action::ShowPool => self.show_pool,
             Action::Crossfeed => self.crossfeed,
+            Action::Follow => self.follow,
             Action::ToggleSnap => self.snap,
             Action::AutoWarp => self.auto_warp,
             Action::WarpClip => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.warp.is_some()),
@@ -474,6 +478,12 @@ impl App {
             Action::BatchConvert => self.show_batch = true,
             Action::LayerUp => self.move_layer(true),
             Action::LayerDown => self.move_layer(false),
+            Action::Quantize => self.quantize(),
+            Action::AddLocator => self.add_locator(self.arr_cursor),
+            Action::PrevLocator => self.jump_locator(false),
+            Action::NextLocator => self.jump_locator(true),
+            Action::Continue => self.continue_play(),
+            Action::Follow => self.follow = !self.follow,
             Action::DuplicateTime => self.duplicate_time(),
             Action::DeleteTime => self.delete_time(),
             Action::InsertTime => self.insert_time(),
@@ -509,6 +519,7 @@ impl App {
         }
         let none = Modifiers::NONE;
         let keys: &[(Modifiers, Key, Action)] = &[
+            (Modifiers::SHIFT, Key::Space, Action::Continue),
             (none, Key::Delete, Action::Delete),
             (none, Key::Backspace, Action::Delete),
             (none, Key::Home, Action::GoStart),
@@ -535,6 +546,12 @@ impl App {
         ];
         for &(m, k, a) in keys {
             if ctx.input_mut(|i| i.consume_key(m, k)) {
+                // [ and ] step between cue points in the clip editor, and locators in the song.
+                let a = match (a, self.view) {
+                    (Action::PrevCue, View::Arrangement) => Action::PrevLocator,
+                    (Action::NextCue, View::Arrangement) => Action::NextLocator,
+                    _ => a,
+                };
                 self.run(a, ctx);
             }
         }

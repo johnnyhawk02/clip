@@ -19,6 +19,13 @@ clips on the layers above to patch over parts of it.
 - Where a layer cuts in over one that is still sounding, the one cut off fades out over 5 ms so
   there is no click. A clip that starts or ends on its own keeps its edge.
 - Each layer keeps a volume slider and a colour. Solo and pan are gone.
+- Fades: drag the small handles at a clip's top corners to fade it in or out.
+- Locators: Control ▸ Add Locator (or right-click the ruler) adds a named marker; [ and ] jump
+  between them, a click on one jumps there, and right-click renames it, deletes it or loops to the
+  next one.
+- Playback starts from where you last clicked (the insert marker) and stopping leaves it there;
+  ⇧Space carries on from where you stopped. Control ▸ Follow (⌘F) turns view scrolling on or off.
+  Clip ▸ Quantize (⌘U) snaps clip starts to the grid (Slice at Grid moved to ⌥⌘U).
 - Select one clip and the Clip View appears under the layers, as in Live: Warp on/off and the
   clip's own BPM, Loop, Start and Length (bars.beats.sixteenths), Gain, Reverse and Edit.
 - Playback mixes the layers live as it plays, as Live does, so edits and tempo changes are heard
@@ -34,7 +41,7 @@ clips on the layers above to patch over parts of it.
 - Split Clip (⌘E) cuts the clip under the pointer, at the pointer (snapped to the grid; hold ⌘
   for a free cut), or at the playhead when the pointer isn't over a clip. The Split tool (B) cuts
   with a click.
-- Slice at Grid (⌘U) cuts the selected clips at every grid line (the grid size you pick, or
+- Slice at Grid (⌥⌘U) cuts the selected clips at every grid line (the grid size you pick, or
   every beat when the grid is Off or Auto), ready to drag around, duplicate (⌘D), loop and group.
 - Clip ▸ Mangle rearranges the selected clips in the slots they sit in (a single clip is sliced
   at the grid first): Shuffle, Reverse Order, Swap Pairs, Stutter (some slices repeat the one

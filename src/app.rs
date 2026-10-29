@@ -36,6 +36,7 @@ mod clipruler;
 mod tempo;
 mod timesel;
 mod clipview;
+mod locators;
 
 use self::clip::*;
 use self::chop::*;
@@ -121,6 +122,7 @@ struct Snapshot {
     tempo: f64,
     beats_per_bar: u32,
     arr_loop: Option<Sel>,
+    locators: Vec<(usize, String)>,
     label: &'static str,
 }
 
@@ -192,6 +194,16 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// Named markers in the song (frame, name), in time order, as Live's locators.
+    locators: Vec<(usize, String)>,
+    /// A right-click in the ruler: the locator under it (if any) and the frame there.
+    loc_menu: Option<(Option<usize>, usize)>,
+    /// Dragging a clip's fade handle: (layer, clip, fade in?).
+    fade_drag: Option<(usize, usize, bool)>,
+    /// The view scrolls along with the playhead (Control ▸ Follow, ⌘F).
+    follow: bool,
+    /// Where song playback last stopped: ⇧Space carries on from here.
+    stopped_at: usize,
     /// A Clip View edit in progress (one undo step per drag or typed value).
     clip_view_edit: bool,
     /// The speed last handed to the player for a tempo still being dragged in.
@@ -405,6 +417,11 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            locators: Vec::new(),
+            loc_menu: None,
+            fade_drag: None,
+            follow: true,
+            stopped_at: 0,
             clip_view_edit: false,
             live_speed: 1.0,
             stretching: None,
@@ -592,7 +609,7 @@ impl App {
         let mut out = Audio { rate, channels: vec![Vec::new(); channels] };
         for (c, fades) in t.clips.iter().zip(crossfades(&t.clips)) {
             let mut v = c.visible();
-            let fades = edge_fades(&v, fades);
+            let fades = with_clip_fades(c, edge_fades(&v, fades));
             apply_crossfade(&mut v, fades);
             out = effects::mix_into(&out, c.start, &v, c.gain);
         }
@@ -802,8 +819,10 @@ impl App {
 
     fn toggle_play(&mut self) {
         if self.view == View::Arrangement {
+            // As in Live, play starts from the insert marker (where you last clicked) and
+            // stopping leaves it there; ⇧Space carries on from where playback stopped.
             if self.player.is_playing() {
-                self.arr_cursor = self.player.position();
+                self.stopped_at = self.player.position();
                 self.player.stop();
                 return;
             }
@@ -845,6 +864,24 @@ impl App {
         };
         self.play_origin = start;
         self.player.play(start, end, self.looping && self.sel.is_some());
+    }
+
+    /// Control ▸ Continue Playing (⇧Space): play on from where song playback stopped (or stop).
+    fn continue_play(&mut self) {
+        if self.view != View::Arrangement {
+            return self.toggle_play();
+        }
+        if self.player.is_playing() {
+            self.stopped_at = self.player.position();
+            self.player.stop();
+            return;
+        }
+        let end = self.arrangement_frames();
+        if self.stopped_at >= end {
+            self.stopped_at = 0;
+        }
+        self.play_origin = self.stopped_at;
+        self.player.play(self.stopped_at, end, false);
     }
 
     fn stop(&mut self) {

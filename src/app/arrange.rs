@@ -58,7 +58,7 @@ impl ArrArea {
 }
 
 /// A clip block in the arrangement: a name strip on top and its waveform below.
-fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: bool, muted: bool, clip_to: Rect) {
+fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: bool, muted: bool, handles: bool, clip_to: Rect) {
     let p = p.with_clip_rect(clip_to);
     let wave_col = if muted { Color32::from_gray(190) } else { color };
     let fill = if muted { Color32::from_gray(248) } else { color.lerp_to_gamma(Color32::WHITE, 0.88) };
@@ -156,8 +156,31 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
             p.text(badge.center(), Align2::CENTER_CENTER, "no warp", FontId::proportional(9.5), INK);
         }
     }
+    // Fades: a line from silence at the edge up to full level, as in Live.
+    let (fi, fo) = fade_handle_xs(r, c);
+    let body_top = (r.top() + 18.0).min(r.bottom());
+    if c.fade_in > 0 {
+        p.line_segment([Pos2::new(r.left(), r.bottom() - 2.0), Pos2::new(fi, body_top)], Stroke::new(1.0, INK.gamma_multiply(0.7)));
+    }
+    if c.fade_out > 0 {
+        p.line_segment([Pos2::new(fo, body_top), Pos2::new(r.right(), r.bottom() - 2.0)], Stroke::new(1.0, INK.gamma_multiply(0.7)));
+    }
+    // The handles that set them, on the selected or hovered clip.
+    if handles && r.width() > 24.0 && r.height() > 30.0 {
+        for x in [fi, fo] {
+            let h = Rect::from_center_size(Pos2::new(x, body_top + 3.0), Vec2::splat(7.0));
+            p.rect_filled(h, 1.0, Color32::WHITE);
+            p.rect_stroke(h, 1.0, Stroke::new(1.0, INK), egui::StrokeKind::Inside);
+        }
+    }
     let stroke = if selected { Stroke::new(2.0, INK) } else { Stroke::new(1.0, color.lerp_to_gamma(Color32::WHITE, 0.3)) };
     p.rect_stroke(r, 4.0, stroke, egui::StrokeKind::Inside);
+}
+
+/// Where a clip's fade-in and fade-out handles sit (x), in its rect `r`.
+fn fade_handle_xs(r: Rect, c: &Clip) -> (f32, f32) {
+    let px = |f: usize| f as f32 / c.len.max(1) as f32 * r.width();
+    (r.left() + px(c.fade_in), r.right() - px(c.fade_out))
 }
 
 impl App {
@@ -283,7 +306,7 @@ impl App {
     /// Per-layer controls beside each lane: name, show/hide, volume and colour.
     fn track_headers(&mut self, ui: &mut egui::Ui, header: Rect, n_tracks: usize, lane: &dyn Fn(usize) -> Rect) {
         // The whole column, including the corners beside the ruler and scroll bar.
-        let column = Rect::from_min_max(Pos2::new(header.left(), header.top() - 22.0 - LOOP_H), Pos2::new(header.right(), header.bottom() + 15.0));
+        let column = Rect::from_min_max(Pos2::new(header.left(), header.top() - 22.0 - LOOP_H - LOC_H), Pos2::new(header.right(), header.bottom() + 15.0));
         ui.painter().rect_filled(column, 0.0, PANEL);
         ui.painter().line_segment([header.right_top(), header.right_bottom()], Stroke::new(1.0, LINE));
         let mut activate = None;
@@ -570,7 +593,7 @@ impl App {
     pub(super) fn arrangement(&mut self, ui: &mut egui::Ui) {
         let full = ui.available_rect_before_wrap();
         let header_w = 150.0;
-        let ruler_h = 22.0 + LOOP_H;
+        let ruler_h = 22.0 + LOOP_H + LOC_H;
         let ruler = Rect::from_min_max(Pos2::new(full.left() + header_w, full.top()), Pos2::new(full.right(), full.top() + ruler_h));
         let scroll = Rect::from_min_max(Pos2::new(full.left() + header_w, full.bottom() - 15.0), full.max);
         // The master channel sits under the tracks, above the scroll bar, with the Clip View
@@ -720,7 +743,50 @@ impl App {
                 }
             }
         }
+        // Fade handles at a clip's top corners: drag to set its fades.
+        let fade_at = |tracks: &[Track], q: Pos2| -> Option<(usize, usize, bool)> {
+            let (t, c, _) = hit(tracks, q, vs, vl)?;
+            let clip = &tracks[t].clips[c];
+            let l = lane(t);
+            let r = Rect::from_min_max(Pos2::new(a.f_to_x(clip.start as f64, vs, vl), l.top() + 3.0), Pos2::new(a.f_to_x(clip.end() as f64, vs, vl), l.bottom() - 3.0));
+            let y = (r.top() + 18.0).min(r.bottom()) + 3.0;
+            let (fi, fo) = fade_handle_xs(r, clip);
+            if (q.y - y).abs() > 6.0 || r.width() <= 24.0 {
+                return None;
+            }
+            if (q.x - fi).abs() <= 6.0 {
+                Some((t, c, true))
+            } else if (q.x - fo).abs() <= 6.0 {
+                Some((t, c, false))
+            } else {
+                None
+            }
+        };
+        if self.fade_drag.is_some() || resp.hover_pos().and_then(|q| fade_at(&self.tracks, q)).is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
         if resp.drag_started() && !split_tool && !ruler_drag {
+            if let Some(f) = press.and_then(|q| fade_at(&self.tracks, q)) {
+                self.push_undo("Fade");
+                self.fade_drag = Some(f);
+            }
+        }
+        if let (Some((t, c, is_in)), true, Some(q)) = (self.fade_drag, resp.dragged(), resp.interact_pointer_pos()) {
+            if let Some(clip) = self.tracks.get_mut(t).and_then(|t| t.clips.get_mut(c)) {
+                let f = x_to_f(q.x, vs, vl).round() as i64;
+                if is_in {
+                    clip.fade_in = (f - clip.start as i64).clamp(0, (clip.len - clip.fade_out) as i64) as usize;
+                } else {
+                    clip.fade_out = (clip.end() as i64 - f).clamp(0, (clip.len - clip.fade_in) as i64) as usize;
+                }
+                self.dirty = true;
+                self.refresh_playback();
+            }
+        }
+        if resp.drag_stopped() {
+            self.fade_drag = None;
+        }
+        if resp.drag_started() && !split_tool && !ruler_drag && self.fade_drag.is_none() {
             if let Some(q) = press {
                 // As in Live, a clip moves by its name strip; dragging across its waveform selects
                 // time instead (⌥ still drags a copy from anywhere on it).
@@ -886,6 +952,11 @@ impl App {
                         self.sel_clip = Some((t, c));
                         self.active = t;
                     }
+                    None if q.y < lanes.top() && self.locator_at(q.x, &|f| a.f_to_x(f, vs, vl)).is_some() => {
+                        // A click on a locator jumps there.
+                        let i = self.locator_at(q.x, &|f| a.f_to_x(f, vs, vl)).unwrap();
+                        self.go_to_frame(self.locators[i].0);
+                    }
                     None => {
                         // Clicking empty space moves the playhead (and picks that track).
                         self.sel_clip = None;
@@ -925,7 +996,7 @@ impl App {
         if playing {
             ui.ctx().request_repaint();
             let p = play_pos as f64;
-            if self.clip_drag.is_none() && (p > self.arr_view_start + self.arr_view_len || p < self.arr_view_start) {
+            if self.follow && self.clip_drag.is_none() && (p > self.arr_view_start + self.arr_view_len || p < self.arr_view_start) {
                 self.arr_view_start = p - self.arr_view_len * 0.05;
                 self.arr_clamp();
             }
@@ -1066,7 +1137,13 @@ impl App {
         let hit = |tracks: &[Track], q: Pos2, vs: f64, vl: f64| a.hit(tracks, q, vs, vl);
         let (vs, vl) = (self.arr_view_start, self.arr_view_len);
         if resp.secondary_clicked() {
-            if let Some(q) = resp.interact_pointer_pos() {
+            self.loc_menu = None;
+            // In the ruler: the locator menu.
+            if let Some(q) = resp.interact_pointer_pos().filter(|q| q.y < lanes.top()) {
+                let f = a.x_to_f(q.x, vs, vl);
+                let f = self.snap_to_grid(f, vl / lanes.width() as f64) as usize;
+                self.loc_menu = Some((self.locator_at(q.x, &|f| a.f_to_x(f, vs, vl)), f));
+            } else if let Some(q) = resp.interact_pointer_pos() {
                 match hit(&self.tracks, q, vs, vl) {
                     Some((t, c, _)) => {
                         if !self.selected_clips().contains(&(t, c)) {
@@ -1086,6 +1163,9 @@ impl App {
         }
         let ctx = ui.ctx().clone();
         resp.context_menu(|ui| {
+            if let Some(m) = self.loc_menu {
+                return self.locator_menu(ui, m);
+            }
             match self.ctx_menu_track {
                 Some(t) => self.track_menu(ui, t, &ctx),
                 None if self.sel_clip.is_some() => self.clip_menu(ui, &ctx),
@@ -1131,7 +1211,7 @@ impl App {
                     painter.line_segment([Pos2::new(x, lanes.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.0, Color32::from_gray(line)));
                     let bar_no = (f / bar).round() as u64;
                     if on_bar && bar_no % label_every == 0 {
-                        painter.text(Pos2::new(x + 3.0, ruler.top() + LOOP_H + 1.0), Align2::LEFT_TOP, (bar_no + 1).to_string(), FontId::proportional(11.0), MUTED);
+                        painter.text(Pos2::new(x + 3.0, ruler.top() + LOOP_H + LOC_H + 1.0), Align2::LEFT_TOP, (bar_no + 1).to_string(), FontId::proportional(11.0), MUTED);
                     }
                 }
                 k += 1;
@@ -1153,7 +1233,7 @@ impl App {
                 painter.line_segment([Pos2::new(x, ruler.bottom() - if major { 7.0 } else { 3.0 }), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, MUTED));
                 if major {
                     painter.line_segment([Pos2::new(x, lanes.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.0, Color32::from_gray(242)));
-                    painter.text(Pos2::new(x + 3.0, ruler.top() + LOOP_H + 1.0), Align2::LEFT_TOP, ruler_label(self.ruler, rate as u32, t, step), FontId::proportional(11.0), MUTED);
+                    painter.text(Pos2::new(x + 3.0, ruler.top() + LOOP_H + LOC_H + 1.0), Align2::LEFT_TOP, ruler_label(self.ruler, rate as u32, t, step), FontId::proportional(11.0), MUTED);
                 }
             }
             k += 1;
@@ -1187,7 +1267,8 @@ impl App {
                 }
                 let r = Rect::from_min_max(Pos2::new(x0, l.top() + 3.0), Pos2::new(x1.max(x0 + 2.0), l.bottom() - 3.0));
                 let selected = self.sel_clip == Some((ti, ci)) || self.sel_extra.contains(&(ti, ci));
-                draw_clip(&painter, r, c, color, selected, muted, lanes);
+                let hovered = self.arr_hover.is_some_and(|h| (h.0, h.1) == (ti, ci));
+                draw_clip(&painter, r, c, color, selected, muted, selected || hovered || self.fade_drag.is_some_and(|d| (d.0, d.1) == (ti, ci)), lanes);
                 // Parts a layer above plays over are washed out: they are not heard.
                 for &(s, e) in &hidden[ti] {
                     let (s, e) = (s.max(c.start), e.min(c.end()));
@@ -1236,6 +1317,22 @@ impl App {
                 }
             }
         }
+        // Locators: a flag in the ruler with its name, and a faint line down through the song.
+        for (f, name) in &self.locators {
+            let x = f_to_x(*f as f64, vs, vl);
+            if x < lanes.left() - 1.0 || x > lanes.right() {
+                continue;
+            }
+            let top = ruler.top() + LOOP_H + 1.0;
+            painter.add(egui::Shape::convex_polygon(vec![Pos2::new(x, top), Pos2::new(x + 8.0, top + 5.0), Pos2::new(x, top + 10.0)], Color32::from_rgb(40, 150, 180), Stroke::NONE));
+            let label = painter.layout_no_wrap(name.clone(), FontId::proportional(10.5), INK);
+            let bg = Rect::from_min_size(Pos2::new(x + 9.0, top), label.size() + Vec2::new(4.0, 0.0));
+            painter.rect_filled(bg, 2.0, PANEL);
+            painter.galley(Pos2::new(x + 11.0, top), label, INK);
+            for y in (lanes.top() as i32..lanes.bottom() as i32).step_by(6) {
+                painter.line_segment([Pos2::new(x, y as f32), Pos2::new(x, y as f32 + 3.0)], Stroke::new(1.0, Color32::from_rgb(40, 150, 180).gamma_multiply(0.6)));
+            }
+        }
         // Playhead (or the playback position).
         let ph = if playing { play_pos } else { self.arr_cursor };
         let x = f_to_x(ph as f64, vs, vl);
@@ -1254,13 +1351,16 @@ impl App {
         if let Some(q) = hover {
             let f = x_to_f(q.x, vs, vl) as usize;
             let text = if self.grid_frames(spp).is_some() { format!("{}  {}", self.fmt_bars(f), self.fmt_pos(f)) } else { self.fmt_pos(f) };
-            painter.text(Pos2::new(lanes.right() - 6.0, ruler.top() + LOOP_H + 1.0), Align2::RIGHT_TOP, text, FontId::monospace(11.0), MUTED);
+            painter.text(Pos2::new(lanes.right() - 6.0, ruler.top() + LOOP_H + LOC_H + 1.0), Align2::RIGHT_TOP, text, FontId::monospace(11.0), MUTED);
         }
     }
 }
 
 /// Height of the loop strip along the top of the arrangement ruler.
 pub(super) const LOOP_H: f32 = 13.0;
+
+/// Height of the locator row, between the loop strip and the bar numbers.
+pub(super) const LOC_H: f32 = 12.0;
 
 /// Most ticks or lines a ruler draws in one frame. Normally a few hundred at most; the cap means a
 /// bad view value (not a number, say) can never keep a drawing loop going forever.

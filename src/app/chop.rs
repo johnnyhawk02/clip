@@ -490,6 +490,8 @@ impl App {
         let cut = at - left.start;
         let mut right = left.clone();
         left.len = cut;
+        left.fade_out = 0;
+        right.fade_in = 0;
         right.start = at;
         right.trim += cut;
         right.len -= cut;

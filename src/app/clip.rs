@@ -25,6 +25,9 @@ pub(super) struct Clip {
     pub(super) looping: bool,
     /// A warped clip plays its source audio stretched to the song tempo (keeping its pitch),
     /// as in Ableton; `audio` is then the stretched version.
+    /// Fades drawn with the clip's corner handles (frames), as in Live.
+    pub(super) fade_in: usize,
+    pub(super) fade_out: usize,
     /// The clip's own volume (linear), set in the Clip View.
     pub(super) gain: f32,
     /// Where bar 1.1.1 is in the audio (frames): the clip editor's ruler counts from here, with
@@ -148,7 +151,7 @@ impl Clip {
     pub(super) fn new(name: impl Into<String>, audio: Arc<Audio>, start: usize) -> Clip {
         let peaks = Arc::new(Peaks::build(&audio));
         let len = audio.frames();
-        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None, looping: false, warp: None, origin: 0, gain: 1.0 }
+        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None, looping: false, warp: None, origin: 0, gain: 1.0, fade_in: 0, fade_out: 0 }
     }
 
     pub(super) fn end(&self) -> usize {
@@ -327,6 +330,17 @@ pub(super) fn edge_fades(a: &Audio, fades: (usize, usize)) -> (usize, usize) {
     }
     let level = |i: usize| a.channels.iter().map(|c| c[i].abs()).fold(0.0f32, f32::max);
     edge_fades_for(level(0), level(n - 1), n, a.rate, fades)
+}
+
+/// A clip's fades: its own (from the corner handles) where longer than the automatic ones
+/// (crossfades and edge fades), shared out so they never overlap.
+pub(super) fn with_clip_fades(c: &Clip, (fin, fout): (usize, usize)) -> (usize, usize) {
+    let (fin, fout) = (fin.max(c.fade_in), fout.max(c.fade_out));
+    if fin + fout > c.len {
+        let k = c.len as f64 / (fin + fout) as f64;
+        return ((fin as f64 * k) as usize, (fout as f64 * k) as usize);
+    }
+    (fin, fout)
 }
 
 /// `edge_fades` from the levels at a clip's first and last frames, its length and rate.

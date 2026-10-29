@@ -109,7 +109,7 @@ fn clip_src(c: &Clip, cross: (usize, usize), rate: u32) -> engine::ClipSrc {
     let mut src = engine::ClipSrc { audio, speed, start: c.start, len: c.len, trim: c.trim, looping, frames, fades: (0, 0), gain: c.gain };
     let level = |t: usize| (0..2).map(|ch| src.sample_at(t, ch).abs()).fold(0.0f32, f32::max);
     let (first, last) = (level(c.start), level(c.end() - 1));
-    src.fades = edge_fades_for(first, last, c.len, rate, cross);
+    src.fades = with_clip_fades(c, edge_fades_for(first, last, c.len, rate, cross));
     src
 }
 

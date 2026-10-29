@@ -117,6 +117,9 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <li><b>Trim</b> by dragging either edge. The audio underneath is kept, so you can drag it back out.</li>
     <li><b>Phrase lines:</b> a fine line runs across every 4 bars, counting from bar 1. <span class="path">PhotoSound ▸ Preferences</span> <kbd>⌘,</kbd> changes the spacing, or 0 turns them off.</li>
     <li><b>Snapping:</b> moves and trims snap to the grid, other clips' edges and the playhead. Hold <kbd>⌘</kbd> to place freely.</li>
+    <li><b>Fades:</b> drag the small handles at a clip's top corners to fade it in or out.</li>
+    <li><b>Locators:</b> <span class="path">Control ▸ Add Locator</span>, or right-click the ruler, adds a named marker. <kbd>[</kbd> <kbd>]</kbd> jump between them; right-click one to rename it, delete it or loop to the next.</li>
+    <li><b>Playing:</b> play starts from where you last clicked and stopping leaves it there, as in Live. <kbd>⇧Space</kbd> carries on from where you stopped, <kbd>⌘F</kbd> turns Follow on or off, and <kbd>⌘U</kbd> quantizes clip starts to the grid.</li>
     <li><b>Clip View:</b> select one clip and its settings appear under the layers, as in Live: Warp and the clip's BPM, Loop, Start, Length, Gain, Reverse and Edit.</li>
     <li><b>Each layer</b> has an eye (show/hide), a colour swatch and a volume slider. <kbd>⌥⌘↑</kbd> <kbd>⌥⌘↓</kbd> step between layers.</li>
     <li><b>Copy, cut, paste</b> clips with <kbd>⌘C</kbd> <kbd>⌘X</kbd> <kbd>⌘V</kbd>. Paste goes on the selected layer at the playhead. <kbd>⌘D</kbd> duplicates a clip right after itself, and <kbd>⌫</kbd> deletes it.</li>
@@ -143,7 +146,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <div class="cards">
     <div class="card"><b>Split Clip <kbd>⌘E</kbd></b><span>Cuts the clip under the pointer, at the pointer (snapped to the grid), or at the playhead when the pointer isn't over a clip.</span></div>
     <div class="card"><b>Split tool <kbd>C</kbd></b><span>Click anywhere on a clip to cut it there. Press <kbd>S</kbd> to go back to the selection tool.</span></div>
-    <div class="card"><b>Slice at Grid <kbd>⌘U</kbd></b><span>Cuts the selected clips at every grid line, ready to drag around, duplicate, loop and group.</span></div>
+    <div class="card"><b>Slice at Grid <kbd>⌥⌘U</kbd></b><span>Cuts the selected clips at every grid line, ready to drag around, duplicate, loop and group.</span></div>
     <div class="card"><b>Reverse <kbd>R</kbd></b><span>Plays the selected clips backwards. Also on the clip's right-click menu.</span></div>
   </div>
   <figure><img src="img/slice.jpg" alt="A loop sliced into beat-length clips"><figcaption>A loop after Slice at Grid: every beat is now its own clip.</figcaption></figure>
@@ -259,7 +262,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <tr><th>Keys</th><th>Does</th></tr>
     <tr><td><kbd>Space</kbd></td><td>Play / pause. <kbd>Esc</kbd> stops.</td></tr>
     <tr><td><kbd>⌘E</kbd></td><td>Split clip</td></tr>
-    <tr><td><kbd>⌘U</kbd></td><td>Slice at grid</td></tr>
+    <tr><td><kbd>⌘U</kbd> / <kbd>⌥⌘U</kbd></td><td>Quantize / slice at grid</td></tr>
     <tr><td><kbd>⌘D</kbd></td><td>Duplicate clip</td></tr>
     <tr><td><kbd>⌘Y</kbd></td><td>Mangle again</td></tr>
     <tr><td><kbd>R</kbd></td><td>Reverse the selected clips</td></tr>

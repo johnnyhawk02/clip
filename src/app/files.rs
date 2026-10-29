@@ -287,6 +287,7 @@ impl App {
                             looping: c.looping,
                             origin: c.origin,
                             gain: c.gain,
+                            fades: (c.fade_in, c.fade_out),
                             group: c.group.as_ref().map(|g| tracks_data(g, pool)),
                             warp: c.warp.as_ref().map(|w| {
                                 let i = pool.iter().position(|a| Arc::ptr_eq(a, &w.source)).unwrap_or_else(|| {
@@ -308,6 +309,7 @@ impl App {
             grid: self.grid,
             snap: self.snap,
             arr_loop: self.arr_loop,
+            locators: self.locators.clone(),
             looping: self.looping,
             master_gain: self.master_gain,
             rate: self.rate(),
@@ -331,6 +333,7 @@ impl App {
         (self.tempo, self.beats_per_bar, self.grid, self.snap) = (file.tempo, file.beats_per_bar.max(1), file.grid.min(GRID.len() - 1), file.snap);
         self.laid_out_tempo = self.tempo;
         self.master_gain = file.master_gain;
+        self.locators = file.locators.clone();
         (self.arr_loop, self.looping) = (file.arr_loop, file.looping);
         // Older projects could hold a loop that ends part-way through a bar.
         self.arr_loop = self.arr_loop.map(|l| self.whole_bars(l));
@@ -354,6 +357,7 @@ impl App {
                         clip.looping = c.looping;
                         clip.origin = c.origin;
                         clip.gain = c.gain;
+                        (clip.fade_in, clip.fade_out) = c.fades;
                         clip.len = if c.looping { c.len } else { clip.len };
                         if let Some((bpm, tempo, i)) = c.warp {
                             if let Some(source) = audio.get(i) {

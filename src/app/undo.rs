@@ -21,6 +21,7 @@ impl App {
             tempo: self.tempo,
             beats_per_bar: self.beats_per_bar,
             arr_loop: self.arr_loop,
+            locators: self.locators.clone(),
             label,
         });
         self.redo.clear();
@@ -73,6 +74,7 @@ impl App {
             tempo: std::mem::replace(&mut self.tempo, snap.tempo),
             beats_per_bar: std::mem::replace(&mut self.beats_per_bar, snap.beats_per_bar),
             arr_loop: std::mem::replace(&mut self.arr_loop, snap.arr_loop),
+            locators: std::mem::replace(&mut self.locators, snap.locators),
             label: snap.label,
         });
         self.sel = snap.sel;
@@ -100,6 +102,7 @@ impl App {
             tempo: std::mem::replace(&mut self.tempo, snap.tempo),
             beats_per_bar: std::mem::replace(&mut self.beats_per_bar, snap.beats_per_bar),
             arr_loop: std::mem::replace(&mut self.arr_loop, snap.arr_loop),
+            locators: std::mem::replace(&mut self.locators, snap.locators),
             label: snap.label,
         });
         self.sel = snap.sel;

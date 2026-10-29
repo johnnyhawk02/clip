@@ -29,6 +29,9 @@ pub struct ProjectFile {
     pub looping: bool,
     #[serde(default = "default_master")]
     pub master_gain: f32,
+    /// Named markers in the song (frame, name), as Live's locators.
+    #[serde(default)]
+    pub locators: Vec<(usize, String)>,
     pub rate: u32,
     pub tracks: Vec<TrackData>,
     pub audio: Vec<AudioData>,
@@ -91,6 +94,9 @@ pub struct ClipData {
     /// The clip's own volume (linear).
     #[serde(default = "default_master")]
     pub gain: f32,
+    /// Fades from the clip's corner handles (frames).
+    #[serde(default)]
+    pub fades: (usize, usize),
 }
 
 pub fn write(path: &Path, project: &ProjectFile, audio: &[&Audio]) -> Result<(), String> {
@@ -158,6 +164,7 @@ mod tests {
             arr_loop: Some((0, 3)),
             looping: true,
             master_gain: 1.0,
+            locators: Vec::new(),
             rate: 1000,
             tracks: vec![TrackData {
                 name: "T".into(),
@@ -180,6 +187,7 @@ mod tests {
                     warp: None,
                     origin: 0,
                     gain: 1.0,
+                    fades: (0, 0),
                 }],
             }],
             audio: vec![AudioData { rate: 1000, channels: 2, frames: 3 }],

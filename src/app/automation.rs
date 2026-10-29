@@ -153,7 +153,7 @@ impl App {
                         for (ti, t) in self.tracks.iter().enumerate() {
                             for c in &t.clips {
                                 let w = c.warp.as_ref().map(|w| (w.bpm, w.tempo));
-                                eprintln!("clip t{ti} {:?} start {} trim {} len {} frames {} warp {:?} tempo {}", c.name, c.start, c.trim, c.len, c.audio.frames(), w, self.tempo);
+                                eprintln!("clip t{ti} {:?} start {} trim {} len {} frames {} warp {:?} tempo {} fades {:?} gain {}", c.name, c.start, c.trim, c.len, c.audio.frames(), w, self.tempo, (c.fade_in, c.fade_out), c.gain);
                             }
                         }
                     }
