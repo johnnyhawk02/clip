@@ -122,6 +122,9 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
                     }
                 }
             }
+            // Drawn as heard: smaller where the clip fades in or out.
+            let g = fade_gain(c, i0);
+            let (lo, hi) = (lo * g, hi * g);
             let y0 = mid - hi.clamp(-1.0, 1.0) * amp;
             let y1 = (mid - lo.clamp(-1.0, 1.0) * amp).max(y0 + 1.0);
             p.line_segment([Pos2::new(x + 0.5, y0), Pos2::new(x + 0.5, y1)], Stroke::new(1.0, wave_col));
@@ -176,6 +179,19 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
     }
     let stroke = if selected { Stroke::new(2.0, INK) } else { Stroke::new(1.0, color.lerp_to_gamma(Color32::WHITE, 0.3)) };
     p.rect_stroke(r, 4.0, stroke, egui::StrokeKind::Inside);
+}
+
+/// A clip's fade level `i` frames in (equal power, as heard), from its fade handles.
+fn fade_gain(c: &Clip, i: usize) -> f32 {
+    let mut g = 1.0;
+    if i < c.fade_in {
+        g *= (i as f32 / c.fade_in as f32 * std::f32::consts::FRAC_PI_2).sin();
+    }
+    let k = c.len.saturating_sub(1 + i);
+    if k < c.fade_out {
+        g *= ((k + 1) as f32 / c.fade_out as f32 * std::f32::consts::FRAC_PI_2).sin();
+    }
+    g
 }
 
 /// Where a clip's fades end (x), in its rect `r`.
