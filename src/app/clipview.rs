@@ -18,7 +18,7 @@ impl App {
     /// Draw the Clip View in `r` and apply what's changed (one undo step per drag or typed value).
     pub(super) fn clip_view(&mut self, ui: &mut egui::Ui, r: Rect) {
         let Some((t, ci)) = self.clip_view_clip() else { return };
-        ui.painter().rect_filled(r, 0.0, PANEL);
+        ui.painter().rect_filled(r, 0.0, panel());
         let Some(c) = self.clip((t, ci)).cloned() else { return };
         let bf = self.beat_frames().max(1.0);
         let bpb = self.beats_per_bar.max(1) as f64;
@@ -35,8 +35,8 @@ impl App {
         ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(8.0, 3.0);
-                let small = |ui: &mut egui::Ui, s: &str| ui.label(egui::RichText::new(s).size(11.0).color(MUTED));
-                ui.add(egui::Label::new(egui::RichText::new(&c.name).strong().color(INK)).truncate());
+                let small = |ui: &mut egui::Ui, s: &str| ui.label(egui::RichText::new(s).size(11.0).color(muted()));
+                ui.add(egui::Label::new(egui::RichText::new(&c.name).strong().color(ink())).truncate());
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                         if ui.add(Button::new("Warp").selected(c.warp.is_some())).on_hover_text("Follow the song tempo").clicked() {
@@ -108,7 +108,7 @@ impl App {
                     if ui.small_button("−").on_hover_text("Down a semitone").clicked() {
                         pitch = Some(c.transpose - 1);
                     }
-                    ui.label(egui::RichText::new(format!("{:+} st", c.transpose)).color(INK));
+                    ui.label(egui::RichText::new(format!("{:+} st", c.transpose)).color(ink()));
                     if ui.small_button("+").on_hover_text("Up a semitone").clicked() {
                         pitch = Some(c.transpose + 1);
                     }

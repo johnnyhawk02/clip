@@ -52,7 +52,7 @@ impl App {
     pub(super) fn session(&mut self, ui: &mut egui::Ui) {
         self.fit_slots();
         let full = ui.max_rect();
-        ui.painter().rect_filled(full, 0.0, Color32::WHITE);
+        ui.painter().rect_filled(full, 0.0, gray(255));
         let n_tracks = self.tracks.len();
         let n_scenes = self.scenes.len();
         let grid_h = HEAD_H + n_scenes as f32 * ROW_H + ROW_H;
@@ -64,13 +64,13 @@ impl App {
             let mut changed = false;
             for t in 0..n_tracks {
                 let c = col(t);
-                let color = TRACK_COLORS[self.tracks[t].color % TRACK_COLORS.len()];
+                let color = live_color(self.tracks[t].color);
                 // Title: the track's name in its colour (click to select the track).
                 let head = Rect::from_min_size(c.min, Vec2::new(c.width(), HEAD_H - 6.0));
-                ui.painter().rect_filled(head, 3.0, color.lerp_to_gamma(Color32::WHITE, 0.55));
-                ui.painter().text(head.left_center() + Vec2::new(6.0, 0.0), Align2::LEFT_CENTER, &self.tracks[t].name, FontId::proportional(12.0), INK);
+                ui.painter().rect_filled(head, 3.0, color);
+                ui.painter().text(head.left_center() + Vec2::new(6.0, 0.0), Align2::LEFT_CENTER, &self.tracks[t].name, FontId::proportional(12.0), Color32::from_gray(10));
                 if t == self.active {
-                    ui.painter().rect_stroke(head, 3.0, Stroke::new(1.5, INK), egui::StrokeKind::Inside);
+                    ui.painter().rect_stroke(head, 3.0, Stroke::new(1.5, ink()), egui::StrokeKind::Inside);
                 }
                 if ui.interact(head, ui.scope_id().with(("shead", t)), Sense::click()).clicked() {
                     self.set_active(t);
@@ -82,8 +82,8 @@ impl App {
                 // The track's stop button, under its slots.
                 let stop = Rect::from_min_size(slot_rect(t, n_scenes).min, Vec2::new(c.width(), ROW_H - 3.0));
                 let stop_r = ui.interact(stop, ui.scope_id().with(("sstop", t)), Sense::click());
-                ui.painter().rect_filled(stop, 3.0, if stop_r.hovered() { Color32::from_gray(225) } else { PANEL });
-                ui.painter().rect_filled(Rect::from_center_size(stop.center(), Vec2::splat(8.0)), 1.0, INK);
+                ui.painter().rect_filled(stop, 3.0, if stop_r.hovered() { gray(225) } else { panel() });
+                ui.painter().rect_filled(Rect::from_center_size(stop.center(), Vec2::splat(8.0)), 1.0, ink());
                 if stop_r.on_hover_text("Stop this track's clip").clicked() {
                     self.stop_track(t);
                 }
@@ -95,8 +95,8 @@ impl App {
                     ui.horizontal(|ui| {
                         let (act, act_r) = ui.allocate_exact_size(Vec2::new(22.0, 20.0), Sense::click());
                         let on = !tr.mute;
-                        ui.painter().rect(act, 3.0, if on { INK } else { Color32::TRANSPARENT }, Stroke::new(1.0, INK), egui::StrokeKind::Inside);
-                        ui.painter().text(act.center(), Align2::CENTER_CENTER, (t + 1).to_string(), FontId::proportional(11.0), if on { Color32::WHITE } else { INK });
+                        ui.painter().rect(act, 3.0, if on { ink() } else { Color32::TRANSPARENT }, Stroke::new(1.0, ink()), egui::StrokeKind::Inside);
+                        ui.painter().text(act.center(), Align2::CENTER_CENTER, (t + 1).to_string(), FontId::proportional(11.0), if on { gray(255) } else { ink() });
                         if act_r.on_hover_text("Track on / mute").clicked() {
                             tr.mute = !tr.mute;
                             changed = true;
@@ -110,7 +110,7 @@ impl App {
                         changed |= v.drag_stopped() || (v.changed() && !v.dragged());
                     });
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Pan").size(11.0).color(MUTED));
+                        ui.label(egui::RichText::new("Pan").size(11.0).color(muted()));
                         ui.spacing_mut().slider_width = (mix.width() - 40.0).max(30.0);
                         let p = ui.add(egui::Slider::new(&mut tr.pan, -1.0..=1.0).show_value(false));
                         if p.double_clicked() {
@@ -123,14 +123,14 @@ impl App {
             // Scenes: name and launch button on the right, then Stop All.
             let sx = origin.x + n_tracks as f32 * COL_W + 6.0;
             let shead = Rect::from_min_size(Pos2::new(sx, origin.y), Vec2::new(SCENE_W, HEAD_H - 6.0));
-            ui.painter().text(shead.left_center() + Vec2::new(6.0, 0.0), Align2::LEFT_CENTER, "Scenes", FontId::proportional(12.0), MUTED);
+            ui.painter().text(shead.left_center() + Vec2::new(6.0, 0.0), Align2::LEFT_CENTER, "Scenes", FontId::proportional(12.0), muted());
             for s in 0..n_scenes {
                 let r = Rect::from_min_size(Pos2::new(sx, origin.y + HEAD_H + s as f32 * ROW_H), Vec2::new(SCENE_W, ROW_H - 3.0));
                 let resp = ui.interact(r, ui.scope_id().with(("scene", s)), Sense::click());
-                ui.painter().rect_filled(r, 3.0, if resp.hovered() { Color32::from_gray(225) } else { PANEL });
+                ui.painter().rect_filled(r, 3.0, if resp.hovered() { gray(225) } else { panel() });
                 let tri = Rect::from_min_size(r.min, Vec2::new(22.0, r.height()));
-                play_triangle(ui.painter(), tri.center(), INK);
-                ui.painter().text(tri.right_center() + Vec2::new(2.0, 0.0), Align2::LEFT_CENTER, &self.scenes[s], FontId::proportional(12.0), INK);
+                play_triangle(ui.painter(), tri.center(), ink());
+                ui.painter().text(tri.right_center() + Vec2::new(2.0, 0.0), Align2::LEFT_CENTER, &self.scenes[s], FontId::proportional(12.0), ink());
                 if resp.on_hover_text("Launch every clip in this scene").clicked() {
                     self.launch_scene(s);
                 }
@@ -168,6 +168,7 @@ impl App {
             ui.ctx().request_repaint();
         }
         let clip_name = self.tracks[t].slots[s].as_ref().map(|c| c.name.clone());
+        let color = self.tracks[t].slots[s].as_ref().and_then(|c| c.color).map_or(color, live_color);
         // A filled slot can be dragged to another; any slot can be clicked.
         if clip_name.is_some() {
             ui.scope_builder(egui::UiBuilder::new().max_rect(r), |ui| {
@@ -175,28 +176,50 @@ impl App {
             });
         }
         let resp = ui.interact(r, id.with("click"), Sense::click());
+        if clip_name.is_some() {
+            let current = self.tracks[t].slots[s].as_ref().and_then(|c| c.color).unwrap_or(self.tracks[t].color);
+            resp.context_menu(|ui| {
+                if let Some(i) = color_picker(ui, current) {
+                    ui.close();
+                    self.push_undo("Clip Colour");
+                    if let Some(c) = self.tracks[t].slots[s].as_mut() {
+                        c.color = Some(i);
+                    }
+                    self.dirty = true;
+                }
+                ui.separator();
+                if ui.button("Delete").clicked() {
+                    ui.close();
+                    self.sel_slot = Some((t, s));
+                    self.clear_slot();
+                }
+            });
+        }
         let p = ui.painter();
         match &clip_name {
             Some(name) => {
-                p.rect_filled(r, 3.0, if playing || waiting { color } else { color.lerp_to_gamma(Color32::WHITE, 0.6) });
+                // As in Live: the slot in the clip's colour, its triangle green while it plays
+                // (blinking while it waits for its bar).
+                p.rect_filled(r, 3.0, color);
                 let tri = Rect::from_min_size(r.min, Vec2::new(22.0, r.height()));
-                play_triangle(p, tri.center(), if playing { Color32::WHITE } else { INK });
-                let mut job = egui::text::LayoutJob::simple_singleline(name.clone(), FontId::proportional(11.5), if playing { Color32::WHITE } else { INK });
+                let green = Color32::from_rgb(40, 200, 60);
+                play_triangle(p, tri.center(), if playing || waiting { green } else { Color32::from_gray(10) });
+                let mut job = egui::text::LayoutJob::simple_singleline(name.clone(), FontId::proportional(11.5), Color32::from_gray(10));
                 job.wrap = egui::text::TextWrapping { max_width: r.width() - 28.0, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
                 let g = p.ctx().fonts_mut(|f| f.layout_job(job));
-                p.galley(Pos2::new(tri.right(), r.center().y - g.size().y / 2.0), g, INK);
+                p.galley(Pos2::new(tri.right(), r.center().y - g.size().y / 2.0), g, Color32::from_gray(10));
             }
             None => {
-                p.rect_filled(r, 3.0, Color32::from_gray(238));
-                p.rect_stroke(Rect::from_center_size(r.center(), Vec2::splat(7.0)), 1.0, Stroke::new(1.0, Color32::from_gray(200)), egui::StrokeKind::Inside);
+                p.rect_filled(r, 3.0, gray(238));
+                p.rect_stroke(Rect::from_center_size(r.center(), Vec2::splat(7.0)), 1.0, Stroke::new(1.0, gray(200)), egui::StrokeKind::Inside);
             }
         }
         if selected || self.sel_slots.contains(&(t, s)) {
-            p.rect_stroke(r, 3.0, Stroke::new(2.0, INK), egui::StrokeKind::Inside);
+            p.rect_stroke(r, 3.0, Stroke::new(2.0, ink()), egui::StrokeKind::Inside);
         }
         // Something dragged over the slot: show where it would land.
         if resp.dnd_hover_payload::<SlotDrag>().is_some() || resp.dnd_hover_payload::<PoolDrag>().is_some() {
-            p.rect_stroke(r, 3.0, Stroke::new(2.0, INK.gamma_multiply(0.5)), egui::StrokeKind::Inside);
+            p.rect_stroke(r, 3.0, Stroke::new(2.0, ink().gamma_multiply(0.5)), egui::StrokeKind::Inside);
         }
         if let Some(from) = resp.dnd_release_payload::<SlotDrag>() {
             let copy = ui.input(|i| i.modifiers.alt);

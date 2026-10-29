@@ -407,7 +407,7 @@ impl App {
             dialog_header(ui, title, &format!("{blurb} Click to add a point, drag to move it, double-click to remove it."));
             let (rect, resp) = ui.allocate_exact_size(Vec2::new(520.0, 180.0), Sense::click_and_drag());
             let p = ui.painter_at(rect.expand(4.0));
-            p.rect_filled(rect, 4.0, Color32::from_gray(252));
+            p.rect_filled(rect, 4.0, gray(252));
             // The selection's waveform, faintly, so the curve can be lined up with the sound.
             let w = rect.width() as usize;
             let len = (e - s).max(1);
@@ -420,7 +420,7 @@ impl App {
                 let peak = a.channels.iter().map(|c| c[f0..f1].iter().fold(0.0f32, |m, v| m.max(v.abs()))).fold(0.0, f32::max);
                 let h = peak.min(1.0) * rect.height() * 0.48;
                 let x = rect.left() + px as f32 + 0.5;
-                p.line_segment([Pos2::new(x, rect.center().y - h), Pos2::new(x, rect.center().y + h)], Stroke::new(1.0, Color32::from_gray(215)));
+                p.line_segment([Pos2::new(x, rect.center().y - h), Pos2::new(x, rect.center().y + h)], Stroke::new(1.0, gray(215)));
             }
             let to_screen = |(t, v): (f32, f32)| Pos2::new(rect.left() + t * rect.width(), rect.bottom() - (v - lo) / (hi - lo) * rect.height());
             let from_screen = |q: Pos2| {
@@ -430,8 +430,8 @@ impl App {
             let refs: &[f32] = if kind == CurveKind::Envelope { &[0.0, 1.0, 2.0] } else { &[-12.0, 0.0, 12.0] };
             for &v in refs {
                 let y = to_screen((0.0, v)).y;
-                p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.0, Color32::from_gray(if v == refs[1] { 150 } else { 225 })));
-                p.text(Pos2::new(rect.left() + 3.0, y), if v == hi { Align2::LEFT_TOP } else { Align2::LEFT_BOTTOM }, kind.format(v), FontId::proportional(10.0), Color32::from_gray(110));
+                p.line_segment([Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)], Stroke::new(1.0, gray(if v == refs[1] { 150 } else { 225 })));
+                p.text(Pos2::new(rect.left() + 3.0, y), if v == hi { Align2::LEFT_TOP } else { Align2::LEFT_BOTTOM }, kind.format(v), FontId::proportional(10.0), gray(110));
             }
             let points = match kind {
                 CurveKind::Envelope => &mut self.env_points,
@@ -483,14 +483,14 @@ impl App {
                 }
             }
             let line: Vec<Pos2> = points.iter().map(|&pt| to_screen(pt)).collect();
-            p.add(egui::Shape::line(line.clone(), Stroke::new(1.5, Color32::BLACK)));
+            p.add(egui::Shape::line(line.clone(), Stroke::new(1.5, gray(0))));
             for q in line {
-                p.rect_filled(Rect::from_center_size(q, Vec2::splat(7.0)), 0.0, Color32::BLACK);
+                p.rect_filled(Rect::from_center_size(q, Vec2::splat(7.0)), 0.0, gray(0));
             }
             if let Some(q) = resp.hover_pos() {
-                p.text(rect.right_top() + Vec2::new(-4.0, 3.0), Align2::RIGHT_TOP, kind.format(from_screen(q).1), FontId::monospace(10.0), Color32::from_gray(90));
+                p.text(rect.right_top() + Vec2::new(-4.0, 3.0), Align2::RIGHT_TOP, kind.format(from_screen(q).1), FontId::monospace(10.0), gray(90));
             }
-            p.rect_stroke(rect, 4.0, Stroke::new(1.0, LINE), egui::StrokeKind::Outside);
+            p.rect_stroke(rect, 4.0, Stroke::new(1.0, rule()), egui::StrokeKind::Outside);
             (apply, cancel) = dialog_buttons(ui, "OK", true, |ui| {
                 if ui.button("Reset").clicked() {
                     *points = kind.flat();
@@ -552,7 +552,7 @@ impl App {
                             (None, true) => "Following playback",
                             (None, false) => "At the cursor",
                         })
-                        .color(MUTED),
+                        .color(muted()),
                     );
                 });
                 let Some(a) = src else {
@@ -561,7 +561,7 @@ impl App {
                 };
                 let (rect, _) = ui.allocate_exact_size(ui.available_size().max(Vec2::new(200.0, 120.0)), Sense::hover());
                 let p = ui.painter_at(rect);
-                p.rect_filled(rect, 4.0, Color32::WHITE);
+                p.rect_filled(rect, 4.0, gray(255));
                 let plot = rect.shrink2(Vec2::new(34.0, 18.0)).translate(Vec2::new(10.0, -2.0));
                 let nyq = a.rate as f32 / 2.0;
                 let fx = |hz: f32| plot.left() + ((hz.max(20.0) / 20.0).ln() / (nyq / 20.0).ln()) * plot.width();
@@ -569,17 +569,17 @@ impl App {
                 for hz in [100.0, 1000.0, 10000.0] {
                     if hz < nyq {
                         let x = fx(hz);
-                        p.line_segment([Pos2::new(x, plot.top()), Pos2::new(x, plot.bottom())], Stroke::new(1.0, Color32::from_gray(232)));
+                        p.line_segment([Pos2::new(x, plot.top()), Pos2::new(x, plot.bottom())], Stroke::new(1.0, gray(232)));
                         let label = if hz >= 1000.0 { format!("{}k", hz / 1000.0) } else { format!("{hz}") };
-                        p.text(Pos2::new(x, plot.bottom() + 3.0), Align2::CENTER_TOP, label, FontId::proportional(10.0), MUTED);
+                        p.text(Pos2::new(x, plot.bottom() + 3.0), Align2::CENTER_TOP, label, FontId::proportional(10.0), muted());
                     }
                 }
                 let n = a.frames();
                 if !three_d {
                     for db in [0.0, -24.0, -48.0, -72.0] {
                         let y = dby(db, plot);
-                        p.line_segment([Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)], Stroke::new(1.0, Color32::from_gray(232)));
-                        p.text(Pos2::new(plot.left() - 4.0, y), Align2::RIGHT_CENTER, format!("{db:.0}"), FontId::proportional(10.0), MUTED);
+                        p.line_segment([Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)], Stroke::new(1.0, gray(232)));
+                        p.text(Pos2::new(plot.left() - 4.0, y), Align2::RIGHT_CENTER, format!("{db:.0}"), FontId::proportional(10.0), muted());
                     }
                     // Average several FFTs across a selection; otherwise one at the position.
                     let size = 4096;
@@ -602,11 +602,11 @@ impl App {
                     for w in pts.windows(2) {
                         p.add(egui::Shape::convex_polygon(
                             vec![w[0], w[1], Pos2::new(w[1].x, plot.bottom()), Pos2::new(w[0].x, plot.bottom())],
-                            Color32::from_gray(228),
+                            gray(228),
                             Stroke::NONE,
                         ));
                     }
-                    p.add(egui::Shape::line(pts, Stroke::new(1.2, INK)));
+                    p.add(egui::Shape::line(pts, Stroke::new(1.2, ink())));
                     if playing && sel.is_none() {
                         ctx.request_repaint();
                     }
@@ -648,14 +648,14 @@ impl App {
                         for w in pts.windows(2) {
                             p.add(egui::Shape::convex_polygon(
                                 vec![w[0], w[1], Pos2::new(w[1].x, base), Pos2::new(w[0].x, base)],
-                                Color32::WHITE,
+                                gray(255),
                                 Stroke::NONE,
                             ));
                         }
                         let shade = (60.0 + 140.0 * k as f32 / data.len() as f32) as u8;
-                        p.add(egui::Shape::line(pts, Stroke::new(1.0, Color32::from_gray(shade))));
+                        p.add(egui::Shape::line(pts, Stroke::new(1.0, gray(shade))));
                     }
-                    p.text(Pos2::new(front.left(), front.bottom() + 14.0), Align2::LEFT_TOP, "front: start of range · back: end", FontId::proportional(10.0), MUTED);
+                    p.text(Pos2::new(front.left(), front.bottom() + 14.0), Align2::LEFT_TOP, "front: start of range · back: end", FontId::proportional(10.0), muted());
                 }
             });
         self.spectrum_3d = three_d;
@@ -664,14 +664,22 @@ impl App {
 
     /// Clip ▸ Preferences (⌘,).
     pub(super) fn prefs_dialog(&mut self, ctx: &egui::Context) {
-        let Some((bars_before, repitch_before)) = self.prefs_open else { return };
+        let Some((bars_before, repitch_before, look_before)) = self.prefs_open else { return };
         let mut ok = false;
         let mut cancel = false;
         let mut repitch = repitch_mode();
+        let mut look = APPEARANCE.load(std::sync::atomic::Ordering::Relaxed);
         let resp = dialog_modal("prefs").show(ctx, |ui| {
             ui.set_width(420.0);
             dialog_header(ui, "Preferences", "");
             dialog_grid("prefsgrid").show(ui, |ui| {
+                ui.label("Appearance");
+                ui.horizontal(|ui| {
+                    ui.radio_value(&mut look, 0, "Match the Mac");
+                    ui.radio_value(&mut look, 1, "Light");
+                    ui.radio_value(&mut look, 2, "Dark");
+                });
+                ui.end_row();
                 ui.label("Phrase lines");
                 ui.horizontal(|ui| {
                     ui.label("every");
@@ -686,12 +694,14 @@ impl App {
                 });
                 ui.end_row();
             });
-            ui.label(egui::RichText::new("Phrase lines are a fine line across the arrangement, counting from bar 1. 0 turns them off. Tempo changes apply to warped clips.").color(MUTED));
+            ui.label(egui::RichText::new("Phrase lines are a fine line across the arrangement, counting from bar 1. 0 turns them off. Tempo changes apply to warped clips.").color(muted()));
             (ok, cancel) = dialog_buttons(ui, "Done", true, |_| {});
         });
         REPITCH.store(repitch, std::sync::atomic::Ordering::Relaxed);
+        APPEARANCE.store(look, std::sync::atomic::Ordering::Relaxed);
         if cancel || resp.should_close() {
             self.phrase_bars = bars_before;
+            APPEARANCE.store(look_before, std::sync::atomic::Ordering::Relaxed);
             REPITCH.store(repitch_before, std::sync::atomic::Ordering::Relaxed);
             self.prefs_open = None;
         } else if ok {
@@ -701,6 +711,7 @@ impl App {
                     let _ = std::fs::create_dir_all(dir);
                 }
                 let _ = std::fs::write(p, self.phrase_bars.to_string());
+                let _ = std::fs::write(appearance_pref(), look.to_string());
                 if repitch {
                     let _ = std::fs::remove_file(keep_pitch_pref());
                 } else {
@@ -738,7 +749,7 @@ impl App {
                 }
                 ui.horizontal(|ui| {
                     let label = if recording { "■ Stop" } else { "● Record" };
-                    let btn = Button::new(egui::RichText::new(label).size(15.0).color(INK))
+                    let btn = Button::new(egui::RichText::new(label).size(15.0).color(ink()))
                         .min_size(Vec2::new(110.0, 32.0));
                     toggle = ui.add(btn).clicked();
                     let secs = self.recorder.as_ref().map_or(0.0, |r| r.seconds());
@@ -752,7 +763,7 @@ impl App {
                     "Records from the Mac's current input. The recording goes in at the cursor, or replaces the selection."
                 } else {
                     "Records from the Mac's current input into a new sound."
-                }).color(MUTED));
+                }).color(muted()));
             });
         if toggle {
             if recording {
@@ -829,8 +840,8 @@ impl App {
                                 ui.add(egui::Slider::new(v, f.min..=f.max).vertical().show_value(false));
                             });
                             ui.add_space(4.0);
-                            ui.label(egui::RichText::new(format!("{:+.1} dB", *v)).size(12.0).color(INK));
-                            ui.label(egui::RichText::new(f.label).size(12.0).color(MUTED));
+                            ui.label(egui::RichText::new(format!("{:+.1} dB", *v)).size(12.0).color(ink()));
+                            ui.label(egui::RichText::new(f.label).size(12.0).color(muted()));
                         });
                     }
                 });
@@ -840,7 +851,7 @@ impl App {
                     let (s, e) = self.sel.unwrap_or((0, a.frames()));
                     let n = a.slice(s, e).find_sounds(self.split_gap()).len();
                     ui.add_space(12.0);
-                    ui.label(egui::RichText::new(format!("{n} sound{} found. Saved as {}.", if n == 1 { "" } else { "s" }, self.wav_format.label())).color(MUTED));
+                    ui.label(egui::RichText::new(format!("{n} sound{} found. Saved as {}.", if n == 1 { "" } else { "s" }, self.wav_format.label())).color(muted()));
                 }
             }
             let ok = if kind == Dialog::Split { "Choose Folder…" } else { "OK" };

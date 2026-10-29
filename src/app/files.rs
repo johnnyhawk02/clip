@@ -277,6 +277,7 @@ impl App {
                     gain: t.gain,
                     pan: t.pan,
                     color: t.color,
+                    palette: true,
                     mute: t.mute,
                     solo: t.solo,
                     clips: t
@@ -310,6 +311,7 @@ impl App {
                 gain: c.gain,
                 fades: (c.fade_in, c.fade_out),
                 active: c.active,
+                color: c.color,
                 group: c.group.as_ref().map(|g| tracks_data(g, pool)),
                 warp: c.warp.as_ref().map(|w| {
                     let i = pool.iter().position(|a| Arc::ptr_eq(a, &w.source)).unwrap_or_else(|| {
@@ -362,7 +364,10 @@ impl App {
             data.iter()
                 .map(|t| {
                     let mut track = Track::new(t.name.clone());
-                    (track.gain, track.pan, track.color, track.mute, track.solo) = (t.gain, t.pan, t.color, t.mute, t.solo);
+                    (track.gain, track.pan, track.mute, track.solo) = (t.gain, t.pan, t.mute, t.solo);
+                    // Older projects had six colours (grey, blue, green, amber, red, purple):
+                    // their nearest in Live's palette.
+                    track.color = if t.palette { t.color } else { [27, 22, 19, 15, 14, 24][t.color % 6] };
                     track.clips = t.clips.iter().map(|c| clip_from(app, c, audio, rate)).collect();
                     track.slots = t.slots.iter().map(|s| s.as_ref().map(|c| clip_from(app, c, audio, rate))).collect();
                     track
@@ -386,6 +391,7 @@ impl App {
             clip.gain = c.gain;
             (clip.fade_in, clip.fade_out) = c.fades;
             clip.active = c.active;
+            clip.color = c.color;
             clip.len = if c.looping { c.len } else { clip.len };
             if let Some((bpm, tempo, i)) = c.warp {
                 if let Some(source) = audio.get(i) {
@@ -537,8 +543,6 @@ impl App {
     }
 
     pub(super) fn write_ableton(&self, tracks: &[Track], dir: &Path, name: &str) -> Result<PathBuf, String> {
-        // Live's palette indices closest to each track colour (grey, blue, green, amber, red, purple).
-        const LIVE_COLORS: [u32; 6] = [27, 22, 19, 15, 14, 24];
         let samples = dir.join("Samples").join("Imported");
         std::fs::create_dir_all(&samples).map_err(|e| e.to_string())?;
         // This (empty) folder is what makes Live treat the folder as a project, so it finds
@@ -549,7 +553,7 @@ impl App {
         let mut written: Vec<(*const Audio, String, u64)> = Vec::new();
         let mut live = Vec::new();
         for t in tracks {
-            let color = LIVE_COLORS[t.color % LIVE_COLORS.len()];
+            let color = t.color as u32;
             let mut clips = Vec::new();
             for c in &t.clips {
                 // A warped clip exports its original audio, and Live does the stretching.
@@ -587,7 +591,7 @@ impl App {
                 };
                 clips.push(ableton::LiveClip {
                     name: c.name.clone(),
-                    color,
+                    color: c.color.map_or(color, |i| i as u32),
                     rel_path: format!("Samples/Imported/{file}"),
                     abs_path: samples.join(&file).to_string_lossy().into_owned(),
                     file_size: size,
@@ -718,7 +722,7 @@ impl App {
                     if ui.add_enabled(!running && !b.files.is_empty(), Button::new("Clear")).clicked() {
                         b.files.clear();
                     }
-                    ui.label(egui::RichText::new(format!("{} file{}", b.files.len(), if b.files.len() == 1 { "" } else { "s" })).color(MUTED));
+                    ui.label(egui::RichText::new(format!("{} file{}", b.files.len(), if b.files.len() == 1 { "" } else { "s" })).color(muted()));
                 });
                 egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
                     for f in &b.files {
@@ -734,7 +738,7 @@ impl App {
                                 b.out_dir = Some(d);
                             }
                         }
-                        ui.label(egui::RichText::new(b.out_dir.as_ref().map_or("(pick a folder)".into(), |d| d.display().to_string())).color(MUTED));
+                        ui.label(egui::RichText::new(b.out_dir.as_ref().map_or("(pick a folder)".into(), |d| d.display().to_string())).color(muted()));
                     });
                     ui.end_row();
                     ui.label("Format");
@@ -814,7 +818,7 @@ impl App {
                         ui.label(if p.errors.is_empty() { "Done.".to_string() } else { format!("Done, with {} problem(s):", p.errors.len()) });
                     }
                     for e in &p.errors {
-                        ui.label(egui::RichText::new(e).size(11.0).color(MUTED));
+                        ui.label(egui::RichText::new(e).size(11.0).color(muted()));
                     }
                 }
             });

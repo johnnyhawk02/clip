@@ -95,15 +95,6 @@ enum DragMode {
     TrimEnd,
 }
 
-/// Waveform colours a track can be given; muted tones so they sit with the grey look.
-const TRACK_COLORS: [Color32; 6] = [
-    Color32::from_gray(55),
-    Color32::from_rgb(70, 95, 145),
-    Color32::from_rgb(55, 120, 85),
-    Color32::from_rgb(170, 115, 35),
-    Color32::from_rgb(160, 60, 60),
-    Color32::from_rgb(115, 75, 145),
-];
 
 /// Grid divisions for the arrangement: label and length in beats (0 = off, -1 = automatic).
 const GRID: [(&str, f64); 8] =
@@ -264,7 +255,7 @@ pub struct App {
     /// A fine line across the arrangement every this many bars (0 = none), from Preferences.
     phrase_bars: u32,
     /// Preferences window open, holding the settings to go back to on Cancel.
-    prefs_open: Option<(u32, bool)>,
+    prefs_open: Option<(u32, bool, u8)>,
     /// Dragging the loop brace: where it was grabbed (frames), the range then, and which part
     /// (the whole brace moves, an end resizes).
     arr_loop_grab: Option<(f64, Sel, LoopGrab)>,
@@ -429,6 +420,11 @@ fn keep_pitch_pref() -> PathBuf {
     crossfeed_pref().with_file_name("keep-pitch")
 }
 
+/// A file holding Preferences ▸ Appearance (0 follows the Mac, 1 light, 2 dark).
+fn appearance_pref() -> PathBuf {
+    crossfeed_pref().with_file_name("appearance")
+}
+
 /// A file holding the path of the project last opened or saved, reopened at launch.
 fn last_project_pref() -> PathBuf {
     crossfeed_pref().with_file_name("last-project")
@@ -511,6 +507,8 @@ impl App {
             phrase_bars: std::fs::read_to_string(phrase_pref()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(4),
             prefs_open: {
                 REPITCH.store(!keep_pitch_pref().exists(), std::sync::atomic::Ordering::Relaxed);
+                let look = std::env::var("SOUND_EDIT_APPEARANCE").ok().or_else(|| std::fs::read_to_string(appearance_pref()).ok());
+                APPEARANCE.store(look.and_then(|s| s.trim().parse().ok()).unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
                 None
             },
             arr_loop_grab: None,
@@ -1138,6 +1136,7 @@ impl eframe::App for App {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        update_theme(&ctx);
         if !self.synth.is_empty() {
             ctx.request_repaint();
         }
@@ -1197,7 +1196,7 @@ impl eframe::App for App {
         // Docked layout: tools on the left, transport and status at the bottom, Info/Cues on
         // the right, and the waveform filling the middle.
         self.update_meters(&ctx);
-        let bar = egui::Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(10, 6));
+        let bar = egui::Frame::new().fill(panel()).inner_margin(egui::Margin::symmetric(10, 6));
         // The transport runs along the top, as in Live.
         if self.show_controls {
             egui::Panel::top("transport").frame(bar).show(ui, |ui| self.transport_panel(ui));
@@ -1224,13 +1223,13 @@ impl eframe::App for App {
         }
         if self.show_tools && self.palette_docked {
             egui::Panel::left("tools")
-                .frame(egui::Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(8, 4)))
+                .frame(egui::Frame::new().fill(panel()).inner_margin(egui::Margin::symmetric(8, 4)))
                 .resizable(false)
                 .show(ui, |ui| self.tools_panel(ui));
         }
         if self.show_info || self.show_cues || self.show_regions || self.show_pool {
             egui::Panel::right("side")
-                .frame(egui::Frame::new().fill(PANEL).inner_margin(egui::Margin::symmetric(12, 4)))
+                .frame(egui::Frame::new().fill(panel()).inner_margin(egui::Margin::symmetric(12, 4)))
                 .resizable(false)
                 .exact_size(320.0)
                 .show(ui, |ui| {
@@ -1254,8 +1253,8 @@ impl eframe::App for App {
             if self.split {
                 let full = ui.max_rect();
                 let bar = Rect::from_min_size(full.min, Vec2::new(full.width(), 34.0));
-                ui.painter().rect_filled(bar, 0.0, PANEL);
-                ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, LINE));
+                ui.painter().rect_filled(bar, 0.0, panel());
+                ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, rule()));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(12.0, 4.0))), |ui| self.view_bar(ui));
                 let body = Rect::from_min_max(Pos2::new(full.left(), bar.bottom()), full.max);
                 let detail_h = (body.height() * 0.42).clamp(150.0, 440.0);
@@ -1275,15 +1274,15 @@ impl eframe::App for App {
                 self.slot_rects.clear();
                 let session = self.show_session;
                 ui.scope_builder(egui::UiBuilder::new().max_rect(top), |ui| if session { self.session(ui) } else { self.arrangement(ui) });
-                ui.painter().rect_filled(Rect::from_min_max(bottom.min, Pos2::new(bottom.right(), bottom.top() + 1.0)), 0.0, LINE);
+                ui.painter().rect_filled(Rect::from_min_max(bottom.min, Pos2::new(bottom.right(), bottom.top() + 1.0)), 0.0, rule());
                 ui.scope_builder(egui::UiBuilder::new().max_rect(side), |ui| self.clip_view(ui, side));
-                ui.painter().line_segment([Pos2::new(side.right(), bottom.top()), side.right_bottom()], Stroke::new(1.0, LINE));
+                ui.painter().line_segment([Pos2::new(side.right(), bottom.top()), side.right_bottom()], Stroke::new(1.0, rule()));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(wave), |ui| self.waveform(ui));
             } else if self.show_session && self.view == View::Arrangement && !self.tracks.is_empty() {
                 let full = ui.max_rect();
                 let bar = Rect::from_min_size(full.min, Vec2::new(full.width(), 34.0));
-                ui.painter().rect_filled(bar, 0.0, PANEL);
-                ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, LINE));
+                ui.painter().rect_filled(bar, 0.0, panel());
+                ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, rule()));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(12.0, 4.0))), |ui| self.view_bar(ui));
                 let body = Rect::from_min_max(Pos2::new(full.left(), bar.bottom()), full.max);
                 self.slot_rects.clear();
@@ -1291,8 +1290,8 @@ impl eframe::App for App {
             } else if !self.tracks.is_empty() {
                 let full = ui.max_rect();
                 let bar = Rect::from_min_size(full.min, Vec2::new(full.width(), 34.0));
-                ui.painter().rect_filled(bar, 0.0, PANEL);
-                ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, LINE));
+                ui.painter().rect_filled(bar, 0.0, panel());
+                ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, rule()));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(12.0, 4.0))), |ui| self.view_bar(ui));
                 let body = Rect::from_min_max(Pos2::new(full.left(), bar.bottom()), full.max);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| match self.view {
@@ -1332,23 +1331,23 @@ impl eframe::App for App {
                     Some((Some(t), _)) => {
                         let r = Rect::from_min_size(Pos2::new(lanes.left(), lanes.top() + t as f32 * lane_h), Vec2::new(lanes.width(), lane_h));
                         painter.rect_filled(r, 0.0, Color32::from_black_alpha(25));
-                        painter.rect_stroke(r.shrink(2.0), 4.0, Stroke::new(2.0, INK), egui::StrokeKind::Inside);
+                        painter.rect_stroke(r.shrink(2.0), 4.0, Stroke::new(2.0, ink()), egui::StrokeKind::Inside);
                     }
                     Some((None, _)) => {
                         let top = lanes.top() + self.tracks.len() as f32 * lane_h;
                         let r = Rect::from_min_size(Pos2::new(lanes.left(), top), Vec2::new(lanes.width(), lane_h.min(lanes.bottom() - top)));
-                        painter.rect_stroke(r.shrink(4.0), 4.0, Stroke::new(2.0, INK), egui::StrokeKind::Inside);
-                        painter.text(r.center(), Align2::CENTER_CENTER, "New track", FontId::proportional(16.0), INK);
+                        painter.rect_stroke(r.shrink(4.0), 4.0, Stroke::new(2.0, ink()), egui::StrokeKind::Inside);
+                        painter.text(r.center(), Align2::CENTER_CENTER, "New track", FontId::proportional(16.0), ink());
                     }
                     None => {}
                 }
                 if lanes.contains(q) {
-                    painter.line_segment([Pos2::new(q.x, lanes.top()), Pos2::new(q.x, lanes.bottom())], Stroke::new(1.5, INK));
+                    painter.line_segment([Pos2::new(q.x, lanes.top()), Pos2::new(q.x, lanes.bottom())], Stroke::new(1.5, ink()));
                 }
                 self.status = "Drop on a track to add a clip there, or below the tracks for a new track".into();
             } else {
                 painter.rect_filled(screen, 0.0, Color32::from_black_alpha(140));
-                painter.text(screen.center(), Align2::CENTER_CENTER, "Drop to open", FontId::proportional(24.0), Color32::WHITE);
+                painter.text(screen.center(), Align2::CENTER_CENTER, "Drop to open", FontId::proportional(24.0), gray(255));
             }
         }
 

@@ -38,6 +38,14 @@ Solo, a volume slider, a colour and pan; solo wins over mute.
 
 **Guide:** https://johnnyhawk02.github.io/clip/
 
+## Colours and dark mode
+
+Clips are coloured as in Live: the name strip in the clip's colour, a lighter body and a dark
+waveform. Right-click a clip (or a session slot) for Live's 70-colour picker; a track's colour
+swatch, or right-clicking its header, sets the track's colour, which its clips follow unless
+they have their own. New tracks get the next colour in turn. Clip ▸ Preferences ▸ Appearance
+picks Light, Dark (Live's dark greys) or Match the Mac. Live Set exports keep the colours.
+
 ## Session view, as in Live
 
 Tab flips between the song (Arrangement) and the Session view, a grid of clip slots: a column per

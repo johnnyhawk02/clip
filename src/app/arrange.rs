@@ -60,17 +60,20 @@ impl ArrArea {
 /// A clip block in the arrangement: a name strip on top and its waveform below.
 fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: bool, muted: bool, handles: bool, clip_to: Rect) {
     let p = p.with_clip_rect(clip_to);
-    let wave_col = if muted { Color32::from_gray(190) } else { color };
-    let fill = if muted { Color32::from_gray(248) } else { color.lerp_to_gamma(Color32::WHITE, 0.88) };
-    p.rect_filled(r, 4.0, fill);
+    // As in Live: the name strip in the clip's colour, a lighter body, a near-black waveform and
+    // black text in either theme; a clip that's off goes grey.
+    const TEXT: Color32 = Color32::from_gray(10);
+    let wave_col = if muted { Color32::from_gray(70) } else { Color32::from_rgba_unmultiplied(23, 23, 23, 225) };
+    let fill = if muted { Color32::from_gray(140) } else { color.lerp_to_gamma(Color32::WHITE, 0.3) };
+    p.rect_filled(r, 3.0, fill);
     let title = Rect::from_min_max(r.min, Pos2::new(r.right(), (r.top() + 16.0).min(r.bottom())));
-    p.rect_filled(title, egui::CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, if muted { Color32::from_gray(225) } else { color.lerp_to_gamma(Color32::WHITE, 0.55) });
+    p.rect_filled(title, egui::CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, if muted { Color32::from_gray(105) } else { color });
     let mut name_x = r.left().max(clip_to.left()) + 5.0;
     if c.group.is_some() && r.right() - name_x > 30.0 {
         // Group clips get a small stacked-boxes mark before the name.
         let m = Rect::from_min_size(Pos2::new(name_x, title.center().y - 4.0), Vec2::new(8.0, 6.0));
-        p.rect_stroke(m.translate(Vec2::new(2.0, 2.0)), 1.0, Stroke::new(1.0, INK), egui::StrokeKind::Inside);
-        p.rect_filled(m, 1.0, INK);
+        p.rect_stroke(m.translate(Vec2::new(2.0, 2.0)), 1.0, Stroke::new(1.0, TEXT), egui::StrokeKind::Inside);
+        p.rect_filled(m, 1.0, TEXT);
         name_x += 15.0;
     }
     // The name stays on one line, cut short with "…" when the clip is narrow (and leaves room
@@ -80,10 +83,10 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
     let badge_w = if no_warp { 50.0 } else { 0.0 };
     let max_w = r.right().min(clip_to.right()) - name_x - badge_w - if c.looping { 20.0 } else { 4.0 };
     if max_w > 12.0 {
-        let mut job = egui::text::LayoutJob::simple_singleline(c.name.clone(), FontId::proportional(11.0), INK);
+        let mut job = egui::text::LayoutJob::simple_singleline(c.name.clone(), FontId::proportional(11.0), TEXT);
         job.wrap = egui::text::TextWrapping { max_width: max_w, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
         let galley = p.ctx().fonts_mut(|f| f.layout_job(job));
-        p.with_clip_rect(title.intersect(clip_to)).galley(Pos2::new(name_x, title.center().y - galley.size().y / 2.0), galley, INK);
+        p.with_clip_rect(title.intersect(clip_to)).galley(Pos2::new(name_x, title.center().y - galley.size().y / 2.0), galley, TEXT);
     }
     // Waveform of the visible part, one min/max line per pixel (all channels together).
     let body = Rect::from_min_max(Pos2::new(r.left(), title.bottom() + 2.0), Pos2::new(r.right(), r.bottom() - 2.0));
@@ -140,33 +143,33 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
         while i < c.len && (period as f64 / fpp) > 3.0 {
             let x = r.left() + (i as f64 / fpp) as f32;
             if x > r.left() + 1.0 {
-                p.add(egui::Shape::dashed_line(&[Pos2::new(x, title.bottom()), Pos2::new(x, r.bottom())], Stroke::new(1.0, Color32::from_gray(120)), 2.0, 3.0));
+                p.add(egui::Shape::dashed_line(&[Pos2::new(x, title.bottom()), Pos2::new(x, r.bottom())], Stroke::new(1.0, Color32::from_black_alpha(110)), 2.0, 3.0));
             }
             i += period;
         }
         // Loop mark in the title strip, at the right.
         if r.width() > 40.0 {
             let ctr = Pos2::new(r.right().min(clip_to.right()) - 10.0, title.center().y);
-            p.circle_stroke(ctr, 3.5, Stroke::new(1.2, INK));
-            p.add(egui::Shape::convex_polygon(vec![ctr + Vec2::new(1.5, -5.5), ctr + Vec2::new(4.5, -3.5), ctr + Vec2::new(1.0, -1.5)], INK, Stroke::NONE));
+            p.circle_stroke(ctr, 3.5, Stroke::new(1.2, TEXT));
+            p.add(egui::Shape::convex_polygon(vec![ctr + Vec2::new(1.5, -5.5), ctr + Vec2::new(4.5, -3.5), ctr + Vec2::new(1.0, -1.5)], TEXT, Stroke::NONE));
         }
     }
     if no_warp && r.width() > 70.0 {
         let right = r.right().min(clip_to.right()) - if c.looping { 20.0 } else { 4.0 };
         let badge = Rect::from_min_max(Pos2::new(right - 46.0, title.top() + 2.0), Pos2::new(right, title.bottom() - 2.0));
         if badge.left() > r.left().max(clip_to.left()) + 20.0 {
-            p.rect_filled(badge, 3.0, Color32::WHITE.gamma_multiply(0.7));
-            p.text(badge.center(), Align2::CENTER_CENTER, "no warp", FontId::proportional(9.5), INK);
+            p.rect_filled(badge, 3.0, Color32::from_white_alpha(150));
+            p.text(badge.center(), Align2::CENTER_CENTER, "no warp", FontId::proportional(9.5), TEXT);
         }
     }
     // Fades: a line from silence at the edge up to full level, as in Live.
     let (fi, fo) = fade_xs(r, c);
     let body_top = (r.top() + 18.0).min(r.bottom());
     if c.fade_in > 0 {
-        p.line_segment([Pos2::new(r.left(), r.bottom() - 2.0), Pos2::new(fi, body_top)], Stroke::new(1.0, INK.gamma_multiply(0.7)));
+        p.line_segment([Pos2::new(r.left(), r.bottom() - 2.0), Pos2::new(fi, body_top)], Stroke::new(1.0, TEXT.gamma_multiply(0.7)));
     }
     if c.fade_out > 0 {
-        p.line_segment([Pos2::new(fo, body_top), Pos2::new(r.right(), r.bottom() - 2.0)], Stroke::new(1.0, INK.gamma_multiply(0.7)));
+        p.line_segment([Pos2::new(fo, body_top), Pos2::new(r.right(), r.bottom() - 2.0)], Stroke::new(1.0, TEXT.gamma_multiply(0.7)));
     }
     // The handles that set them, on the selected or hovered clip.
     if handles && r.width() > 24.0 && r.height() > 30.0 {
@@ -174,11 +177,11 @@ fn draw_clip(p: &egui::Painter, r: Rect, c: &Clip, color: Color32, selected: boo
         for x in [hi, ho] {
             let h = Rect::from_center_size(Pos2::new(x, body_top + 5.0), Vec2::splat(7.0));
             p.rect_filled(h, 1.0, Color32::WHITE);
-            p.rect_stroke(h, 1.0, Stroke::new(1.0, INK), egui::StrokeKind::Inside);
+            p.rect_stroke(h, 1.0, Stroke::new(1.0, TEXT), egui::StrokeKind::Inside);
         }
     }
-    let stroke = if selected { Stroke::new(2.0, INK) } else { Stroke::new(1.0, color.lerp_to_gamma(Color32::WHITE, 0.3)) };
-    p.rect_stroke(r, 4.0, stroke, egui::StrokeKind::Inside);
+    let stroke = if selected { Stroke::new(2.0, ink()) } else { Stroke::new(1.0, Color32::from_black_alpha(90)) };
+    p.rect_stroke(r, 3.0, stroke, egui::StrokeKind::Inside);
 }
 
 /// A clip's fade level `i` frames in (equal power, as heard), from its fade handles.
@@ -208,6 +211,19 @@ fn fade_handle_xs(r: Rect, c: &Clip) -> (f32, f32) {
 }
 
 impl App {
+    /// Give the selected clips palette colour `i`, as Live's clip colour picker.
+    pub(super) fn set_clip_color(&mut self, i: usize) {
+        let mut ps: Vec<(usize, usize)> = self.sel_clip.into_iter().collect();
+        ps.extend(self.sel_extra.iter().copied());
+        self.push_undo("Clip Colour");
+        for p in ps {
+            if let Some(c) = self.clip_mut(p) {
+                c.color = Some(i);
+            }
+        }
+        self.dirty = true;
+    }
+
     /// Right-click menu for a clip.
     fn clip_menu(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let is_group = self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.group.is_some());
@@ -221,6 +237,12 @@ impl App {
                 None
             }
         };
+        let current = self.sel_clip.and_then(|p| Some(self.clip(p)?.color.unwrap_or(self.tracks.get(p.0)?.color)));
+        if let Some(i) = color_picker(ui, current.unwrap_or(usize::MAX)) {
+            ui.close();
+            self.set_clip_color(i);
+        }
+        ui.separator();
         let mut chosen = None;
         chosen = chosen.or(pick(ui, if is_group { "Open Group" } else { "Edit Clip" }, Action::EditClip));
         ui.separator();
@@ -281,7 +303,14 @@ impl App {
     fn track_menu(&mut self, ui: &mut egui::Ui, t: usize, ctx: &egui::Context) {
         self.set_active(t);
         let Some(track) = self.tracks.get(t) else { return };
-        let (mute, has_clips) = (track.mute, !track.clips.is_empty());
+        let (mute, has_clips, color) = (track.mute, !track.clips.is_empty(), track.color);
+        if let Some(i) = color_picker(ui, color) {
+            ui.close();
+            self.push_undo("Track Colour");
+            self.tracks[t].color = i;
+            self.dirty = true;
+        }
+        ui.separator();
         let mut chosen = None;
         let mut collapse = false;
         let item = |ui: &mut egui::Ui, label: &str, enabled: bool| {
@@ -310,9 +339,6 @@ impl App {
         if item(ui, if mute { "Unmute" } else { "Mute" }, true) {
             chosen = Some(Action::MuteTrack);
         }
-        if item(ui, "Next Colour", true) {
-            chosen = Some(Action::TrackColor);
-        }
         ui.separator();
         if item(ui, "Collapse Track to One Clip", has_clips) {
             collapse = true;
@@ -332,8 +358,8 @@ impl App {
     fn track_headers(&mut self, ui: &mut egui::Ui, header: Rect, n_tracks: usize, lane: &dyn Fn(usize) -> Rect) {
         // The whole column, including the corners beside the ruler and scroll bar.
         let column = Rect::from_min_max(Pos2::new(header.left(), header.top() - 22.0 - LOOP_H - LOC_H), Pos2::new(header.right(), header.bottom() + 15.0));
-        ui.painter().rect_filled(column, 0.0, PANEL);
-        ui.painter().line_segment([header.right_top(), header.right_bottom()], Stroke::new(1.0, LINE));
+        ui.painter().rect_filled(column, 0.0, panel());
+        ui.painter().line_segment([header.right_top(), header.right_bottom()], Stroke::new(1.0, rule()));
         let mut activate = None;
         let mut changed = false;
         for ti in 0..n_tracks {
@@ -341,11 +367,11 @@ impl App {
             let r = Rect::from_min_max(Pos2::new(header.left(), l.top()), Pos2::new(header.right() - 1.0, l.bottom()));
             let is_active = ti == self.active;
             if is_active {
-                ui.painter().rect_filled(r, 0.0, Color32::WHITE);
-                ui.painter().rect_filled(Rect::from_min_size(r.min, Vec2::new(3.0, r.height())), 0.0, INK);
+                ui.painter().rect_filled(r, 0.0, gray(255));
+                ui.painter().rect_filled(Rect::from_min_size(r.min, Vec2::new(3.0, r.height())), 0.0, ink());
             }
             if ti > 0 {
-                ui.painter().line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, Color32::from_gray(190)));
+                ui.painter().line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, gray(190)));
             }
             let bg = ui.interact(r, ui.scope_id().with(("track_bg", ti)), Sense::click());
             if bg.clicked() {
@@ -366,8 +392,8 @@ impl App {
                         // Live's track activator (its number, lit while the track plays) and Solo.
                         let (act, act_r) = ui.allocate_exact_size(Vec2::new(22.0, 20.0), Sense::click());
                         let on = !t.mute;
-                        ui.painter().rect(act, 3.0, if on { INK } else { Color32::TRANSPARENT }, Stroke::new(1.0, INK), egui::StrokeKind::Inside);
-                        ui.painter().text(act.center(), Align2::CENTER_CENTER, (ti + 1).to_string(), FontId::proportional(11.0), if on { Color32::WHITE } else { INK });
+                        ui.painter().rect(act, 3.0, if on { ink() } else { Color32::TRANSPARENT }, Stroke::new(1.0, ink()), egui::StrokeKind::Inside);
+                        ui.painter().text(act.center(), Align2::CENTER_CENTER, (ti + 1).to_string(), FontId::proportional(11.0), if on { gray(255) } else { ink() });
                         if act_r.on_hover_text(if on { "Track on (click to mute)" } else { "Track muted (click to turn on)" }).clicked() {
                             t.mute = !t.mute;
                             changed = true;
@@ -386,11 +412,13 @@ impl App {
                 if inner.height() > 70.0 {
                     ui.horizontal(|ui| {
                         let (sw, swr) = ui.allocate_exact_size(Vec2::new(22.0, 20.0), Sense::click());
-                        ui.painter().rect_filled(sw.shrink(3.0), 3.0, TRACK_COLORS[t.color % TRACK_COLORS.len()]);
-                        if swr.on_hover_text("Track colour (click to change)").clicked() {
-                            t.color = (t.color + 1) % TRACK_COLORS.len();
+                        ui.painter().rect_filled(sw.shrink(3.0), 3.0, live_color(t.color));
+                        let swr = swr.on_hover_text("Track colour");
+                        if let Some(i) = egui::Popup::menu(&swr).show(|ui| color_picker(ui, t.color)).and_then(|r| r.inner) {
+                            t.color = i;
+                            changed = true;
                         }
-                        ui.label(egui::RichText::new("Pan").size(11.0).color(MUTED));
+                        ui.label(egui::RichText::new("Pan").size(11.0).color(muted()));
                         ui.spacing_mut().slider_width = (inner.width() - 64.0).max(30.0);
                         let tip = match t.pan {
                             p if p.abs() < 0.01 => "Pan centre".to_string(),
@@ -505,7 +533,7 @@ impl App {
         let t = track.unwrap_or(self.tracks.len());
         let top = lanes.top() + t as f32 * lane_h;
         let r = Rect::from_min_max(Pos2::new(x(frame), top + 2.0), Pos2::new(x(frame + len), (top + lane_h - 2.0).min(lanes.bottom()))).intersect(lanes);
-        ui.painter().rect(r, 4.0, INK.gamma_multiply(0.12), Stroke::new(1.5, INK), egui::StrokeKind::Inside);
+        ui.painter().rect(r, 4.0, ink().gamma_multiply(0.12), Stroke::new(1.5, ink()), egui::StrokeKind::Inside);
         ui.ctx().set_cursor_icon(egui::CursorIcon::Copy);
     }
 
@@ -535,11 +563,11 @@ impl App {
                     let mut go_up = None;
                     for (i, n) in names.iter().enumerate() {
                         if i > 0 {
-                            ui.label(egui::RichText::new("▸").color(MUTED));
+                            ui.label(egui::RichText::new("▸").color(muted()));
                         }
                         if i == depth {
-                            ui.label(egui::RichText::new(n).strong().color(INK));
-                        } else if ui.link(egui::RichText::new(n).color(MUTED)).clicked() {
+                            ui.label(egui::RichText::new(n).strong().color(ink()));
+                        } else if ui.link(egui::RichText::new(n).color(muted())).clicked() {
                             go_up = Some(depth - i);
                         }
                     }
@@ -588,7 +616,7 @@ impl App {
                     if self.song_edit && ![&t, &b].iter().any(|r| r.dragged() || r.has_focus()) {
                         self.song_edit = false;
                     }
-                    ui.label(egui::RichText::new("Grid").color(MUTED));
+                    ui.label(egui::RichText::new("Grid").color(muted()));
                     egui::ComboBox::from_id_salt("grid").width(80.0).selected_text(GRID[self.grid].0).show_ui(ui, |ui| {
                         for (i, (label, _)) in GRID.iter().enumerate() {
                             ui.selectable_value(&mut self.grid, i, *label);
@@ -624,7 +652,7 @@ impl App {
                         if ui.add_enabled(self.variation > 1, Button::new("◀")).on_hover_text("Previous variation").clicked() {
                             self.step_variation(false);
                         }
-                        ui.label(egui::RichText::new(self.variation.to_string()).color(INK));
+                        ui.label(egui::RichText::new(self.variation.to_string()).color(ink()));
                         if ui.button("▶").on_hover_text("Next variation").clicked() {
                             self.step_variation(true);
                         }
@@ -654,13 +682,13 @@ impl App {
                         .get(track)
                         .map(|t| (t.name.clone(), String::new()))
                         .unwrap_or_default();
-                    ui.label(egui::RichText::new("Editing").color(MUTED));
+                    ui.label(egui::RichText::new("Editing").color(muted()));
                     if let Some(c) = self.clip_mut((track, clip)) {
                         ui.add(egui::TextEdit::singleline(&mut c.name).desired_width(160.0)).on_hover_text("Clip name");
                     } else {
                         ui.label(cname);
                     }
-                    ui.label(egui::RichText::new(format!("on {tname}")).color(MUTED));
+                    ui.label(egui::RichText::new(format!("on {tname}")).color(muted()));
                 }
             }
         });
@@ -1190,11 +1218,11 @@ impl App {
     /// The master channel: the whole mix's volume and level, and the headphone crossfeed switch.
     fn master_strip(&mut self, ui: &mut egui::Ui, r: Rect, header_w: f32) {
         let p = ui.painter();
-        p.rect_filled(r, 0.0, PANEL);
+        p.rect_filled(r, 0.0, panel());
         // The corner beside the scroll bar, below the header column.
-        p.rect_filled(Rect::from_min_size(Pos2::new(r.left(), r.bottom()), Vec2::new(header_w, 15.0)), 0.0, PANEL);
-        p.line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, Color32::from_gray(190)));
-        p.line_segment([Pos2::new(r.left() + header_w - 1.0, r.top()), Pos2::new(r.left() + header_w - 1.0, r.bottom())], Stroke::new(1.0, LINE));
+        p.rect_filled(Rect::from_min_size(Pos2::new(r.left(), r.bottom()), Vec2::new(header_w, 15.0)), 0.0, panel());
+        p.line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, gray(190)));
+        p.line_segment([Pos2::new(r.left() + header_w - 1.0, r.top()), Pos2::new(r.left() + header_w - 1.0, r.bottom())], Stroke::new(1.0, rule()));
         // Level meters along the lane side.
         let m = Rect::from_min_max(Pos2::new(r.left() + header_w + 12.0, r.top() + 11.0), Pos2::new((r.left() + header_w + 372.0).min(r.right() - 12.0), r.bottom() - 11.0));
         let n = self.meter.len().max(1);
@@ -1208,12 +1236,12 @@ impl App {
         let mut changed = false;
         ui.scope_builder(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
-            ui.label(egui::RichText::new("Master").strong().color(INK));
+            ui.label(egui::RichText::new("Master").strong().color(ink()));
             let (b, resp) = ui.allocate_exact_size(Vec2::new(26.0, 22.0), Sense::click());
             let on = self.crossfeed;
             let hover = resp.hovered();
-            ui.painter().rect(b, 4.0, if on { INK } else if hover { Color32::from_gray(232) } else { Color32::WHITE }, Stroke::new(1.0, if on { INK } else { LINE }), egui::StrokeKind::Inside);
-            paint_icon(ui.painter(), b, Action::Crossfeed, if on { Color32::WHITE } else { INK }, false);
+            ui.painter().rect(b, 4.0, if on { ink() } else if hover { gray(232) } else { gray(255) }, Stroke::new(1.0, if on { ink() } else { rule() }), egui::StrokeKind::Inside);
+            paint_icon(ui.painter(), b, Action::Crossfeed, if on { gray(255) } else { ink() }, false);
             if resp.on_hover_text(if on { "Headphone crossfeed is on (click to turn off)" } else { "Headphone crossfeed: hear the mix as if from speakers" }).clicked() {
                 toggle = true;
             }
@@ -1258,7 +1286,7 @@ impl App {
             if f > clip.start && f < clip.end() {
                 let x = f_to_x(f as f64, vs, vl);
                 let l = lane(t);
-                ui.painter().line_segment([Pos2::new(x, l.top() + 2.0), Pos2::new(x, l.bottom() - 2.0)], Stroke::new(1.5, INK));
+                ui.painter().line_segment([Pos2::new(x, l.top() + 2.0), Pos2::new(x, l.bottom() - 2.0)], Stroke::new(1.5, ink()));
             }
         }
         if resp.clicked() {
@@ -1329,9 +1357,9 @@ impl App {
         let spp = self.arr_view_len / lanes.width() as f64;
         let (vs, vl) = (self.arr_view_start, self.arr_view_len);
         let painter = ui.painter_at(full);
-        painter.rect_filled(lanes, 0.0, Color32::WHITE);
-        painter.rect_filled(ruler, 0.0, PANEL);
-        painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0, LINE));
+        painter.rect_filled(lanes, 0.0, gray(255));
+        painter.rect_filled(ruler, 0.0, panel());
+        painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0, rule()));
         // Ruler: bars and beats when the grid is on, otherwise time.
         if let Some(g) = self.grid_frames(spp) {
             let bar = self.bar_frames();
@@ -1352,11 +1380,11 @@ impl App {
                     let on_bar = (f / bar).fract().abs() < 1e-6 || (f / bar).fract() > 1.0 - 1e-6;
                     let on_beat = (f / beat).fract().abs() < 1e-6 || (f / beat).fract() > 1.0 - 1e-6;
                     let (h, line) = if on_bar { (9.0, 228) } else if on_beat { (5.0, 240) } else { (3.0, 246) };
-                    painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, MUTED));
-                    painter.line_segment([Pos2::new(x, lanes.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.0, Color32::from_gray(line)));
+                    painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, muted()));
+                    painter.line_segment([Pos2::new(x, lanes.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.0, gray(line)));
                     let bar_no = (f / bar).round() as u64;
                     if on_bar && bar_no % label_every == 0 {
-                        painter.text(Pos2::new(x + 3.0, ruler.top() + LOOP_H + LOC_H + 1.0), Align2::LEFT_TOP, (bar_no + 1).to_string(), FontId::proportional(11.0), MUTED);
+                        painter.text(Pos2::new(x + 3.0, ruler.top() + LOOP_H + LOC_H + 1.0), Align2::LEFT_TOP, (bar_no + 1).to_string(), FontId::proportional(11.0), muted());
                     }
                 }
                 k += 1;
@@ -1375,10 +1403,10 @@ impl App {
             let x = f_to_x(t * rate, vs, vl);
             if x >= lanes.left() {
                 let major = k % 5 == 0;
-                painter.line_segment([Pos2::new(x, ruler.bottom() - if major { 7.0 } else { 3.0 }), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, MUTED));
+                painter.line_segment([Pos2::new(x, ruler.bottom() - if major { 7.0 } else { 3.0 }), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, muted()));
                 if major {
-                    painter.line_segment([Pos2::new(x, lanes.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.0, Color32::from_gray(242)));
-                    painter.text(Pos2::new(x + 3.0, ruler.top() + LOOP_H + LOC_H + 1.0), Align2::LEFT_TOP, ruler_label(self.ruler, rate as u32, t, step), FontId::proportional(11.0), MUTED);
+                    painter.line_segment([Pos2::new(x, lanes.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.0, gray(242)));
+                    painter.text(Pos2::new(x + 3.0, ruler.top() + LOOP_H + LOC_H + 1.0), Align2::LEFT_TOP, ruler_label(self.ruler, rate as u32, t, step), FontId::proportional(11.0), muted());
                 }
             }
             k += 1;
@@ -1387,7 +1415,7 @@ impl App {
         if let Some((ls, le)) = self.arr_loop {
             let (x0, x1) = (f_to_x(ls as f64, vs, vl).max(lanes.left()), f_to_x(le as f64, vs, vl).min(lanes.right()));
             if x1 > x0 {
-                let col = if self.looping { INK } else { Color32::from_gray(175) };
+                let col = if self.looping { ink() } else { gray(175) };
                 painter.rect_filled(Rect::from_min_max(Pos2::new(x0, ruler.top() + 3.0), Pos2::new(x1, ruler.top() + LOOP_H - 3.0)), 2.0, col);
                 if self.looping {
                     painter.rect_filled(Rect::from_min_max(Pos2::new(x0, lanes.top()), Pos2::new(x1, lanes.bottom())), 0.0, Color32::from_black_alpha(8));
@@ -1398,11 +1426,10 @@ impl App {
         for (ti, t) in self.tracks.iter().enumerate() {
             let l = lane(ti);
             if ti == self.active {
-                painter.rect_filled(l, 0.0, Color32::from_gray(250));
+                painter.rect_filled(l, 0.0, gray(250));
             }
-            painter.line_segment([l.left_bottom(), l.right_bottom()], Stroke::new(1.0, Color32::from_gray(225)));
+            painter.line_segment([l.left_bottom(), l.right_bottom()], Stroke::new(1.0, gray(225)));
             let muted = t.mute;
-            let color = TRACK_COLORS[t.color % TRACK_COLORS.len()];
             let fades = crossfades(&t.clips);
             for (ci, c) in t.clips.iter().enumerate() {
                 let (x0, x1) = (f_to_x(c.start as f64, vs, vl), f_to_x(c.end() as f64, vs, vl));
@@ -1412,7 +1439,7 @@ impl App {
                 let r = Rect::from_min_max(Pos2::new(x0, l.top() + 3.0), Pos2::new(x1.max(x0 + 2.0), l.bottom() - 3.0));
                 let selected = self.sel_clip == Some((ti, ci)) || self.sel_extra.contains(&(ti, ci));
                 let hovered = self.arr_hover.is_some_and(|h| (h.0, h.1) == (ti, ci));
-                draw_clip(&painter, r, c, color, selected, muted || !c.active, selected || hovered || self.fade_drag.is_some_and(|d| (d.0, d.1) == (ti, ci)), lanes);
+                draw_clip(&painter, r, c, live_color(c.color.unwrap_or(t.color)), selected, muted || !c.active, selected || hovered || self.fade_drag.is_some_and(|d| (d.0, d.1) == (ti, ci)), lanes);
             }
             // Crossfades: an X across each overlap, drawn over both clips.
             for (c, &(_, fout)) in t.clips.iter().zip(&fades) {
@@ -1425,15 +1452,15 @@ impl App {
                 }
                 let r = Rect::from_min_max(Pos2::new(x0, (l.top() + 19.0).min(l.bottom() - 3.0)), Pos2::new(x1, l.bottom() - 3.0));
                 let p = painter.with_clip_rect(lanes);
-                p.rect_filled(r, 0.0, Color32::from_white_alpha(140));
-                let stroke = Stroke::new(1.5, INK);
+                p.rect_filled(r, 0.0, wash(140));
+                let stroke = Stroke::new(1.5, ink());
                 p.line_segment([r.left_top(), r.right_bottom()], stroke);
                 p.line_segment([r.left_bottom(), r.right_top()], stroke);
-                p.rect_stroke(r, 0.0, Stroke::new(1.0, INK), egui::StrokeKind::Inside);
+                p.rect_stroke(r, 0.0, Stroke::new(1.0, ink()), egui::StrokeKind::Inside);
             }
         }
         if self.tracks.is_empty() {
-            painter.text(lanes.center(), Align2::CENTER_CENTER, "Drop a sound here, or choose File ▸ Open", FontId::proportional(16.0), Color32::from_gray(120));
+            painter.text(lanes.center(), Align2::CENTER_CENTER, "Drop a sound here, or choose File ▸ Open", FontId::proportional(16.0), gray(120));
         }
         // Phrase lines: a fine darker line every few bars (Preferences), counting from bar 1, drawn over the clips.
         if self.phrase_bars > 0 {
@@ -1455,16 +1482,16 @@ impl App {
         // Locators: a flag in the ruler with its name, and a faint line down through the song.
         for (li, (f, name)) in self.locators.iter().enumerate() {
             let x = f_to_x(*f as f64, vs, vl);
-            let flag = if self.selected_locator == Some(li) { INK } else { Color32::from_rgb(40, 150, 180) };
+            let flag = if self.selected_locator == Some(li) { ink() } else { Color32::from_rgb(40, 150, 180) };
             if x < lanes.left() - 1.0 || x > lanes.right() {
                 continue;
             }
             let top = ruler.top() + LOOP_H + 1.0;
             painter.add(egui::Shape::convex_polygon(vec![Pos2::new(x, top), Pos2::new(x + 8.0, top + 5.0), Pos2::new(x, top + 10.0)], flag, Stroke::NONE));
-            let label = painter.layout_no_wrap(name.clone(), FontId::proportional(10.5), INK);
+            let label = painter.layout_no_wrap(name.clone(), FontId::proportional(10.5), ink());
             let bg = Rect::from_min_size(Pos2::new(x + 9.0, top), label.size() + Vec2::new(4.0, 0.0));
-            painter.rect_filled(bg, 2.0, PANEL);
-            painter.galley(Pos2::new(x + 11.0, top), label, INK);
+            painter.rect_filled(bg, 2.0, panel());
+            painter.galley(Pos2::new(x + 11.0, top), label, ink());
             for y in (lanes.top() as i32..lanes.bottom() as i32).step_by(6) {
                 painter.line_segment([Pos2::new(x, y as f32), Pos2::new(x, y as f32 + 3.0)], Stroke::new(1.0, Color32::from_rgb(40, 150, 180).gamma_multiply(0.6)));
             }
@@ -1473,21 +1500,21 @@ impl App {
         let ph = if playing { play_pos } else { self.arr_cursor };
         let x = f_to_x(ph as f64, vs, vl);
         if x >= lanes.left() && x <= lanes.right() {
-            painter.line_segment([Pos2::new(x, ruler.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.5, INK));
+            painter.line_segment([Pos2::new(x, ruler.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.5, ink()));
             painter.add(egui::Shape::convex_polygon(
                 vec![Pos2::new(x - 5.0, ruler.bottom() - 7.0), Pos2::new(x + 5.0, ruler.bottom() - 7.0), Pos2::new(x, ruler.bottom())],
-                INK,
+                ink(),
                 Stroke::NONE,
             ));
         }
         // Scroll bar.
-        painter.rect_filled(scroll, 0.0, PANEL);
-        painter.line_segment([scroll.left_top(), scroll.right_top()], Stroke::new(1.0, LINE));
-        painter.rect_filled(thumb.shrink2(Vec2::new(1.0, 4.0)), 4.0, Color32::from_gray(185));
+        painter.rect_filled(scroll, 0.0, panel());
+        painter.line_segment([scroll.left_top(), scroll.right_top()], Stroke::new(1.0, rule()));
+        painter.rect_filled(thumb.shrink2(Vec2::new(1.0, 4.0)), 4.0, gray(185));
         if let Some(q) = hover {
             let f = x_to_f(q.x, vs, vl) as usize;
             let text = if self.grid_frames(spp).is_some() { format!("{}  {}", self.fmt_bars(f), self.fmt_pos(f)) } else { self.fmt_pos(f) };
-            painter.text(Pos2::new(lanes.right() - 6.0, ruler.top() + LOOP_H + LOC_H + 1.0), Align2::RIGHT_TOP, text, FontId::monospace(11.0), MUTED);
+            painter.text(Pos2::new(lanes.right() - 6.0, ruler.top() + LOOP_H + LOC_H + 1.0), Align2::RIGHT_TOP, text, FontId::monospace(11.0), muted());
         }
     }
 }

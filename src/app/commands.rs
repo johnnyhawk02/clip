@@ -512,10 +512,10 @@ impl App {
             Action::PasteTime => self.paste_time(),
             Action::DeleteTime => self.delete_time(),
             Action::InsertTime => self.insert_time(),
-            Action::Preferences => self.prefs_open = Some((self.phrase_bars, repitch_mode())),
+            Action::Preferences => self.prefs_open = Some((self.phrase_bars, repitch_mode(), APPEARANCE.load(std::sync::atomic::Ordering::Relaxed))),
             Action::TrackColor => {
                 let t = &mut self.tracks[self.active];
-                t.color = (t.color + 1) % TRACK_COLORS.len();
+                t.color = (t.color + 1) % LIVE_PALETTE.len();
             }
             Action::PrevTrack => self.set_active((self.active + self.tracks.len() - 1) % self.tracks.len()),
             Action::NextCue => self.jump_cue(true),

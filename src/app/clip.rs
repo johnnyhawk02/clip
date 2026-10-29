@@ -40,6 +40,8 @@ pub(super) struct Clip {
     /// -1, -2… before it.
     pub(super) origin: usize,
     pub(super) warp: Option<Warp>,
+    /// Its own colour from Live's palette; none follows the track's.
+    pub(super) color: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -157,7 +159,7 @@ impl Clip {
     pub(super) fn new(name: impl Into<String>, audio: Arc<Audio>, start: usize) -> Clip {
         let peaks = Arc::new(Peaks::build(&audio));
         let len = audio.frames();
-        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None, looping: false, warp: None, origin: 0, gain: 1.0, fade_in: 0, fade_out: 0, active: true, transpose: 0, untransposed: None }
+        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None, looping: false, warp: None, origin: 0, gain: 1.0, fade_in: 0, fade_out: 0, active: true, transpose: 0, untransposed: None, color: None }
     }
 
     pub(super) fn end(&self) -> usize {
@@ -386,7 +388,7 @@ pub(super) struct Track {
     pub(super) gain: f32,
     /// Pan, -1 (left) to 1 (right).
     pub(super) pan: f32,
-    /// Index into `TRACK_COLORS` (0 is the default grey).
+    /// Its colour in Live's palette (`LIVE_PALETTE`).
     pub(super) color: usize,
     pub(super) mute: bool,
     pub(super) solo: bool,
@@ -394,7 +396,7 @@ pub(super) struct Track {
 
 impl Track {
     pub(super) fn new(name: impl Into<String>) -> Track {
-        Track { name: name.into(), clips: Vec::new(), slots: Vec::new(), gain: 1.0, pan: 0.0, color: 0, mute: false, solo: false }
+        Track { name: name.into(), clips: Vec::new(), slots: Vec::new(), gain: 1.0, pan: 0.0, color: next_color(), mute: false, solo: false }
     }
 }
 

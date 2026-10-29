@@ -19,11 +19,11 @@ impl App {
         let enabled = self.enabled(a);
         let resp = ui.add_enabled(enabled, Button::new("").min_size(size).selected(selected));
         let color = if selected {
-            Color32::WHITE
+            gray(255)
         } else if enabled {
-            INK
+            ink()
         } else {
-            Color32::from_gray(185)
+            gray(185)
         };
         paint_icon(ui.painter(), resp.rect, a, color, playing);
         if resp.on_hover_text(tip).on_disabled_hover_text(a.label()).clicked() {
@@ -153,9 +153,9 @@ impl App {
                 (false, View::Arrangement) => self.arr_cursor,
                 _ => self.cursor,
             };
-            ui.label(egui::RichText::new(self.fmt_pos(at)).monospace().size(20.0).color(INK));
+            ui.label(egui::RichText::new(self.fmt_pos(at)).monospace().size(20.0).color(ink()));
             if let (Some((s, e)), View::Editor { .. }) = (self.sel, self.view) {
-                ui.label(egui::RichText::new(format!("sel {}", self.fmt_pos(e - s))).monospace().size(12.0).color(MUTED));
+                ui.label(egui::RichText::new(format!("sel {}", self.fmt_pos(e - s))).monospace().size(12.0).color(muted()));
             }
             ui.add_space(12.0);
             let meters = self.meter.clone();
@@ -204,14 +204,14 @@ impl App {
     /// List of labelled regions: rename, select, delete; plus the loop points.
     fn regions_section(&mut self, ui: &mut egui::Ui) {
         if self.view == View::Arrangement {
-            ui.label(egui::RichText::new("Regions and loops belong to clips. Double-click a clip to see and edit them.").color(MUTED));
+            ui.label(egui::RichText::new("Regions and loops belong to clips. Double-click a clip to see and edit them.").color(muted()));
             return;
         }
         let mut select: Option<Sel> = None;
         let mut remove: Option<usize> = None;
         let mut renamed = false;
         if self.regions.is_empty() {
-            ui.label(egui::RichText::new("No regions yet. Select something and choose Insert ▸ Region from Selection (⇧⌘R).").color(MUTED));
+            ui.label(egui::RichText::new("No regions yet. Select something and choose Insert ▸ Region from Selection (⇧⌘R).").color(muted()));
         }
         let units = self.ruler;
         let rate = self.audio.as_ref().map_or(44100, |a| a.rate);
@@ -244,7 +244,7 @@ impl App {
         match self.loop_points {
             Some((s, e)) => {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("Loop {} – {}", fmt_pos_in(units, rate, s), fmt_pos_in(units, rate, e))).color(MUTED));
+                    ui.label(egui::RichText::new(format!("Loop {} – {}", fmt_pos_in(units, rate, s), fmt_pos_in(units, rate, e))).color(muted()));
                     if ui.small_button("Select").clicked() {
                         select = Some((s, e));
                     }
@@ -278,7 +278,7 @@ impl App {
     fn info_section(&mut self, ui: &mut egui::Ui) {
         if self.view == View::Arrangement {
             let key = |ui: &mut egui::Ui, t: &str| {
-                ui.label(egui::RichText::new(t).color(MUTED));
+                ui.label(egui::RichText::new(t).color(muted()));
             };
             let clips: usize = self.tracks.iter().map(|t| t.clips.len()).sum();
             let length = self.arrangement_frames();
@@ -331,7 +331,7 @@ impl App {
         };
         let r = a.rate as f64;
         let key = |ui: &mut egui::Ui, t: &str| {
-            ui.label(egui::RichText::new(t).color(MUTED));
+            ui.label(egui::RichText::new(t).color(muted()));
         };
         egui::Grid::new("info").num_columns(2).min_col_width(78.0).spacing(Vec2::new(12.0, 6.0)).show(ui, |ui| {
             key(ui, "Sound");
@@ -404,7 +404,7 @@ impl App {
     /// List of cue points: rename, jump to, delete.
     fn cues_section(&mut self, ui: &mut egui::Ui) {
         if self.view == View::Arrangement {
-            ui.label(egui::RichText::new("Cues belong to clips. Double-click a clip to see and edit its cues.").color(MUTED));
+            ui.label(egui::RichText::new("Cues belong to clips. Double-click a clip to see and edit its cues.").color(muted()));
             return;
         }
         let rate = self.audio.as_ref().map_or(44100, |a| a.rate) as f64;
@@ -412,7 +412,7 @@ impl App {
         let mut remove: Option<usize> = None;
         let mut renamed = false;
         if self.cues.is_empty() {
-            ui.label(egui::RichText::new("No cue points yet. Insert ▸ Cue Point (⌘M) adds one at the cursor.").color(MUTED));
+            ui.label(egui::RichText::new("No cue points yet. Insert ▸ Cue Point (⌘M) adds one at the cursor.").color(muted()));
         }
         egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
             egui::Grid::new("cues").num_columns(4).spacing(Vec2::new(6.0, 6.0)).show(ui, |ui| {
@@ -420,7 +420,7 @@ impl App {
                     if ui.add_sized([118.0, 22.0], egui::TextEdit::singleline(&mut c.name)).changed() {
                         renamed = true;
                     }
-                    ui.label(egui::RichText::new(fmt_time(c.frame as f64 / rate)).monospace().color(MUTED));
+                    ui.label(egui::RichText::new(fmt_time(c.frame as f64 / rate)).monospace().color(muted()));
                     if ui.small_button("Go").clicked() {
                         go = Some(c.frame);
                     }

@@ -377,13 +377,13 @@ impl App {
     pub(super) fn waveform(&mut self, ui: &mut egui::Ui) {
         let full = ui.available_rect_before_wrap();
         let Some(_) = self.audio.as_ref() else {
-            ui.painter().rect_filled(full, 0.0, Color32::WHITE);
+            ui.painter().rect_filled(full, 0.0, gray(255));
             ui.painter().text(
                 full.center(),
                 Align2::CENTER_CENTER,
                 if self.loading.is_some() { "Loading…" } else { "Drop a sound here, or choose File ▸ Open\n(WAV, MP3, FLAC, OGG, M4A, AIFF…)" },
                 FontId::proportional(16.0),
-                Color32::from_gray(120),
+                gray(120),
             );
             return;
         };
@@ -764,18 +764,18 @@ impl App {
         let vs = self.view_start;
         let vl = self.view_len;
         let frame_to_x = |f: f64| wave.left() + ((f - vs) / vl) as f32 * wave.width();
-        let black = Color32::BLACK;
+        let black = gray(0);
 
-        painter.rect_filled(wave, 0.0, Color32::WHITE);
-        painter.rect_filled(ruler, 0.0, PANEL);
-        painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0, LINE));
+        painter.rect_filled(wave, 0.0, gray(255));
+        painter.rect_filled(ruler, 0.0, panel());
+        painter.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0, rule()));
         if strip.height() > 0.0 {
-            painter.rect_filled(strip, 0.0, PANEL);
+            painter.rect_filled(strip, 0.0, panel());
             // The loop: a brace in the strip (black when Loop is on), as in the song view.
             if let Some((ls, le)) = self.loop_points {
                 let (x0, x1) = (frame_to_x(ls as f64).max(wave.left()), frame_to_x(le as f64).min(wave.right()));
                 if x1 > x0 {
-                    let col = if self.looping { INK } else { Color32::from_gray(175) };
+                    let col = if self.looping { ink() } else { gray(175) };
                     painter.rect_filled(Rect::from_min_max(Pos2::new(x0, strip.top() + 3.0), Pos2::new(x1, strip.bottom() - 3.0)), 2.0, col);
                     if self.looping {
                         painter.rect_filled(Rect::from_min_max(Pos2::new(x0, wave.top()), Pos2::new(x1, wave.bottom())), 0.0, Color32::from_black_alpha(8));
@@ -786,7 +786,7 @@ impl App {
         if let Some((s, e)) = self.sel {
             let (x0, x1) = (frame_to_x(s as f64).max(wave.left()), frame_to_x(e as f64).min(wave.right()));
             if x1 > x0 {
-                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, ruler.top()), Pos2::new(x1, ruler.bottom() - 1.0)), 0.0, Color32::from_gray(222));
+                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, ruler.top()), Pos2::new(x1, ruler.bottom() - 1.0)), 0.0, gray(222));
             }
         }
 
@@ -820,12 +820,12 @@ impl App {
                 if f >= -0.5 && x >= wave.left() - 0.5 {
                     let (on_bar, on_beat) = (on(f - origin, bar), on(f - origin, beat));
                     let (h, line) = if on_bar { (9.0, 228) } else if on_beat { (5.0, 240) } else { (3.0, 246) };
-                    painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, MUTED));
-                    painter.line_segment([Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, Color32::from_gray(line)));
+                    painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, muted()));
+                    painter.line_segment([Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, gray(line)));
                     let bar_no = ((f - origin) / bar).round() as i64;
                     if on_bar && bar_no.rem_euclid(label_every as i64) == 0 {
                         let label = if bar_no >= 0 { bar_no + 1 } else { bar_no };
-                        painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, label.to_string(), FontId::proportional(11.0), MUTED);
+                        painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, label.to_string(), FontId::proportional(11.0), muted());
                     }
                 }
                 k += 1;
@@ -847,10 +847,10 @@ impl App {
             if x >= wave.left() {
                 let major = k % 5 == 0;
                 let h = if major { 7.0 } else { 3.0 };
-                painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, MUTED));
+                painter.line_segment([Pos2::new(x, ruler.bottom() - h), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, muted()));
                 if major {
-                    painter.line_segment([Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, Color32::from_gray(242)));
-                    painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, ruler_label(self.ruler, rate as u32, t, step), FontId::proportional(11.0), MUTED);
+                    painter.line_segment([Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, gray(242)));
+                    painter.text(Pos2::new(x + 3.0, ruler.top() + 1.0), Align2::LEFT_TOP, ruler_label(self.ruler, rate as u32, t, step), FontId::proportional(11.0), muted());
                 }
             }
             k += 1;
@@ -867,10 +867,10 @@ impl App {
             let tn = audio.frames();
             if let Some((x0, x1)) = sel_px {
                 if x1 > x0 {
-                    painter.rect_filled(Rect::from_min_max(Pos2::new(x0, lane.top()), Pos2::new(x1, lane.bottom())), 0.0, Color32::from_gray(222));
+                    painter.rect_filled(Rect::from_min_max(Pos2::new(x0, lane.top()), Pos2::new(x1, lane.bottom())), 0.0, gray(222));
                 }
             }
-            let tc = TRACK_COLORS[self.tracks.get(self.active).map_or(0, |t| t.color) % TRACK_COLORS.len()];
+            let tc = live_color(self.tracks.get(self.active).map_or(0, |t| t.color));
             let base = tc;
             let tch = audio.num_channels().max(1);
             let lane_h = lane.height() / tch as f32;
@@ -880,9 +880,9 @@ impl App {
                 let amp = lane_h / 2.0 * 0.92;
                 let in_sel = |f: usize| matches!(self.sel, Some((s, e)) if f >= s && f < e);
                 let color_at = |f: usize| if in_sel(f) { base.lerp_to_gamma(black, 0.6) } else { base };
-                painter.line_segment([Pos2::new(wave.left(), mid), Pos2::new(wave.right(), mid)], Stroke::new(1.0, Color32::from_gray(212)));
+                painter.line_segment([Pos2::new(wave.left(), mid), Pos2::new(wave.right(), mid)], Stroke::new(1.0, gray(212)));
                 if ci > 0 {
-                    painter.line_segment([Pos2::new(wave.left(), top), Pos2::new(wave.right(), top)], Stroke::new(1.0, Color32::from_gray(232)));
+                    painter.line_segment([Pos2::new(wave.left(), top), Pos2::new(wave.right(), top)], Stroke::new(1.0, gray(232)));
                 }
                 if spp <= 1.5 {
                     // Zoomed in: connect individual samples.
@@ -928,7 +928,7 @@ impl App {
         if let Some((s, e)) = self.zoom_band {
             let r = Rect::from_min_max(Pos2::new(frame_to_x(s as f64), wave.top() + 1.0), Pos2::new(frame_to_x(e as f64), wave.bottom() - 1.0));
             for (a, b) in [(r.left_top(), r.right_top()), (r.right_top(), r.right_bottom()), (r.right_bottom(), r.left_bottom()), (r.left_bottom(), r.left_top())] {
-                painter.add(egui::Shape::dashed_line(&[a, b], Stroke::new(1.0, Color32::from_gray(80)), 3.0, 3.0));
+                painter.add(egui::Shape::dashed_line(&[a, b], Stroke::new(1.0, gray(80)), 3.0, 3.0));
             }
         }
 
@@ -939,18 +939,18 @@ impl App {
                 continue;
             }
             let in_sel = matches!(self.sel, Some((s, e)) if c.frame >= s && c.frame < e);
-            let col = if in_sel { black } else { Color32::from_gray(110) };
+            let col = if in_sel { black } else { gray(110) };
             painter.add(egui::Shape::dashed_line(&[Pos2::new(x, wave.top()), Pos2::new(x, wave.bottom())], Stroke::new(1.0, col), 4.0, 3.0));
             painter.add(egui::Shape::convex_polygon(
                 vec![Pos2::new(x, ruler.top() + 2.0), Pos2::new(x + 7.0, ruler.top() + 6.0), Pos2::new(x, ruler.top() + 10.0)],
-                Color32::from_gray(60),
+                gray(60),
                 Stroke::NONE,
             ));
-            painter.line_segment([Pos2::new(x, ruler.top() + 2.0), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, Color32::from_gray(60)));
-            let label = painter.layout_no_wrap(c.name.clone(), FontId::proportional(10.0), INK);
+            painter.line_segment([Pos2::new(x, ruler.top() + 2.0), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, gray(60)));
+            let label = painter.layout_no_wrap(c.name.clone(), FontId::proportional(10.0), ink());
             let bg = Rect::from_min_size(Pos2::new(x + 8.0, ruler.top() + 1.0), label.size() + Vec2::new(4.0, 0.0));
-            painter.rect_filled(bg, 2.0, Color32::WHITE);
-            painter.galley(bg.min + Vec2::new(2.0, 0.0), label, INK);
+            painter.rect_filled(bg, 2.0, gray(255));
+            painter.galley(bg.min + Vec2::new(2.0, 0.0), label, ink());
         }
 
         // Regions: a band across the middle of the ruler with their names.
@@ -961,10 +961,10 @@ impl App {
                 continue;
             }
             let rr = Rect::from_min_max(Pos2::new(x0, band.top()), Pos2::new(x1, band.bottom()));
-            painter.rect_filled(rr, 2.0, Color32::from_gray(150));
-            let label = painter.layout_no_wrap(r.name.clone(), FontId::proportional(9.0), Color32::WHITE);
+            painter.rect_filled(rr, 2.0, gray(150));
+            let label = painter.layout_no_wrap(r.name.clone(), FontId::proportional(9.0), gray(255));
             if label.size().x + 6.0 < rr.width() {
-                painter.galley(Pos2::new(rr.left() + 3.0, rr.center().y - label.size().y / 2.0), label, Color32::WHITE);
+                painter.galley(Pos2::new(rr.left() + 3.0, rr.center().y - label.size().y / 2.0), label, gray(255));
             }
         }
         // Loop points: a black bar with end ticks along the bottom of the ruler (in the clip
@@ -994,10 +994,10 @@ impl App {
                 let x = x.max(wave.left() + 1.0);
                 painter.add(egui::Shape::convex_polygon(
                     vec![Pos2::new(x, ruler.bottom() - 15.0), Pos2::new(x + 12.0, ruler.bottom() - 10.0), Pos2::new(x, ruler.bottom() - 5.0)],
-                    INK,
+                    ink(),
                     Stroke::NONE,
                 ));
-                painter.line_segment([Pos2::new(x, ruler.bottom() - 15.0), Pos2::new(x, wave.bottom())], Stroke::new(1.5, INK));
+                painter.line_segment([Pos2::new(x, ruler.bottom() - 15.0), Pos2::new(x, wave.bottom())], Stroke::new(1.5, ink()));
             }
         }
 
@@ -1023,15 +1023,15 @@ impl App {
         }
 
         // Scroll bar: light track with a grey thumb.
-        painter.rect_filled(scroll, 0.0, PANEL);
-        painter.line_segment([scroll.left_top(), scroll.right_top()], Stroke::new(1.0, LINE));
-        let thumb_col = if self.scrollbar_drag { Color32::from_gray(120) } else { Color32::from_gray(185) };
+        painter.rect_filled(scroll, 0.0, panel());
+        painter.line_segment([scroll.left_top(), scroll.right_top()], Stroke::new(1.0, rule()));
+        let thumb_col = if self.scrollbar_drag { gray(120) } else { gray(185) };
         painter.rect_filled(thumb.shrink2(Vec2::new(1.0, 4.0)), 4.0, thumb_col);
 
         // Hover time readout.
         if let Some(p) = hover {
             let f = x_to_frame(p.x, vs, vl);
-            painter.text(Pos2::new(wave.right() - 6.0, ruler.top() + 1.0), Align2::RIGHT_TOP, self.fmt_pos(f), FontId::monospace(11.0), MUTED);
+            painter.text(Pos2::new(wave.right() - 6.0, ruler.top() + 1.0), Align2::RIGHT_TOP, self.fmt_pos(f), FontId::monospace(11.0), muted());
         }
     }
 

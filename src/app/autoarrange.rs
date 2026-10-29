@@ -153,11 +153,11 @@ impl App {
     /// for a new track), landing on the grid where it's dropped.
     pub(super) fn pool_section(&mut self, ui: &mut egui::Ui) {
         if self.view != View::Arrangement {
-            ui.label(egui::RichText::new("Go back to the arrangement to drag loops from the pool.").color(MUTED));
+            ui.label(egui::RichText::new("Go back to the arrangement to drag loops from the pool.").color(muted()));
             return;
         }
         if self.pool.is_empty() {
-            ui.label(egui::RichText::new("Empty. Add the loops in your song (or any clip, grouped ones too, with Clip ▸ Add to Pool), then drag them onto any track.").color(MUTED));
+            ui.label(egui::RichText::new("Empty. Add the loops in your song (or any clip, grouped ones too, with Clip ▸ Add to Pool), then drag them onto any track.").color(muted()));
         }
         let bar = self.bar_frames();
         let mut remove = None;
@@ -166,9 +166,9 @@ impl App {
                 let bars = p.clip.len as f64 / bar;
                 let text = format!("{}  ·  {} bar{}", p.clip.name, (bars * 10.0).round() / 10.0, if (bars - 1.0).abs() < 0.05 { "" } else { "s" });
                 let row = ui.dnd_drag_source(egui::Id::unique(("pool", i)), PoolDrag(i), |ui| {
-                    egui::Frame::new().fill(Color32::WHITE).stroke(Stroke::new(1.0, LINE)).corner_radius(4.0).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
+                    egui::Frame::new().fill(gray(255)).stroke(Stroke::new(1.0, rule())).corner_radius(4.0).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
                         ui.set_width(230.0);
-                        ui.add(egui::Label::new(egui::RichText::new(text).color(INK)).truncate().selectable(false));
+                        ui.add(egui::Label::new(egui::RichText::new(text).color(ink())).truncate().selectable(false));
                     });
                 });
                 row.response.on_hover_text("Drag onto a track");
@@ -194,7 +194,7 @@ impl App {
         self.push_undo("Add Loop from Pool");
         let t = track.unwrap_or_else(|| {
             let mut t = Track::new(clip.name.clone());
-            t.color = self.tracks.len() % TRACK_COLORS.len();
+            t.color = auto_color(self.tracks.len());
             self.tracks.push(t);
             self.tracks.len() - 1
         });
@@ -256,7 +256,7 @@ impl App {
                 let mut t = self.tracks.iter().find(|t| t.name == p.clip.name).cloned().unwrap_or_else(|| Track::new(p.clip.name.clone()));
                 t.clips.clear();
                 if !self.tracks.iter().any(|o| o.name == p.clip.name) {
-                    t.color = i % TRACK_COLORS.len();
+                    t.color = auto_color(i);
                 }
                 t
             })

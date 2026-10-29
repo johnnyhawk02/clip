@@ -72,7 +72,11 @@ pub struct TrackData {
     pub name: String,
     pub gain: f32,
     pub pan: f32,
+    /// The track's colour: an index into Live's palette when `palette` is set, else one of
+    /// the six colours older versions had.
     pub color: usize,
+    #[serde(default)]
+    pub palette: bool,
     pub mute: bool,
     pub solo: bool,
     pub clips: Vec<ClipData>,
@@ -110,6 +114,9 @@ pub struct ClipData {
     /// False for a clip switched off (silent, kept in place).
     #[serde(default = "default_true")]
     pub active: bool,
+    /// Its own colour in Live's palette (none follows the track).
+    #[serde(default)]
+    pub color: Option<usize>,
 }
 
 pub fn write(path: &Path, project: &ProjectFile, audio: &[&Audio]) -> Result<(), String> {
@@ -185,6 +192,7 @@ mod tests {
                 gain: 0.8,
                 pan: -0.5,
                 color: 2,
+                palette: true,
                 mute: false,
                 solo: true,
                 clips: vec![ClipData {
@@ -203,6 +211,7 @@ mod tests {
                     gain: 1.0,
                     fades: (0, 0),
                     active: true,
+                    color: None,
                 }],
                 slots: Vec::new(),
             }],
