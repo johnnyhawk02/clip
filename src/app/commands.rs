@@ -535,6 +535,7 @@ impl App {
             }
         }
         if ctx.egui_wants_keyboard_input() {
+            self.tabs.clear();
             return;
         }
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Space)) && !self.space_down {
@@ -603,16 +604,18 @@ impl App {
             }
         }
         // Tab switches between the Session view and the song view, as in Live.
-        if ctx.input_mut(|i| i.consume_key(none, Key::Tab)) {
-            if self.view != View::Arrangement {
-                self.back_to_arrangement();
+        // Tab switches between the Session and song views, ⇧Tab between the arrangement and the
+        // clip editor, as in Live.
+        for shift in std::mem::take(&mut self.tabs) {
+            if shift {
+                let a = if self.view == View::Arrangement { Action::EditClip } else { Action::BackToArrangement };
+                self.run(a, ctx);
+            } else {
+                if self.view != View::Arrangement {
+                    self.back_to_arrangement();
+                }
+                self.show_session = !self.show_session;
             }
-            self.show_session = !self.show_session;
-        }
-        // ⇧Tab switches between the arrangement and the clip editor, as in Live.
-        if ctx.input_mut(|i| i.consume_key(Modifiers::SHIFT, Key::Tab)) {
-            let a = if self.view == View::Arrangement { Action::EditClip } else { Action::BackToArrangement };
-            self.run(a, ctx);
         }
         if ctx.input_mut(|i| i.consume_key(none, Key::Escape)) {
             if self.player.is_playing() {

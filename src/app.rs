@@ -230,6 +230,8 @@ pub struct App {
     time_clip: Option<(usize, Vec<Vec<Clip>>)>,
     /// Modifier keys held during scripted input (automation `mods:`).
     synth_mods: Modifiers,
+    /// Tab presses taken out of egui's input (true with Shift), so Tab only switches views.
+    tabs: Vec<bool>,
     /// ⇧⌥-dragging a clip's audio inside it: (layer, clip, trim then, frame grabbed).
     slide_drag: Option<(usize, usize, usize, f64)>,
     /// The clip loaded in the detail view under the song (see `detail_key_of`).
@@ -491,6 +493,7 @@ impl App {
             fit_height: false,
             time_clip: None,
             synth_mods: Modifiers::NONE,
+            tabs: Vec::new(),
             slide_drag: None,
             detail_key: None,
             split: false,
@@ -1114,14 +1117,23 @@ impl App {
 
 impl eframe::App for App {
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
-        if self.synth.is_empty() {
-            return;
+        if !self.synth.is_empty() {
+            self.synth_frame += 1;
+            let now = self.synth_frame;
+            let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.synth).into_iter().partition(|(f, _)| *f <= now);
+            self.synth = later;
+            raw_input.events.extend(due.into_iter().map(|(_, e)| e));
         }
-        self.synth_frame += 1;
-        let now = self.synth_frame;
-        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.synth).into_iter().partition(|(f, _)| *f <= now);
-        self.synth = later;
-        raw_input.events.extend(due.into_iter().map(|(_, e)| e));
+        // Take Tab away from egui, which would otherwise also move focus between controls.
+        raw_input.events.retain(|e| match e {
+            egui::Event::Key { key: Key::Tab, pressed, modifiers, .. } => {
+                if *pressed {
+                    self.tabs.push(modifiers.shift);
+                }
+                false
+            }
+            _ => true,
+        });
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
