@@ -138,10 +138,13 @@ impl App {
                         self.synth.push((at, egui::Event::ModifiersChanged(self.synth_mods)));
                     }
                     // space: a tap of the Space bar (press, then release a few frames later).
-                    "space" => {
+                    // key:ArrowLeft (any egui key name) — a tap of that key, with the `mods:` held.
+                    "space" | "key" => {
+                        let key = if cmd == "space" { Some(egui::Key::Space) } else { egui::Key::from_name(arg) };
+                        let Some(key) = key else { continue };
                         let at = self.synth.last().map_or(self.synth_frame, |l| l.0) + 1;
                         for (i, pressed) in [(0, true), (3, false)] {
-                            let e = egui::Event::Key { key: egui::Key::Space, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+                            let e = egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers: self.synth_mods };
                             self.synth.push((at + i, e));
                         }
                     }

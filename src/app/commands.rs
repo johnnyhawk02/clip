@@ -565,6 +565,23 @@ impl App {
                 self.run(a, ctx);
             }
         }
+        // Arrow keys in the song, as in Live.
+        if self.view == View::Arrangement {
+            for (key, sign) in [(Key::ArrowLeft, -1i64), (Key::ArrowRight, 1)] {
+                if ctx.input_mut(|i| i.consume_key(Modifiers::SHIFT, key)) {
+                    self.extend_time_sel(sign);
+                } else if ctx.input_mut(|i| i.consume_key(none, key)) {
+                    self.arrow_nudge(sign);
+                }
+            }
+            for (key, sign) in [(Key::ArrowUp, -1i64), (Key::ArrowDown, 1)] {
+                if ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, key)) {
+                    self.resize_loop(sign < 0);
+                } else if ctx.input_mut(|i| i.consume_key(none, key)) {
+                    self.arrow_up_down(sign);
+                }
+            }
+        }
         // ⇧Tab switches between the arrangement and the clip editor, as in Live.
         if ctx.input_mut(|i| i.consume_key(Modifiers::SHIFT, Key::Tab)) {
             let a = if self.view == View::Arrangement { Action::EditClip } else { Action::BackToArrangement };

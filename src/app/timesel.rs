@@ -257,4 +257,66 @@ impl App {
         self.time_sel = Some(((at, at + len), (0, self.tracks.len().saturating_sub(1))));
         self.finish_time_edit("Pasted the time, pushing the rest later");
     }
+
+    /// One step of the song's grid at the current zoom (a beat when the grid is off).
+    fn grid_step(&self) -> usize {
+        let spp = self.arr_lanes.map_or(1.0, |(l, _)| self.arr_view_len / l.width().max(1.0) as f64);
+        self.grid_frames(spp).unwrap_or_else(|| self.beat_frames()).round().max(1.0) as usize
+    }
+
+    /// ← →: nudge the selected clips by the grid, or move the insert marker to the next grid
+    /// line (as in Live).
+    pub(super) fn arrow_nudge(&mut self, sign: i64) {
+        let g = self.grid_step() as i64;
+        let clips = self.selected_clips();
+        if !clips.is_empty() && self.time_sel.is_none() {
+            self.push_undo("Nudge");
+            for (t, c) in clips {
+                if let Some(clip) = self.tracks.get_mut(t).and_then(|t| t.clips.get_mut(c)) {
+                    clip.start = (clip.start as i64 + sign * g).max(0) as usize;
+                }
+            }
+            self.dirty = true;
+            self.refresh_playback();
+            return;
+        }
+        let here = self.arr_cursor as i64;
+        let next = if sign > 0 { (here / g + 1) * g } else { ((here - 1).max(0) / g) * g };
+        self.go_to_frame(next.max(0) as usize);
+        self.time_sel = None;
+    }
+
+    /// ⇧← ⇧→: grow or shrink the time selection by the grid (from the insert marker if none).
+    pub(super) fn extend_time_sel(&mut self, sign: i64) {
+        let g = self.grid_step();
+        let ((s, e), layers) = self.time_sel.unwrap_or(((self.arr_cursor, self.arr_cursor), (self.active, self.active)));
+        let e = if sign > 0 { e + g } else { e.saturating_sub(g).max(s + g) };
+        self.time_sel = Some(((s, e), layers));
+        self.sel_clip = None;
+        self.sel_extra.clear();
+    }
+
+    /// ↑ ↓: with Loop on and nothing selected, move the loop by its own length; otherwise move
+    /// to the layer above or below (as in Live).
+    pub(super) fn arrow_up_down(&mut self, sign: i64) {
+        if let (true, Some((ls, le)), None, None) = (self.looping, self.arr_loop, self.sel_clip, self.time_sel) {
+            let n = (le - ls) as i64;
+            let s = (ls as i64 + sign * n).max(0) as usize;
+            self.arr_loop = Some((s, s + n as usize));
+            self.dirty = true;
+            return;
+        }
+        let t = (self.active as i64 + sign).clamp(0, self.tracks.len().saturating_sub(1) as i64) as usize;
+        self.set_active(t);
+    }
+
+    /// ⌘↑ ⌘↓: double or halve the loop's length (never less than a bar).
+    pub(super) fn resize_loop(&mut self, longer: bool) {
+        let Some((ls, le)) = self.arr_loop else { return };
+        let n = le - ls;
+        let bar = self.bar_frames().round() as usize;
+        let n = if longer { n * 2 } else { (n / 2).max(bar) };
+        self.arr_loop = Some(self.whole_bars((ls, ls + n)));
+        self.dirty = true;
+    }
 }
