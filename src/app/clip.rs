@@ -293,18 +293,21 @@ const EDGE_FADE_SECS: f64 = 0.004;
 /// Fades for a clip's edges where nothing crossfades them: none where the audio starts or ends
 /// at (or near) a zero crossing, so a transient stays untouched, growing to 4 ms where the edge
 /// cuts through a loud part of the wave and would click.
-pub(super) fn edge_fades(a: &Audio, (fin, fout): (usize, usize)) -> (usize, usize) {
+pub(super) fn edge_fades(a: &Audio, fades: (usize, usize)) -> (usize, usize) {
     let n = a.frames();
     if n == 0 {
-        return (fin, fout);
+        return fades;
     }
-    let full = (a.rate as f64 * EDGE_FADE_SECS).round();
-    let len = |i: usize| {
-        let level = a.channels.iter().map(|c| c[i].abs()).fold(0.0f32, f32::max);
-        (full * (level as f64 / 0.05).min(1.0)).round() as usize
-    };
-    let fin = if fin == 0 { len(0) } else { fin };
-    let fout = if fout == 0 { len(n - 1) } else { fout };
+    let level = |i: usize| a.channels.iter().map(|c| c[i].abs()).fold(0.0f32, f32::max);
+    edge_fades_for(level(0), level(n - 1), n, a.rate, fades)
+}
+
+/// `edge_fades` from the levels at a clip's first and last frames, its length and rate.
+pub(super) fn edge_fades_for(first: f32, last: f32, n: usize, rate: u32, (fin, fout): (usize, usize)) -> (usize, usize) {
+    let full = (rate as f64 * EDGE_FADE_SECS).round();
+    let len = |level: f32| (full * (level as f64 / 0.05).min(1.0)).round() as usize;
+    let fin = if fin == 0 { len(first) } else { fin };
+    let fout = if fout == 0 { len(last) } else { fout };
     // A very short clip shares its length between the two.
     if fin + fout > n {
         return (n / 2, n - n / 2);
@@ -727,6 +730,8 @@ impl App {
         }
         if moved {
             self.laid_out_tempo = tempo;
+            self.player.rescale(r);
+            self.live_speed = 1.0;
             self.arr_loop = self.arr_loop.map(|(a, b)| (sc(a), sc(b)));
             self.time_sel = self.time_sel.map(|((a, b), l)| ((sc(a), sc(b)), l));
             self.arr_cursor = sc(self.arr_cursor);
@@ -737,6 +742,9 @@ impl App {
         }
         if changed {
             self.dirty = true;
+            // Playback picks up the new layout straight away (re-pitched clips need nothing
+            // more); the stretch below is for drawing, exports and Keep pitch.
+            self.refresh_playback();
             self.stretch_in_background();
         }
     }

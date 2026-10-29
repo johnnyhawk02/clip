@@ -19,6 +19,8 @@ clips on the layers above to patch over parts of it.
 - Where a layer cuts in over one that is still sounding, the one cut off fades out over 5 ms so
   there is no click. A clip that starts or ends on its own keeps its edge.
 - Each layer keeps a volume slider and a colour. Solo and pan are gone.
+- Playback mixes the layers live as it plays, as Live does, so edits and tempo changes are heard
+  at once with nothing to render first. Dragging the tempo re-pitches what you hear straight away.
 - Recording puts the take on a new top layer. Layers ▸ Flatten Layers turns everything heard
   into one plain clip.
 

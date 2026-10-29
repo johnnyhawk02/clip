@@ -8,11 +8,39 @@ use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
 
 use crate::audio::Audio;
 use crate::crossfeed::Crossfeed;
+use crate::engine::Song;
+
+/// What the player plays: a finished buffer (the clip editor), or the song, mixed live.
+pub enum Source {
+    Buffer(Arc<Audio>),
+    Song(Arc<Song>),
+}
+
+impl Source {
+    fn frames(&self) -> usize {
+        match self {
+            Source::Buffer(a) => a.frames(),
+            Source::Song(s) => s.end,
+        }
+    }
+
+    fn rate(&self) -> u32 {
+        match self {
+            Source::Buffer(a) => a.rate,
+            Source::Song(s) => s.rate,
+        }
+    }
+}
 
 pub struct Shared {
-    pub audio: Arc<Audio>,
+    pub source: Source,
     /// Current position in source frames (fractional, for rate conversion).
     pub pos: f64,
+    /// Song frames per source frame of time: above 1 while a faster tempo is being dragged in,
+    /// before the song is laid out for it (the song re-pitches live, as on a record).
+    pub speed: f64,
+    /// Loudest output per side since the meters last looked.
+    pub peak: [f32; 2],
     pub start: usize,
     pub end: usize,
     pub playing: bool,
@@ -30,8 +58,10 @@ pub struct Player {
 impl Player {
     pub fn new() -> Player {
         let shared = Arc::new(Mutex::new(Shared {
-            audio: Arc::new(Audio { rate: 44100, channels: vec![Vec::new()] }),
+            source: Source::Buffer(Arc::new(Audio { rate: 44100, channels: vec![Vec::new()] })),
             pos: 0.0,
+            speed: 1.0,
+            peak: [0.0; 2],
             start: 0,
             end: 0,
             playing: false,
@@ -47,9 +77,17 @@ impl Player {
     }
 
     pub fn set_audio(&self, audio: Arc<Audio>) {
+        self.set_source(Source::Buffer(audio));
+    }
+
+    pub fn set_song(&self, song: Arc<Song>) {
+        self.set_source(Source::Song(song));
+    }
+
+    fn set_source(&self, source: Source) {
         let mut s = self.shared.lock().unwrap();
-        let n = audio.frames();
-        s.audio = audio;
+        let n = source.frames();
+        s.source = source;
         s.end = s.end.min(n);
         s.start = s.start.min(s.end);
         if s.pos as usize >= s.end {
@@ -60,7 +98,7 @@ impl Player {
 
     pub fn play(&self, start: usize, end: usize, looping: bool) {
         let mut s = self.shared.lock().unwrap();
-        let n = s.audio.frames();
+        let n = s.source.frames();
         let end = end.min(n);
         if start >= end {
             return;
@@ -90,6 +128,26 @@ impl Player {
 
     pub fn position(&self) -> usize {
         self.shared.lock().unwrap().pos as usize
+    }
+
+    /// Play the song this much faster (a tempo being dragged in; see `Shared::speed`).
+    pub fn set_speed(&self, speed: f64) {
+        self.shared.lock().unwrap().speed = speed;
+    }
+
+    /// The song was laid out again at a new tempo: frame positions scale by `r` and the speed
+    /// goes back to 1, so the playhead stays on the same beat.
+    pub fn rescale(&self, r: f64) {
+        let mut s = self.shared.lock().unwrap();
+        s.pos *= r;
+        s.start = (s.start as f64 * r).round() as usize;
+        s.end = (s.end as f64 * r).round() as usize;
+        s.speed = 1.0;
+    }
+
+    /// The loudest output on each side since the last call (for the level meters).
+    pub fn take_peaks(&self) -> [f32; 2] {
+        std::mem::take(&mut self.shared.lock().unwrap().peak)
     }
 }
 
@@ -122,6 +180,7 @@ where
     let out_ch = config.channels as usize;
     let out_rate = config.sample_rate as f64;
     let mut xfeed = Crossfeed::new(out_rate);
+    let mut mix: Vec<[f32; 2]> = Vec::new();
     device
         .build_output_stream(
             config,
@@ -131,9 +190,17 @@ where
                     data.fill(T::from_sample(0.0));
                     return;
                 };
-                let step = s.audio.rate as f64 / out_rate;
+                let step = s.source.rate() as f64 / out_rate;
                 let crossfeed = s.crossfeed && out_ch >= 2;
-                for frame in data.chunks_mut(out_ch) {
+                // The song is mixed for the whole block up front.
+                let frames = data.len() / out_ch.max(1);
+                if mix.len() < frames {
+                    mix.resize(frames, [0.0; 2]);
+                }
+                if let (true, Source::Song(song)) = (s.playing, &s.source) {
+                    song.render(s.pos, step * s.speed, &mut mix[..frames]);
+                }
+                for (k, frame) in data.chunks_mut(out_ch).enumerate() {
                     if !s.playing {
                         xfeed.reset();
                         frame.fill(T::from_sample(0.0));
@@ -142,6 +209,10 @@ where
                     if s.pos >= s.end as f64 {
                         if s.looping && s.end > s.start {
                             s.pos = s.start as f64;
+                            // Mix from the top again for the rest of this block.
+                            if let Source::Song(song) = &s.source {
+                                song.render(s.pos, step * s.speed, &mut mix[k..frames]);
+                            }
                         } else {
                             s.playing = false;
                             s.pos = s.end as f64;
@@ -149,30 +220,36 @@ where
                             continue;
                         }
                     }
-                    let i0 = s.pos as usize;
-                    let t = (s.pos - i0 as f64) as f32;
-                    let audio = &s.audio;
-                    let last = audio.frames().saturating_sub(1);
-                    let i1 = (i0 + 1).min(last);
-                    let n_src = audio.num_channels();
-                    let sample = |c: usize| {
-                        if n_src == 0 || i0 > last {
-                            0.0
-                        } else {
-                            let ch = &audio.channels[c.min(n_src - 1)];
-                            ch[i0] * (1.0 - t) + ch[i1] * t
+                    let (l, r) = match &s.source {
+                        Source::Song(_) => (mix[k][0], mix[k][1]),
+                        Source::Buffer(audio) => {
+                            let i0 = s.pos as usize;
+                            let t = (s.pos - i0 as f64) as f32;
+                            let last = audio.frames().saturating_sub(1);
+                            let i1 = (i0 + 1).min(last);
+                            let n_src = audio.num_channels();
+                            let sample = |c: usize| {
+                                if n_src == 0 || i0 > last {
+                                    0.0
+                                } else {
+                                    let ch = &audio.channels[c.min(n_src - 1)];
+                                    ch[i0] * (1.0 - t) + ch[i1] * t
+                                }
+                            };
+                            (sample(0), sample(1))
                         }
                     };
-                    let heard = if crossfeed { Some(xfeed.process(sample(0), sample(1))) } else { None };
+                    s.peak = [s.peak[0].max(l.abs()), s.peak[1].max(r.abs())];
+                    let (l, r) = if crossfeed { xfeed.process(l, r) } else { (l, r) };
                     for (c, out) in frame.iter_mut().enumerate() {
-                        let v = match (heard, c) {
-                            (Some((l, _)), 0) => l,
-                            (Some((_, r)), 1) => r,
-                            _ => sample(c),
+                        let v = match c {
+                            0 => l,
+                            1 => r,
+                            _ => 0.0,
                         };
                         *out = T::from_sample(v.clamp(-1.0, 1.0));
                     }
-                    s.pos += step;
+                    s.pos += step * if matches!(s.source, Source::Song(_)) { s.speed } else { 1.0 };
                 }
             },
             |err| eprintln!("audio stream error: {err}"),

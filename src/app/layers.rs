@@ -2,6 +2,7 @@
 //! like layers in a picture editor.
 
 use super::*;
+use crate::engine;
 
 /// Length of the fade where one layer cuts off another mid-sound (5 ms at 44.1 kHz).
 const SWITCH_FADE_SECS: f64 = 0.005;
@@ -82,6 +83,36 @@ pub(super) fn flatten_clips(tracks: &[Track], resume: usize, cut: usize) -> Trac
     out
 }
 
+/// The song as the live engine plays it: the visible layers' clips, read straight from their
+/// audio (a re-pitched clip from its original, at the speed the tempo needs), and the plan of
+/// which layer is heard when.
+pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32) -> engine::Song {
+    let visible: Vec<&Track> = tracks.iter().filter(|t| !t.mute).collect();
+    let plan: Vec<Layer> = visible.iter().map(|t| Layer::of(t, Audio { rate, channels: Vec::new() })).collect();
+    let layers = visible
+        .iter()
+        .map(|t| engine::LayerSrc {
+            gain: t.gain,
+            clips: t.clips.iter().zip(crossfades(&t.clips)).filter(|(c, _)| c.len > 0).map(|(c, cross)| clip_src(c, cross, rate)).collect(),
+        })
+        .collect();
+    engine::Song { layers, pieces: pieces(&plan, rate), end, rate, master }
+}
+
+fn clip_src(c: &Clip, cross: (usize, usize), rate: u32) -> engine::ClipSrc {
+    let (audio, speed, frames) = match c.warp.as_ref().filter(|_| repitch_mode()) {
+        // Re-pitched live from the original, so a new tempo needs no re-render.
+        Some(w) => (w.source.clone(), w.tempo / w.bpm, (w.source.frames() as f64 * w.bpm / w.tempo).round() as usize),
+        None => (c.audio.clone(), 1.0, c.audio.frames()),
+    };
+    let looping = c.looping.then(|| c.loop_points.map(|(s, e)| (s.min(frames), e.min(frames))).filter(|(s, e)| e > s).unwrap_or((0, frames)));
+    let mut src = engine::ClipSrc { audio, speed, start: c.start, len: c.len, trim: c.trim, looping, frames, fades: (0, 0) };
+    let level = |t: usize| (0..2).map(|ch| src.sample_at(t, ch).abs()).fold(0.0f32, f32::max);
+    let (first, last) = (level(c.start), level(c.end() - 1));
+    src.fades = edge_fades_for(first, last, c.len, rate, cross);
+    src
+}
+
 /// For each layer, the spans hidden by visible layers above it (merged, in time order).
 pub(super) fn covered_above(tracks: &[Track]) -> Vec<Vec<(usize, usize)>> {
     let mut above: Vec<(usize, usize)> = Vec::new();
@@ -112,20 +143,14 @@ pub(super) fn switch_fade(rate: u32) -> usize {
     ((rate as f64 * SWITCH_FADE_SECS).round() as usize).max(1)
 }
 
-#[derive(Clone, Copy)]
-enum Ramp {
-    Full,
-    In,
-    Out,
-}
+pub(super) use crate::engine::Ramp;
 
-/// Flatten layers into what is heard. Where a layer cuts in over one that is still sounding, the
-/// one cut off fades out over a few ms; where a lower layer is uncovered mid-sound it fades in
-/// just before. Clips that start or end on their own keep their edges.
-pub(super) fn flatten(layers: &[Layer], rate: u32) -> Audio {
+/// Which layer is heard over each stretch, as (layer, from, to, ramp): the plan `flatten` mixes
+/// by, and that the live engine plays from. Where a layer cuts in over one that is still
+/// sounding, the one cut off fades out over a few ms; where a lower layer is uncovered
+/// mid-sound it fades in just before. Clips that start or end on their own keep their edges.
+pub(super) fn pieces(layers: &[Layer], rate: u32) -> Vec<(usize, usize, usize, Ramp)> {
     let segs = segments(layers);
-    let frames = segs.last().map_or(0, |s| s.1);
-    let channels = layers.iter().map(|l| l.audio.num_channels()).max().unwrap_or(1).max(1);
     let fade = switch_fade(rate);
     let mut pieces: Vec<(usize, usize, usize, Ramp)> = segs.iter().map(|&(s, e, o)| (o, s, e, Ramp::Full)).collect();
     for k in 1..segs.len() {
@@ -150,8 +175,16 @@ pub(super) fn flatten(layers: &[Layer], rate: u32) -> Audio {
             pieces.push((o, s - n, s, Ramp::In));
         }
     }
+    pieces
+}
+
+/// Flatten layers into what is heard, by the plan from `pieces` (for exports and groups; playback
+/// mixes the same plan live, see `engine`).
+pub(super) fn flatten(layers: &[Layer], rate: u32) -> Audio {
+    let frames = segments(layers).last().map_or(0, |s| s.1);
+    let channels = layers.iter().map(|l| l.audio.num_channels()).max().unwrap_or(1).max(1);
     let mut out = vec![vec![0.0f32; frames]; channels];
-    for (li, a, b, ramp) in pieces {
+    for (li, a, b, ramp) in pieces(layers, rate) {
         let l = &layers[li];
         if b <= a || l.audio.num_channels() == 0 || l.gain == 0.0 {
             continue;

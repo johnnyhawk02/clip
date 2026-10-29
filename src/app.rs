@@ -186,6 +186,8 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// The speed last handed to the player for a tempo still being dragged in.
+    live_speed: f64,
     /// Warped clips being re-stretched for a new tempo on another thread.
     stretching: Option<Receiver<(usize, f64, Arc<Audio>, Arc<Peaks>)>>,
     /// Dragging the tempo box: the tempo so far and pixels not yet turned into a step.
@@ -392,6 +394,7 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            live_speed: 1.0,
             stretching: None,
             tempo_drag: None,
             laid_out_tempo: 120.0,
@@ -548,7 +551,13 @@ impl App {
                 Some(a) => a,
                 None => return,
             },
-            View::Arrangement => Arc::new(self.mixdown()),
+            View::Arrangement => {
+                // The song is mixed live as it plays: just hand over what to play.
+                let song = layers::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain);
+                self.player.set_song(Arc::new(song));
+                self.play_audio = None;
+                return;
+            }
         };
         self.player.set_audio(play.clone());
         self.play_audio = Some(play);
@@ -1730,6 +1739,13 @@ impl eframe::App for App {
         }
         self.poll_loading();
         self.poll_stretch();
+        // A tempo being dragged in is heard straight away: the song re-pitches live until it's
+        // laid out for the new tempo.
+        let speed = if self.view == View::Arrangement && repitch_mode() { self.tempo / self.laid_out_tempo } else { 1.0 };
+        if speed != self.live_speed {
+            self.live_speed = speed;
+            self.player.set_speed(speed);
+        }
         // Warped clips follow the tempo once it's been set (not on every step of a drag).
         if self.view == View::Arrangement && !ui.ctx().input(|i| i.pointer.any_down()) {
             self.refit_warped();

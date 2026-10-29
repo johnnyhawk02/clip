@@ -6,6 +6,7 @@ mod app;
 mod audio;
 mod crossfeed;
 mod effects;
+mod engine;
 mod menu;
 mod player;
 mod project;

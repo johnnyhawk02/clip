@@ -190,6 +190,15 @@ impl App {
                     }
                     "openproj" => self.open_project(PathBuf::from(arg)),
                     "playhead" => self.arr_cursor = (arg.parse::<f64>().unwrap_or(0.0) * rate) as usize,
+                    "liveexport" => {
+                        // What the live engine plays, rendered start to end (to compare with export).
+                        let song = layers::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain);
+                        let mut out = vec![[0.0f32; 2]; song.end];
+                        song.render(0.0, 1.0, &mut out);
+                        let a = Audio { rate: song.rate, channels: vec![out.iter().map(|f| f[0]).collect(), out.iter().map(|f| f[1]).collect()] };
+                        let r = audio::save_wav(&a, Path::new(arg), WavFormat::Float32);
+                        self.status = format!("liveexport {arg}: {r:?}");
+                    }
                     "export" => {
                         let a = if self.view == View::Arrangement { Arc::new(self.mixdown()) } else { self.audio.clone().unwrap() };
                         let r = audio::save_wav(&a, Path::new(arg), self.wav_format);

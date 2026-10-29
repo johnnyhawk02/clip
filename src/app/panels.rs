@@ -127,18 +127,10 @@ impl App {
 
     /// Update the playback level meters (they follow the playhead and fall back smoothly).
     pub(super) fn update_meters(&mut self, ctx: &egui::Context) {
-        let n_ch = self.play_audio.as_ref().map_or(2, |a| a.num_channels().max(1));
-        self.meter.resize(n_ch, 0.0);
-        let playing = self.player.is_playing();
-        let pos = self.player.position();
-        for (c, m) in self.meter.iter_mut().enumerate() {
-            let now = match (&self.play_audio, playing) {
-                (Some(a), true) if pos < a.frames() => {
-                    let end = (pos + 2048).min(a.frames());
-                    a.channels[c][pos..end].iter().fold(0.0f32, |p, s| p.max(s.abs()))
-                }
-                _ => 0.0,
-            };
+        // What actually went out since the last frame, as the player measured it.
+        let peaks = self.player.take_peaks();
+        self.meter.resize(2, 0.0);
+        for (m, now) in self.meter.iter_mut().zip(peaks) {
             *m = now.max(*m * 0.85);
         }
         if self.meter.iter().any(|m| *m > 0.001) {
