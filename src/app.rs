@@ -1187,7 +1187,7 @@ impl eframe::App for App {
                 let detail_h = (body.height() * 0.42).clamp(150.0, 440.0);
                 let top = Rect::from_min_max(body.min, Pos2::new(body.right(), body.bottom() - detail_h));
                 let bottom = Rect::from_min_max(Pos2::new(body.left(), top.bottom()), body.max);
-                let side = Rect::from_min_max(bottom.min, Pos2::new(bottom.left() + 210.0, bottom.bottom()));
+                let side = Rect::from_min_max(bottom.min, Pos2::new(bottom.left() + 250.0, bottom.bottom()));
                 let wave = Rect::from_min_max(Pos2::new(side.right() + 1.0, bottom.top() + 1.0), bottom.max);
                 // The focus follows a click, as in Live: the song above, or the clip below.
                 if let Some(q) = ui.input(|i| i.pointer.press_origin().filter(|_| i.pointer.any_pressed())) {

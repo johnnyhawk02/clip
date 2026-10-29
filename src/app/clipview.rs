@@ -21,6 +21,7 @@ impl App {
         let mut bpm = c.warp.as_ref().map(|w| w.bpm);
         let mut gain_db = 20.0 * c.gain.max(1e-4).log10();
         let mut toggle = None;
+        let mut pitch: Option<i32> = None;
         let mut active = false;
         // Which values the person changed this frame (only those are applied, so rounding never
         // nudges the others).
@@ -44,6 +45,17 @@ impl App {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
                             }
                             resp.on_hover_text("The clip's own tempo");
+                        }
+                        // ×2 ÷2: for a loop whose tempo was read at double or half speed.
+                        if let Some(b) = bpm.as_mut() {
+                            if ui.small_button("×2").on_hover_text("Double the clip's tempo").clicked() {
+                                *b = (*b * 2.0).min(400.0);
+                                bpm_set = true;
+                            }
+                            if ui.small_button("÷2").on_hover_text("Halve the clip's tempo").clicked() {
+                                *b = (*b / 2.0).max(20.0);
+                                bpm_set = true;
+                            }
                         }
                 });
                 ui.horizontal(|ui| {
@@ -87,6 +99,19 @@ impl App {
                     }
                 });
                 ui.horizontal(|ui| {
+                    small(ui, "Pitch");
+                    if ui.small_button("−").on_hover_text("Down a semitone").clicked() {
+                        pitch = Some(c.transpose - 1);
+                    }
+                    ui.label(egui::RichText::new(format!("{:+} st", c.transpose)).color(INK));
+                    if ui.small_button("+").on_hover_text("Up a semitone").clicked() {
+                        pitch = Some(c.transpose + 1);
+                    }
+                    if c.transpose != 0 && ui.small_button("0").on_hover_text("Back to the original pitch").clicked() {
+                        pitch = Some(0);
+                    }
+                });
+                ui.horizontal(|ui| {
                     small(ui, "Gain");
                     ui.spacing_mut().slider_width = 130.0;
                     let resp = ui.add(egui::Slider::new(&mut gain_db, -24.0..=12.0).show_value(false)).on_hover_text(format!("{gain_db:+.1} dB (double-click for 0 dB)"));
@@ -98,6 +123,11 @@ impl App {
                 });
             });
         });
+        if let Some(semis) = pitch.map(|s| s.clamp(-24, 24)) {
+            self.push_undo("Transpose");
+            self.set_transpose((t, ci), semis);
+            return;
+        }
         if let Some(a) = toggle {
             let ctx = ui.ctx().clone();
             self.run(a, &ctx);

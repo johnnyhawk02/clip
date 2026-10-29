@@ -25,6 +25,10 @@ pub(super) struct Clip {
     pub(super) looping: bool,
     /// A warped clip plays its source audio stretched to the song tempo (keeping its pitch),
     /// as in Ableton; `audio` is then the stretched version.
+    /// Transposition in semitones from the Clip View (keeps the length), and the audio from
+    /// before it, to go back to. Baked in when the project is saved.
+    pub(super) transpose: i32,
+    pub(super) untransposed: Option<Arc<Audio>>,
     /// Off (0 key, as Live): kept in place but silent, so the layer below shows through.
     pub(super) active: bool,
     /// Fades drawn with the clip's corner handles (frames), as in Live.
@@ -153,7 +157,7 @@ impl Clip {
     pub(super) fn new(name: impl Into<String>, audio: Arc<Audio>, start: usize) -> Clip {
         let peaks = Arc::new(Peaks::build(&audio));
         let len = audio.frames();
-        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None, looping: false, warp: None, origin: 0, gain: 1.0, fade_in: 0, fade_out: 0, active: true }
+        Clip { name: name.into(), audio, peaks, start, trim: 0, len, cues: Vec::new(), regions: Vec::new(), loop_points: None, group: None, looping: false, warp: None, origin: 0, gain: 1.0, fade_in: 0, fade_out: 0, active: true, transpose: 0, untransposed: None }
     }
 
     pub(super) fn end(&self) -> usize {
@@ -718,6 +722,31 @@ impl App {
         self.sel_clip = Some(p);
         self.sel_extra.clear();
         p
+    }
+
+    /// Clip View ▸ Pitch: transpose clip `p` to `semis` semitones, keeping its length and place.
+    pub(super) fn set_transpose(&mut self, (t, ci): (usize, usize), semis: i32) {
+        let Some(c) = self.tracks.get_mut(t).and_then(|t| t.clips.get_mut(ci)) else { return };
+        if c.transpose == semis || c.group.is_some() {
+            return;
+        }
+        let base = c.untransposed.get_or_insert_with(|| c.warp.as_ref().map_or(c.audio.clone(), |w| w.source.clone())).clone();
+        let new = if semis == 0 { base } else { Arc::new(effects::pitch_shift(&base, semis as f32)) };
+        c.transpose = semis;
+        match c.warp.as_mut() {
+            Some(w) => {
+                w.source = new;
+                w.source_peaks = Arc::new(Peaks::build(&w.source));
+                let (audio, peaks) = stretched(&w.source, w.bpm / w.tempo, repitch_mode());
+                (c.audio, c.peaks) = (audio, peaks);
+            }
+            None => {
+                c.peaks = Arc::new(Peaks::build(&new));
+                c.audio = new;
+            }
+        }
+        self.dirty = true;
+        self.refresh_playback();
     }
 
     /// Duplicate the selected clip, placing the copy right after it (as in Ableton).
