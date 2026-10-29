@@ -15,6 +15,13 @@ codesign --force --deep -s - "$APP"
 # The app was called Sound Edit before it became PhotoSound.
 rm -rf "/Applications/Sound Edit.app" "/Applications/PhotoSound.app"
 cp -R "$APP" /Applications/
+# Leave no copies in the build folder, or Spotlight lists them next to the installed app.
+LSREG=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+for old in target/release/bundle/*/*.app; do
+  $LSREG -u "$old" 2>/dev/null || true
+  rm -rf "$old"
+done
+touch target/.metadata_never_index
 # Tell Launch Services about the document types.
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "/Applications/PhotoSound.app" 2>/dev/null || true
 echo "Installed /Applications/PhotoSound.app"
