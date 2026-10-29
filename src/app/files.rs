@@ -261,10 +261,10 @@ impl App {
                 .map(|t| TrackData {
                     name: t.name.clone(),
                     gain: t.gain,
-                    pan: t.pan,
+                    pan: 0.0,
                     color: t.color,
                     mute: t.mute,
-                    solo: t.solo,
+                    solo: false,
                     clips: t
                         .clips
                         .iter()
@@ -337,7 +337,7 @@ impl App {
             data.iter()
                 .map(|t| {
                     let mut track = Track::new(t.name.clone());
-                    (track.gain, track.pan, track.color, track.mute, track.solo) = (t.gain, t.pan, t.color, t.mute, t.solo);
+                    (track.gain, track.color, track.mute) = (t.gain, t.color, t.mute);
                     for c in &t.clips {
                         let a = c.audio.and_then(|i| audio.get(i).cloned()).unwrap_or_else(|| Arc::new(Audio { rate, channels: vec![Vec::new()] }));
                         let mut clip = Clip::new(c.name.clone(), a, c.start);
@@ -479,39 +479,6 @@ impl App {
 
     // ---------- editing ----------
 
-    /// Save each region as its own file, named after the region.
-    /// File ▸ Export Stems: one WAV per track (with its volume and pan), all starting at the
-    /// beginning and all the same length, so they line up when dropped into another DAW.
-    pub(super) fn export_stems(&mut self) {
-        let tracks = self.song_tracks();
-        if tracks.is_empty() {
-            return;
-        }
-        let Some(dir) = rfd::FileDialog::new().set_title(format!("Choose a folder for {} stems", tracks.len())).pick_folder() else { return };
-        match self.write_stems(&tracks, &dir) {
-            Ok(n) => self.status = format!("Exported {n} stems to {}", dir.display()),
-            Err(e) => self.status = format!("Couldn't export stems: {e}"),
-        }
-    }
-
-    pub(super) fn write_stems(&self, tracks: &[Track], dir: &Path) -> Result<usize, String> {
-        let rate = self.rate();
-        let len = tracks.iter().flat_map(|t| t.clips.iter().map(|c| c.end())).max().unwrap_or(0);
-        for (i, t) in tracks.iter().enumerate() {
-            let rendered = self.render_track(t);
-            let mut stem = effects::mix_panned(&[(&rendered, t.gain, t.pan)], rate);
-            // Pad to the full length so every stem lines up end to end too.
-            let channels = stem.num_channels().max(2);
-            stem = effects::convert_channels(&stem, channels);
-            for c in &mut stem.channels {
-                c.resize(len, 0.0);
-            }
-            let clean: String = t.name.chars().map(|c| if c.is_alphanumeric() || " -_".contains(c) { c } else { '_' }).collect();
-            audio::save_wav(&stem, &dir.join(format!("{:02} {}.wav", i + 1, clean.trim())), self.wav_format)?;
-        }
-        Ok(tracks.len())
-    }
-
     /// File ▸ Export Ableton Live Set: a "<name> Project" folder holding a .als set (one audio
     /// track per track, clips in place, loops, tempo) and the samples it plays.
     pub(super) fn export_ableton(&mut self) {
@@ -608,7 +575,7 @@ impl App {
                     sample_beats: src.frames() as f64 / rate as f64 * c.warp.as_ref().map_or(self.tempo, |w| w.bpm) / 60.0,
                 });
             }
-            live.push(ableton::LiveTrack { name: t.name.clone(), color, gain: t.gain, pan: t.pan, mute: t.mute, solo: t.solo, clips });
+            live.push(ableton::LiveTrack { name: t.name.clone(), color, gain: t.gain, pan: 0.0, mute: t.mute, solo: false, clips });
         }
         let als = dir.join(format!("{name}.als"));
         ableton::write(&als, self.tempo, self.beats_per_bar, &live)?;

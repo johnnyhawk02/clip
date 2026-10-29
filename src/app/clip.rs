@@ -360,17 +360,14 @@ pub(super) struct Track {
     pub(super) clips: Vec<Clip>,
     /// Linear volume (1 = unchanged).
     pub(super) gain: f32,
-    /// -1 (left) .. 1 (right).
-    pub(super) pan: f32,
     /// Index into `TRACK_COLORS` (0 is the default grey).
     pub(super) color: usize,
     pub(super) mute: bool,
-    pub(super) solo: bool,
 }
 
 impl Track {
     pub(super) fn new(name: impl Into<String>) -> Track {
-        Track { name: name.into(), clips: Vec::new(), gain: 1.0, pan: 0.0, color: 0, mute: false, solo: false }
+        Track { name: name.into(), clips: Vec::new(), gain: 1.0, color: 0, mute: false }
     }
 }
 
@@ -598,7 +595,6 @@ impl App {
                 None => {
                     let mut nt = self.tracks[t].clone();
                     nt.clips.clear();
-                    nt.solo = false;
                     inner.push(nt);
                     track_of.push((t, inner.len() - 1));
                     inner.len() - 1

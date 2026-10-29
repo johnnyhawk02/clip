@@ -232,7 +232,6 @@ impl App {
         let Some(t) = self.tracks.get(self.active) else { return };
         let mut t = t.clone();
         t.name = format!("{} copy", t.name);
-        t.solo = false;
         self.add_track(t, "Duplicate Track");
     }
 

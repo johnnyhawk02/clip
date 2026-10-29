@@ -77,7 +77,6 @@ pub enum Action {
     DeleteTrack,
     MixDown,
     MuteTrack,
-    SoloTrack,
     NextTrack,
     PrevTrack,
     Delay,
@@ -94,7 +93,6 @@ pub enum Action {
     RulerTimecode,
     ShowSpectrum,
     BatchConvert,
-    MixDialog,
     OffsetTrack,
     TrackColor,
     LayerUp,
@@ -141,7 +139,6 @@ pub enum Action {
     DockPalette,
     CollapseClip,
     CollapseTrack,
-    ExportStems,
     ExportAbleton,
     AutoArrange,
     PrevVariation,
@@ -160,14 +157,14 @@ pub const ALL: &[Action] = &[
     Smooth, NoiseGate, Pitch, Tempo, Speed, ToMono, Split, PlayPause, Stop, Loop, GoStart, GoEnd,
     ZoomIn, ZoomOut, ZoomSel, ZoomFit, ZoomBack, Crossfeed, NarrowGrid, WidenGrid, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
     ShowControls, ShowInfo, Convert, Equalizer, Envelope, Bender, Record, AddCue, NextCue, PrevCue,
-    ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, SoloTrack, NextTrack,
-    PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, LayerUp, LayerDown, MergeDown, Preferences, ShowRegions, Dither, CutGaps,
+    ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, NextTrack,
+    PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, OffsetTrack, TrackColor, LayerUp, LayerDown, MergeDown, Preferences, ShowRegions, Dither, CutGaps,
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
     GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
     ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp, SliceClip, ReverseClip,
     MangleShuffle, MangleReverse, MangleSwap, MangleStutter, MangleRandomReverse, MangleDropOut, MangleBBCut, MangleAgain, DockPalette,
     MangleCutHouse, MangleCutHipHop, MangleCutDembow, MangleCutFootwork, MangleCutTrap, MangleCutBreakcore, MangleCutHalftime,
-    ExportStems, ExportAbleton, AutoArrange, PrevVariation, NextVariation, SwapSection, ShowPool, AddToPool,
+    ExportAbleton, AutoArrange, PrevVariation, NextVariation, SwapSection, ShowPool, AddToPool,
 ];
 
 pub enum Item {
@@ -327,7 +324,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | SoloTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | ShowPool | Crossfeed | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
+            || matches!(self, Loop | MuteTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | ShowPool | Crossfeed | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues)
     }
 
     pub fn label(self) -> &'static str {
@@ -438,7 +435,6 @@ impl Action {
             DeleteTrack => "Delete Layer",
             MixDown => "Flatten Layers",
             MuteTrack => "Hide Layer",
-            SoloTrack => "Solo Track",
             NextTrack => "Next Layer",
             PrevTrack => "Previous Layer",
             Delay => "Delay…",
@@ -450,14 +446,12 @@ impl Action {
             ClearLoop => "Clear Loop",
             AddRegion => "Region from Selection",
             ExportRegions => "Export Regions…",
-            ExportStems => "Export Stems…",
             ExportAbleton => "Export Ableton Live Set…",
             RulerTime => "Minutes:Seconds",
             RulerSamples => "Samples",
             RulerTimecode => "Timecode (30 fps)",
             ShowSpectrum => "Spectrum",
             BatchConvert => "Batch Convert…",
-            MixDialog => "Mix…",
             OffsetTrack => "Offset Layer…",
             TrackColor => "Next Layer Colour",
             LayerUp => "Move Layer Up",

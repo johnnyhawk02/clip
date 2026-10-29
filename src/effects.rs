@@ -467,12 +467,6 @@ pub fn spectrum(a: &Audio, start: usize, size: usize) -> Vec<f32> {
     (0..size / 2).map(|k| 20.0 * ((re[k] * re[k] + im[k] * im[k]).sqrt() * 4.0 / size as f32).max(1e-7).log10()).collect()
 }
 
-/// Equal-power pan gains (left, right) for pan -1 (left) .. 1 (right).
-pub fn pan_gains(pan: f32) -> (f32, f32) {
-    let a = (pan.clamp(-1.0, 1.0) + 1.0) * PI / 4.0;
-    (a.cos() * std::f32::consts::SQRT_2, a.sin() * std::f32::consts::SQRT_2)
-}
-
 pub fn noise(rate: u32, channels: usize, secs: f32, level_db: f32) -> Audio {
     let n = (secs * rate as f32) as usize;
     let amp = db_to_gain(level_db);
@@ -495,35 +489,6 @@ pub fn noise(rate: u32, channels: usize, secs: f32, level_db: f32) -> Audio {
 pub fn silence(rate: u32, channels: usize, secs: f32) -> Audio {
     let n = (secs * rate as f32) as usize;
     Audio { rate, channels: vec![vec![0.0; n]; channels.max(1)] }
-}
-
-/// Mix several sounds (each with a linear gain) into one. All must share a sample rate. The
-/// result is as long as the longest input and has as many channels as the widest one; mono
-/// inputs are spread across every channel.
-/// Each input has a pan (-1 left .. 1 right); any panned input makes the result stereo.
-pub fn mix_panned(inputs: &[(&Audio, f32, f32)], rate: u32) -> Audio {
-    let frames = inputs.iter().map(|(a, _, _)| a.frames()).max().unwrap_or(0);
-    let widest = inputs.iter().map(|(a, _, _)| a.num_channels()).max().unwrap_or(1).max(1);
-    let channels = if inputs.iter().any(|(_, _, p)| *p != 0.0) { widest.max(2) } else { widest };
-    let mut out = vec![vec![0.0f32; frames]; channels];
-    for &(a, gain, pan) in inputs {
-        if a.num_channels() == 0 || gain == 0.0 {
-            continue;
-        }
-        let (pl, pr) = if pan != 0.0 { pan_gains(pan) } else { (1.0, 1.0) };
-        for (ci, o) in out.iter_mut().enumerate() {
-            let src = &a.channels[ci.min(a.num_channels() - 1)];
-            let g = gain * match ci {
-                0 => pl,
-                1 => pr,
-                _ => 1.0,
-            };
-            for (d, s) in o.iter_mut().zip(src) {
-                *d += s * g;
-            }
-        }
-    }
-    Audio { rate, channels: out }
 }
 
 /// Mix `clip` into `base` starting at frame `at`, at `level` (linear). Extends the file if
@@ -822,18 +787,6 @@ mod tests {
     }
 
     #[test]
-    fn mixes_tracks() {
-        let a = Audio { rate: 10, channels: vec![vec![0.5; 4]] };
-        let b = Audio { rate: 10, channels: vec![vec![0.25; 6], vec![-0.25; 6]] };
-        let m = mix_panned(&[(&a, 1.0, 0.0), (&b, 2.0, 0.0)], 10);
-        assert_eq!(m.frames(), 6);
-        assert_eq!(m.num_channels(), 2);
-        assert_eq!(m.channels[0][0], 1.0);
-        assert_eq!(m.channels[1][0], 0.0);
-        assert_eq!(m.channels[1][5], -0.5);
-    }
-
-    #[test]
     fn new_effects() {
         let a = sine(1.0);
         let n = a.frames();
@@ -854,10 +807,6 @@ mod tests {
         let peak_bin = spec.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap().0;
         assert_eq!(peak_bin, 128);
         assert!((spec[128] - 0.0).abs() < 3.0, "{}", spec[128]);
-        let (l, r) = pan_gains(-1.0);
-        assert!(r.abs() < 1e-5 && (l - std::f32::consts::SQRT_2).abs() < 1e-5);
-        let m = mix_panned(&[(&silence(10, 1, 1.0), 1.0, 0.5)], 10);
-        assert_eq!(m.num_channels(), 2);
     }
 
     #[test]

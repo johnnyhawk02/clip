@@ -14,7 +14,7 @@ impl App {
                 Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Dither | Action::AutoGain => true,
                 Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed => true,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
-                Action::Export | Action::ExportStems | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
+                Action::Export | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
                 Action::Delete => has_clip || self.time_sel.is_some(),
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy => has_clip,
                 Action::SplitClip => doc,
@@ -40,9 +40,9 @@ impl App {
                 Action::Undo => !self.undo.is_empty(),
                 Action::Redo => !self.redo.is_empty(),
                 Action::PlayPause | Action::Stop | Action::GoStart | Action::GoEnd | Action::ZoomIn | Action::ZoomOut | Action::ZoomFit => doc,
-                Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack | Action::SoloTrack => doc,
+                Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack => doc,
                 Action::TrackColor | Action::OffsetTrack => doc,
-                Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack | Action::MixDialog => self.tracks.len() > 1,
+                Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack => self.tracks.len() > 1,
                 Action::LayerUp => self.active > 0,
                 Action::LayerDown => self.active + 1 < self.tracks.len(),
                 Action::MergeDown => self.can_merge_down(),
@@ -61,7 +61,7 @@ impl App {
             Action::AutoWarp => return true,
             Action::AutoArrange | Action::PrevVariation | Action::NextVariation | Action::SwapSection | Action::AddToPool => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
-            Action::MixDialog | Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown => return false,
+            Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown => return false,
             _ => {}
         }
         let has = self.audio.is_some();
@@ -71,8 +71,8 @@ impl App {
             Action::New | Action::Open | Action::Quit | Action::Preferences => true,
             Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop | Action::Crossfeed => true,
             Action::ShowCues | Action::Record => true,
-            Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack | Action::SoloTrack => has,
-            Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack | Action::MixDialog => has && self.tracks.len() > 1,
+            Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack => has,
+            Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack => has && self.tracks.len() > 1,
             Action::SetLoop | Action::AddRegion => sel,
             Action::ClearLoop => has && self.loop_points.is_some(),
             Action::ExportRegions => has && !self.regions.is_empty(),
@@ -136,7 +136,6 @@ impl App {
             Action::LoopClip => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.looping),
             Action::Dither => audio::DITHER.load(std::sync::atomic::Ordering::Relaxed),
             Action::AutoGain => self.auto_gain,
-            Action::SoloTrack => self.tracks.get(self.active).is_some_and(|t| t.solo),
             _ => false,
         }
     }
@@ -432,12 +431,6 @@ impl App {
                 self.dirty = true;
                 self.refresh_playback();
             }
-            Action::SoloTrack => {
-                let t = &mut self.tracks[self.active];
-                t.solo = !t.solo;
-                self.dirty = true;
-                self.refresh_playback();
-            }
             Action::NextTrack => self.set_active((self.active + 1) % self.tracks.len()),
             Action::Delay => self.dialog = Some(Dialog::Delay),
             Action::Emphasize => self.dialog = Some(Dialog::Emphasize),
@@ -453,7 +446,6 @@ impl App {
             }
             Action::AddRegion => self.add_region(),
             Action::ExportRegions => self.export_regions(),
-            Action::ExportStems => self.export_stems(),
             Action::ExportAbleton => self.export_ableton(),
             Action::RulerTime => self.ruler = RulerUnits::Time,
             Action::RulerSamples => self.ruler = RulerUnits::Samples,
@@ -476,7 +468,6 @@ impl App {
                 self.refresh_playback();
             }
             Action::BatchConvert => self.show_batch = true,
-            Action::MixDialog => self.mix_include = Some(vec![true; self.tracks.len()]),
             Action::LayerUp => self.move_layer(true),
             Action::LayerDown => self.move_layer(false),
             Action::Preferences => self.prefs_open = Some((self.phrase_bars, repitch_mode())),

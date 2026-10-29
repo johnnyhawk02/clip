@@ -180,10 +180,6 @@ impl App {
                         let r = self.write_ableton(&self.song_tracks(), p, "Test");
                         self.status = format!("als {arg}: {r:?}");
                     }
-                    "stems" => {
-                        let r = self.write_stems(&self.song_tracks(), Path::new(arg));
-                        self.status = format!("stems {arg}: {r:?}");
-                    }
                     "saveproj" => {
                         let r = self.write_project(Path::new(arg));
                         self.status = format!("saveproj {arg}: {r:?}");

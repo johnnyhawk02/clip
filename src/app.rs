@@ -302,9 +302,6 @@ pub struct App {
     spectrum_cache: Option<((usize, Sel), Vec<Vec<f32>>)>,
     show_batch: bool,
     batch: Batch,
-    /// Mix dialog: which tracks to include (open while Some), and whether to add a new track.
-    mix_include: Option<Vec<bool>>,
-    mix_to_new: bool,
     /// Turn mixes down when they would clip.
     auto_gain: bool,
     /// Warp clips whose names give their tempo when they're imported.
@@ -486,8 +483,6 @@ impl App {
             spectrum_cache: None,
             show_batch: false,
             batch: Batch::default(),
-            mix_include: None,
-            mix_to_new: true,
             auto_gain: true,
             auto_warp: true,
             cue_drag: None,
@@ -1047,7 +1042,7 @@ impl eframe::App for App {
         let title = if self.tracks.is_empty() { "PhotoSound".into() } else { format!("{name}{} — PhotoSound", if self.dirty { " (edited)" } else { "" }) };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        let modal_open = self.pending.is_some() || self.dialog.is_some() || self.curve.is_some() || self.mix_include.is_some();
+        let modal_open = self.pending.is_some() || self.dialog.is_some() || self.curve.is_some();
         for a in self.menu.poll() {
             if !modal_open {
                 self.run(a, &ctx);
@@ -1130,7 +1125,6 @@ impl eframe::App for App {
         if self.show_batch {
             self.batch_window(&ctx);
         }
-        self.mix_dialog(&ctx);
         self.prefs_dialog(&ctx);
 
         // Highlight when a file is dragged over the window.
