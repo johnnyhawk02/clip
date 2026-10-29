@@ -49,6 +49,7 @@ impl App {
                 Action::LayerUp => self.active > 0,
                 Action::DuplicateTime | Action::DeleteTime | Action::InsertTime | Action::CopyTime | Action::CutTime => self.time_sel.is_some(),
                 Action::PasteTime => self.time_clip.is_some(),
+                Action::Trim => self.time_sel.is_some(),
                 Action::LayerDown => self.active + 1 < self.tracks.len(),
                 Action::MergeDown => self.can_merge_down(),
                 _ => false,
@@ -159,8 +160,14 @@ impl App {
         if !self.enabled(a) {
             return;
         }
-        if self.view == View::Arrangement && self.time_sel.is_some() && a == Action::DuplicateClip {
-            return self.duplicate_time_sel();
+        if self.view == View::Arrangement && self.time_sel.is_some() {
+            // With a time selection, ⌘D duplicates it, ⇧⌘J crops to it and ⌘J consolidates it.
+            match a {
+                Action::DuplicateClip => return self.duplicate_time_sel(),
+                Action::Trim => return self.crop_time_sel(),
+                Action::CollapseClip => return self.consolidate_time_sel(),
+                _ => {}
+            }
         }
         if self.view == View::Arrangement && self.time_sel.is_some() && on_time_sel(a) {
             return self.run_on_time_sel(a, ctx);

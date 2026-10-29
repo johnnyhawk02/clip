@@ -338,4 +338,55 @@ impl App {
         self.refresh_playback();
         self.status = if on { "Clip on".into() } else { "Clip off — it stays in place, silent (0 switches it back on)".into() };
     }
+
+    /// ⇧⌘J with a time selection (Live's Crop): the clips it touches are cut down to the part
+    /// inside it; other clips stay.
+    pub(super) fn crop_time_sel(&mut self) {
+        let Some(((s, e), layers)) = self.time_sel else { return };
+        self.push_undo("Crop");
+        for t in self.sel_layers(layers) {
+            let clips = std::mem::take(&mut self.tracks[t].clips);
+            self.tracks[t].clips = clips
+                .into_iter()
+                .map(|c| {
+                    if c.start >= e || c.end() <= s {
+                        return c;
+                    }
+                    let (a, b) = (s.max(c.start), e.min(c.end()));
+                    let mut piece = c.clone();
+                    piece.trim += a - c.start;
+                    (piece.start, piece.len) = (a, b - a);
+                    piece
+                })
+                .collect();
+        }
+        self.finish_time_edit("Cropped the clips to the selection — ⌘Z to undo");
+    }
+
+    /// ⌘J with a time selection (Live's Consolidate): each layer's stretch becomes one new clip,
+    /// rendered as heard (fades, gain), warped to follow the tempo.
+    pub(super) fn consolidate_time_sel(&mut self) {
+        let Some(((s, e), layers)) = self.time_sel else { return };
+        self.push_undo("Consolidate");
+        let rate = self.rate();
+        for t in self.sel_layers(layers) {
+            let mut part = Track::new("part");
+            part.clips = self.copy_span(t, (s, e));
+            if part.clips.iter().all(|c| !c.active) {
+                continue;
+            }
+            let rendered = self.render_track(&part);
+            let mut audio = rendered.slice(s.min(rendered.frames()), e.min(rendered.frames()));
+            if audio.frames() < e - s {
+                audio = audio.insert(audio.frames(), audio.frames(), &effects::silence(rate, audio.num_channels().max(1), (e - s - audio.frames()) as f32 / rate as f32));
+            }
+            let name = self.tracks[t].clips.iter().find(|c| c.start < e && c.end() > s).map_or("Consolidated".to_string(), |c| c.name.clone());
+            let mut clip = Clip::new(name, Arc::new(audio), s);
+            clip.len = e - s;
+            clip.warp = Some(Warp { bpm: self.tempo, source: clip.audio.clone(), source_peaks: clip.peaks.clone(), tempo: self.tempo, repitch: repitch_mode() });
+            self.clear_span(t, (s, e));
+            self.tracks[t].clips.push(clip);
+        }
+        self.finish_time_edit("Consolidated the selection into one clip per layer — ⌘Z to undo");
+    }
 }
