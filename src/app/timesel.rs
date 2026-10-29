@@ -213,4 +213,48 @@ impl App {
         self.refresh_playback();
         self.status = "Quantized to the grid — ⌘Z to undo".into();
     }
+
+    /// Edit ▸ Copy Time (⇧⌘C): copy the selected stretch of every layer.
+    pub(super) fn copy_time(&mut self) {
+        let Some(((s, e), _)) = self.time_sel else { return };
+        let layers = (0..self.tracks.len())
+            .map(|t| {
+                self.copy_span(t, (s, e))
+                    .into_iter()
+                    .map(|mut c| {
+                        c.start -= s;
+                        c
+                    })
+                    .collect()
+            })
+            .collect();
+        self.time_clip = Some((e - s, layers));
+        self.status = "Copied the selected time — ⇧⌘V pastes it at the insert marker".into();
+    }
+
+    /// Edit ▸ Cut Time (⇧⌘X): copy the selected time, then take it out and close the gap.
+    pub(super) fn cut_time(&mut self) {
+        self.copy_time();
+        self.delete_time();
+        if let Some(u) = self.undo.last_mut() {
+            u.label = "Cut Time";
+        }
+    }
+
+    /// Edit ▸ Paste Time (⇧⌘V): insert the copied time at the selection's start (or the insert
+    /// marker), pushing everything after it later, and select it.
+    pub(super) fn paste_time(&mut self) {
+        let Some((len, layers)) = self.time_clip.clone() else { return };
+        let at = self.time_sel.map_or(self.arr_cursor, |((s, _), _)| s);
+        self.push_undo("Paste Time");
+        self.shift_from(at, len as i64);
+        for (t, pieces) in layers.into_iter().enumerate().take(self.tracks.len()) {
+            self.tracks[t].clips.extend(pieces.into_iter().map(|mut c| {
+                c.start += at;
+                c
+            }));
+        }
+        self.time_sel = Some(((at, at + len), (0, self.tracks.len().saturating_sub(1))));
+        self.finish_time_edit("Pasted the time, pushing the rest later");
+    }
 }

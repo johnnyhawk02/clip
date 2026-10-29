@@ -47,7 +47,8 @@ impl App {
                 Action::TrackColor | Action::OffsetTrack => doc,
                 Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack => self.tracks.len() > 1,
                 Action::LayerUp => self.active > 0,
-                Action::DuplicateTime | Action::DeleteTime | Action::InsertTime => self.time_sel.is_some(),
+                Action::DuplicateTime | Action::DeleteTime | Action::InsertTime | Action::CopyTime | Action::CutTime => self.time_sel.is_some(),
+                Action::PasteTime => self.time_clip.is_some(),
                 Action::LayerDown => self.active + 1 < self.tracks.len(),
                 Action::MergeDown => self.can_merge_down(),
                 _ => false,
@@ -65,7 +66,7 @@ impl App {
             Action::AutoWarp => return true,
             Action::AutoArrange | Action::PrevVariation | Action::NextVariation | Action::SwapSection | Action::AddToPool => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
-            Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown | Action::DuplicateTime | Action::DeleteTime | Action::InsertTime | Action::AddLocator | Action::PrevLocator | Action::NextLocator => return false,
+            Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown | Action::DuplicateTime | Action::DeleteTime | Action::InsertTime | Action::CopyTime | Action::CutTime | Action::PasteTime | Action::AddLocator | Action::PrevLocator | Action::NextLocator => return false,
             _ => {}
         }
         let has = self.audio.is_some();
@@ -491,6 +492,9 @@ impl App {
                 self.refresh_playback();
             }
             Action::DuplicateTime => self.duplicate_time(),
+            Action::CopyTime => self.copy_time(),
+            Action::CutTime => self.cut_time(),
+            Action::PasteTime => self.paste_time(),
             Action::DeleteTime => self.delete_time(),
             Action::InsertTime => self.insert_time(),
             Action::Preferences => self.prefs_open = Some((self.phrase_bars, repitch_mode())),
