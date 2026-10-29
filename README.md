@@ -56,7 +56,8 @@ clips on the layers above to patch over parts of it.
   click.
 - Clips on a layer never overlap, as in Live: drop, paste or drag a clip onto another on the same
   layer and it cuts a gap in the one underneath the length of the dropped clip. (Stacking is what
-  layers are for.)
+  layers are for.) Dragging a clip's edge over its neighbour instead overlaps the two, and they
+  crossfade across the overlap (equal power), shown by an X.
 - Swap Section (⇧R, or Clip ▸ Auto Arrange ▸ Swap Section): click a clip and press ⇧R to replace it with a random section of the same length from the loop pool, in the same place. Press ⇧R again for another; ⌘Z undoes it.
 - The Loop Pool (View ▸ Panels ▸ Loop Pool, ⌘7) lists the loops in the song, warped to its tempo. Drag one onto a layer to add it there at the grid line you drop it on, or below the last layer for a new one. Auto Arrange and Swap Section draw from the same pool; Grouped clips count as loops too, and Clip ▸ Add to Pool (also on the right-click menu) puts any selected clip in as it is, trimmed or grouped. × takes a loop out of the pool and Add Loops from Song brings in new ones.
 - The Master strip under the layers holds the output volume (saved in the project, double-click to reset), its meters, and a headphone button for Headphone Crossfeed. Control ▸ Headphone Crossfeed makes headphones sound like speakers: each ear also hears a delayed, filtered share of the other side. The filters are measured from Johnny's CanOpener setting (a click through each side) and match it to within -100 dB. It only changes what you hear, never what you export, and it stays on between runs.
