@@ -179,6 +179,9 @@ pub struct App {
     /// Dragging the loop brace: where it was grabbed (frames), the range then, and which part
     /// (the whole brace moves, an end resizes).
     arr_loop_grab: Option<(f64, Sel, LoopGrab)>,
+    /// Dragging the arrangement ruler to zoom: the frame grabbed, the pointer's height then and
+    /// the view length then.
+    ruler_zoom: Option<(f64, f32, f64)>,
     /// Which track a right-click on empty lane space is for (None: the clip menu).
     ctx_menu_track: Option<usize>,
     grid: usize,
@@ -352,6 +355,7 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             arr_loop_grab: None,
+            ruler_zoom: None,
             ctx_menu_track: None,
             grid: 1,
             snap: true,
@@ -1202,7 +1206,7 @@ impl App {
                 }
                 Action::Loop => {
                     if self.arr_loop.is_none() {
-                        self.arr_loop = self.selected_span().or(Some((self.arr_cursor, self.arr_cursor + (self.bar_frames() * 4.0) as usize)));
+                        self.arr_loop = Some(self.whole_bars(self.selected_span().unwrap_or((self.arr_cursor, self.arr_cursor + (self.bar_frames() * 4.0) as usize))));
                     }
                     self.looping = !self.looping;
                     if self.player.is_playing() {
@@ -1214,7 +1218,7 @@ impl App {
                 Action::SetLoop => {
                     if let Some(span) = self.selected_span() {
                         self.push_undo("Set Loop");
-                        self.arr_loop = Some(span);
+                        self.arr_loop = Some(self.whole_bars(span));
                         self.looping = true;
                         self.dirty = true;
                     }

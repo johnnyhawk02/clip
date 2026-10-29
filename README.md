@@ -92,8 +92,9 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
 - **Loops:** Clip ▸ Loop Clip (⌥⌘L) makes a clip repeat its loop section — its loop points
   (set in the clip editor with Insert ▸ Set Loop to Selection) or the whole clip — for as long as
   you drag its right edge out. Each clip loops on its own; dotted lines show where it starts over.
-  For the arrangement, drag in the ruler to draw a loop range (a brace along the top of the ruler;
-  drag the brace to move the whole loop, or either end of it to resize)
+  For the arrangement, drag in the strip along the top of the ruler to draw a loop range (a black
+  brace; drag it to move the whole loop, or either end to resize). Loops are always whole bars.
+  Drag in the bar numbers below the strip to zoom (down zooms in, up zooms out, sideways scrolls)
   and turn Loop on or off with ⌘L or the loop button; playback then goes round that range. Insert ▸
   Set Loop to Selection in the arrangement sets it to the selected clips. Both are saved in the
   project.

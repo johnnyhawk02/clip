@@ -269,7 +269,7 @@ impl App {
     /// Per-layer controls beside each lane: name, show/hide, volume and colour.
     fn track_headers(&mut self, ui: &mut egui::Ui, header: Rect, n_tracks: usize, lane: &dyn Fn(usize) -> Rect) {
         // The whole column, including the corners beside the ruler and scroll bar.
-        let column = Rect::from_min_max(Pos2::new(header.left(), header.top() - RULER_H), Pos2::new(header.right(), header.bottom() + 15.0));
+        let column = Rect::from_min_max(Pos2::new(header.left(), header.top() - 22.0 - LOOP_H), Pos2::new(header.right(), header.bottom() + 15.0));
         ui.painter().rect_filled(column, 0.0, PANEL);
         ui.painter().line_segment([header.right_top(), header.right_bottom()], Stroke::new(1.0, LINE));
         let mut activate = None;
@@ -357,6 +357,14 @@ impl App {
 
     pub(super) fn bar_frames(&self) -> f64 {
         self.beat_frames() * self.beats_per_bar as f64
+    }
+
+    /// A span widened out to whole bars (at least one): loops never stop part-way through a bar.
+    pub(super) fn whole_bars(&self, (s, e): Sel) -> Sel {
+        let bar = self.bar_frames();
+        let bs = (s as f64 / bar + 1e-6).floor();
+        let be = (e as f64 / bar - 1e-6).ceil().max(bs + 1.0);
+        ((bs * bar) as usize, (be * bar) as usize)
     }
 
     /// The grid spacing in frames at the current zoom (`spp` = frames per pixel), if the grid is on.
@@ -507,7 +515,7 @@ impl App {
     pub(super) fn arrangement(&mut self, ui: &mut egui::Ui) {
         let full = ui.available_rect_before_wrap();
         let header_w = 150.0;
-        let ruler_h = 22.0;
+        let ruler_h = 22.0 + LOOP_H;
         let ruler = Rect::from_min_max(Pos2::new(full.left() + header_w, full.top()), Pos2::new(full.right(), full.top() + ruler_h));
         let scroll = Rect::from_min_max(Pos2::new(full.left() + header_w, full.bottom() - 15.0), full.max);
         // The master channel sits under the tracks, above the scroll bar.
@@ -567,62 +575,81 @@ impl App {
 
         let press = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos());
         let split_tool = self.tool == Tool::Split;
-        // Dragging in the ruler draws the arrangement's loop range (and turns Loop on). Grabbing
-        // the brace itself moves the whole loop, or one end of it near the ends.
+        // The ruler has two parts, as in Live. The strip along the top is for the loop: drag
+        // there to draw one, drag the brace to move it, or an end of it to resize. Loops are
+        // always whole bars. Below it, the bar numbers zoom: drag down to zoom in, up to zoom
+        // out, and sideways to scroll.
         let ruler_drag = press.is_some_and(|q| q.y < ruler.bottom());
+        let in_loop_strip = |q: Pos2| q.y < ruler.top() + LOOP_H;
         let brace_at = |q: Pos2| -> Option<LoopGrab> {
             let (ls, le) = self.arr_loop?;
             let (x0, x1) = (a.f_to_x(ls as f64, vs, vl), a.f_to_x(le as f64, vs, vl));
-            if q.y > ruler.top() + 12.0 || q.x < x0 - 4.0 || q.x > x1 + 4.0 {
+            if !in_loop_strip(q) || q.x < x0 - 4.0 || q.x > x1 + 4.0 {
                 return None;
             }
             let edge = 6.0f32.min((x1 - x0) / 3.0);
             Some(if q.x < x0 + edge { LoopGrab::Start } else if q.x > x1 - edge { LoopGrab::End } else { LoopGrab::Move })
         };
-        if let Some(g) = ui.input(|i| i.pointer.hover_pos()).filter(|_| self.clip_drag.is_none()).and_then(|q| brace_at(q)).or(self.arr_loop_grab.map(|g| g.2)) {
-            ui.ctx().set_cursor_icon(if g == LoopGrab::Move { egui::CursorIcon::Grab } else { egui::CursorIcon::ResizeHorizontal });
-        }
-        if resp.drag_started() && ruler_drag {
-            if let (Some(g), Some(range)) = (brace_at(press.unwrap()), self.arr_loop) {
-                self.arr_loop_grab = Some((x_to_f(press.unwrap().x, vs, vl), range, g));
+        if self.clip_drag.is_none() {
+            let hover = ui.input(|i| i.pointer.hover_pos()).filter(|q| ruler.contains(*q));
+            if let Some(g) = hover.and_then(|q| brace_at(q)).or(self.arr_loop_grab.map(|g| g.2)) {
+                ui.ctx().set_cursor_icon(if g == LoopGrab::Move { egui::CursorIcon::Grab } else { egui::CursorIcon::ResizeHorizontal });
+            } else if self.ruler_zoom.is_some() || hover.is_some_and(|q| !in_loop_strip(q)) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
             }
+        }
+        let bar = self.bar_frames();
+        let to_bar = |f: f64| ((f / bar).round().max(0.0) * bar) as usize;
+        let bar_n = bar.round() as usize;
+        if resp.drag_started() && ruler_drag {
+            let q = press.unwrap();
+            let f = x_to_f(q.x, vs, vl);
+            if !in_loop_strip(q) {
+                self.ruler_zoom = Some((f, q.y, vl));
+            } else if let (Some(g), Some(range)) = (brace_at(q), self.arr_loop) {
+                self.arr_loop_grab = Some((f, range, g));
+            } else {
+                self.arr_loop_drag = Some(to_bar(f));
+            }
+        }
+        if let (Some((anchor, y0, len0)), true, Some(q)) = (self.ruler_zoom, resp.dragged(), resp.interact_pointer_pos()) {
+            // The bar grabbed stays under the pointer while the zoom changes around it.
+            self.arr_view_len = len0 * ((y0 - q.y) as f64 / 80.0).exp();
+            self.arr_clamp();
+            self.arr_view_start = anchor - ((q.x - lanes.left()) / lanes.width()) as f64 * self.arr_view_len;
+            self.arr_clamp();
         }
         if let (Some((at, (ls, le), g)), true, Some(q)) = (self.arr_loop_grab, resp.dragged(), resp.interact_pointer_pos()) {
             let d = x_to_f(q.x, vs, vl) - at;
-            let moved = |f: usize| self.snap_to_grid((f as f64 + d).max(0.0), spp) as usize;
+            let moved = |f: usize| to_bar(f as f64 + d);
             let range = match g {
                 LoopGrab::Move => {
                     let s = moved(ls);
                     (s, s + (le - ls))
                 }
-                LoopGrab::Start => (moved(ls).min(le.saturating_sub(1)), le),
-                LoopGrab::End => (ls, moved(le).max(ls + 1)),
+                LoopGrab::Start => (moved(ls).min(le.saturating_sub(bar_n)), le),
+                LoopGrab::End => (ls, moved(le).max(ls + bar_n)),
             };
             self.arr_loop = Some(range);
         }
-        if resp.drag_stopped() && self.arr_loop_grab.take().is_some() {
-            self.dirty = true;
-            if self.player.is_playing() {
-                self.toggle_play();
-                self.toggle_play();
-            }
-        }
-        if resp.drag_started() && ruler_drag && self.arr_loop_grab.is_none() {
-            let f = x_to_f(press.unwrap().x, vs, vl);
-            self.arr_loop_drag = Some(self.snap_to_grid(f, spp) as usize);
-        }
         if let (Some(a), true, Some(q)) = (self.arr_loop_drag, resp.dragged(), resp.interact_pointer_pos()) {
-            let b = self.snap_to_grid(x_to_f(q.x, vs, vl), spp) as usize;
+            let f = x_to_f(q.x, vs, vl);
+            let b = to_bar(f);
+            // At least one bar, reaching the way the pointer went.
+            let b = if b != a { b } else if f < a as f64 { a.saturating_sub(bar_n) } else { a + bar_n };
             if b != a {
                 self.arr_loop = Some((a.min(b), a.max(b)));
                 self.looping = true;
             }
         }
-        if resp.drag_stopped() && self.arr_loop_drag.take().is_some() {
-            self.dirty = true;
-            if self.player.is_playing() {
-                self.toggle_play();
-                self.toggle_play();
+        if resp.drag_stopped() {
+            self.ruler_zoom = None;
+            if self.arr_loop_grab.take().is_some() || self.arr_loop_drag.take().is_some() {
+                self.dirty = true;
+                if self.player.is_playing() {
+                    self.toggle_play();
+                    self.toggle_play();
+                }
             }
         }
         if resp.drag_started() && !split_tool && !ruler_drag {
@@ -1018,7 +1045,7 @@ impl App {
                     painter.line_segment([Pos2::new(x, lanes.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.0, Color32::from_gray(line)));
                     let bar_no = (f / bar).round() as u64;
                     if on_bar && bar_no % label_every == 0 {
-                        painter.text(Pos2::new(x + 3.0, ruler.top() + 2.0), Align2::LEFT_TOP, (bar_no + 1).to_string(), FontId::proportional(11.0), MUTED);
+                        painter.text(Pos2::new(x + 3.0, ruler.top() + LOOP_H + 1.0), Align2::LEFT_TOP, (bar_no + 1).to_string(), FontId::proportional(11.0), MUTED);
                     }
                 }
                 k += 1;
@@ -1040,7 +1067,7 @@ impl App {
                 painter.line_segment([Pos2::new(x, ruler.bottom() - if major { 7.0 } else { 3.0 }), Pos2::new(x, ruler.bottom())], Stroke::new(1.0, MUTED));
                 if major {
                     painter.line_segment([Pos2::new(x, lanes.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.0, Color32::from_gray(242)));
-                    painter.text(Pos2::new(x + 3.0, ruler.top() + 2.0), Align2::LEFT_TOP, ruler_label(self.ruler, rate as u32, t, step), FontId::proportional(11.0), MUTED);
+                    painter.text(Pos2::new(x + 3.0, ruler.top() + LOOP_H + 1.0), Align2::LEFT_TOP, ruler_label(self.ruler, rate as u32, t, step), FontId::proportional(11.0), MUTED);
                 }
             }
             k += 1;
@@ -1050,7 +1077,7 @@ impl App {
             let (x0, x1) = (f_to_x(ls as f64, vs, vl).max(lanes.left()), f_to_x(le as f64, vs, vl).min(lanes.right()));
             if x1 > x0 {
                 let col = if self.looping { INK } else { Color32::from_gray(175) };
-                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, ruler.top() + 1.0), Pos2::new(x1, ruler.top() + 5.0)), 1.0, col);
+                painter.rect_filled(Rect::from_min_max(Pos2::new(x0, ruler.top() + 3.0), Pos2::new(x1, ruler.top() + LOOP_H - 3.0)), 2.0, col);
                 if self.looping {
                     painter.rect_filled(Rect::from_min_max(Pos2::new(x0, lanes.top()), Pos2::new(x1, lanes.bottom())), 0.0, Color32::from_black_alpha(8));
                 }
@@ -1124,10 +1151,13 @@ impl App {
         if let Some(q) = hover {
             let f = x_to_f(q.x, vs, vl) as usize;
             let text = if self.grid_frames(spp).is_some() { format!("{}  {}", self.fmt_bars(f), self.fmt_pos(f)) } else { self.fmt_pos(f) };
-            painter.text(Pos2::new(lanes.right() - 6.0, ruler.top() + 2.0), Align2::RIGHT_TOP, text, FontId::monospace(11.0), MUTED);
+            painter.text(Pos2::new(lanes.right() - 6.0, ruler.top() + LOOP_H + 1.0), Align2::RIGHT_TOP, text, FontId::monospace(11.0), MUTED);
         }
     }
 }
+
+/// Height of the loop strip along the top of the arrangement ruler.
+const LOOP_H: f32 = 13.0;
 
 /// Which part of the arrangement's loop brace is being dragged.
 #[derive(Clone, Copy, PartialEq)]

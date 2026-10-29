@@ -328,6 +328,8 @@ impl App {
         (self.tempo, self.beats_per_bar, self.grid, self.snap) = (file.tempo, file.beats_per_bar.max(1), file.grid.min(GRID.len() - 1), file.snap);
         self.master_gain = file.master_gain;
         (self.arr_loop, self.looping) = (file.arr_loop, file.looping);
+        // Older projects could hold a loop that ends part-way through a bar.
+        self.arr_loop = self.arr_loop.map(|l| self.whole_bars(l));
         fn build(app: &App, data: &[TrackData], audio: &[Arc<Audio>], rate: u32) -> Vec<Track> {
             data.iter()
                 .map(|t| {
