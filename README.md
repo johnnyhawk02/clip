@@ -4,21 +4,11 @@ A desktop audio editor written in Rust (egui + symphonia + cpal + hound), built 
 chopping up loops, keeping the good bits and editing them into a track. (It was called Sound Edit
 until October 2026.)
 
-## Layers, not a mix
+## Tracks, as in Live
 
-Tracks are **layers**, like layers in a photo editor. Only one clip is heard at any moment: the
-one on the highest layer that has a clip there. Where no layer has a clip you hear silence. So
-you edit one track instead of mixing several: lay a long loop on a low layer, then drop short
-clips on the layers above to patch over parts of it.
+Tracks play together, mixed. Each has Live's track activator (its number, lit while it plays),
+Solo, a volume slider, a colour and pan; solo wins over mute.
 
-- Parts of a clip that a layer above plays over are washed out, so the screen shows what you hear.
-- The eye beside each layer hides it; the layers below then show through.
-- Right-click a layer (or the Layers menu) for Move Layer Up / Down, which changes what wins,
-  and Merge Down, which joins a layer with the one below into one layer of clips that sounds the
-  same: each clip is cut down to the part that was heard, with short crossfades at the joins.
-- Where a layer cuts in over one that is still sounding, the one cut off fades out over 5 ms so
-  there is no click. A clip that starts or ends on its own keeps its edge.
-- Each layer keeps a volume slider and a colour. Solo and pan are gone.
 - Fades: drag the small handles at a clip's top corners to fade it in or out.
 - Locators: Control ▸ Add Locator (or right-click the ruler) adds a named marker; [ and ] jump
   between them, a click on one jumps there, and right-click renames it, deletes it or loops to the
@@ -29,22 +19,22 @@ clips on the layers above to patch over parts of it.
   on the first of the bar. It's only heard, never exported.
   Clip ▸ Quantize (⌘U) snaps clip starts to the grid (Slice at Grid moved to ⌥⌘U).
 - More Live editing: ⇧⌥-drag a clip's waveform to slide its audio inside it; Edit ▸ Cut / Copy /
-  Paste Time (⇧⌘X ⇧⌘C ⇧⌘V) work on a stretch of every layer; ⇧⌘J crops clips to a time selection
-  and ⌘J consolidates it into one clip per layer; 0 switches clips off and on (an off clip is
-  silent and the layer below shows through). Arrow keys nudge the selected clips or move the insert
+  Paste Time (⇧⌘X ⇧⌘C ⇧⌘V) work on a stretch of every track; ⇧⌘J crops clips to a time selection
+  and ⌘J consolidates it into one clip per track; 0 switches clips off and on (an off clip stays in
+  place, silent). Arrow keys nudge the selected clips or move the insert
   marker by the grid, ⇧← ⇧→ grow the selection, ↑ ↓ move the loop by its length (Loop on, nothing
-  selected) or change layer, ⌘↑ ⌘↓ double or halve the loop. Double-click the bar numbers to zoom
-  to the selection (or the whole song); H fits the layers to the height. Drag a locator to move it,
+  selected) or change track, ⌘↑ ⌘↓ double or halve the loop. Double-click the bar numbers to zoom
+  to the selection (or the whole song); H fits the tracks to the height. Drag a locator to move it,
   click it to select it, Delete removes it and ⌘R renames it. The Clip View has Pitch (semitones,
   keeping the length) and ×2 / ÷2 for the clip's BPM.
 - Select one clip and it opens in the detail view under the song, as in Live: its waveform with the
   bar ruler, start flag and loop strip, and the Clip View down the left (Warp and the clip's BPM,
   Loop, Reverse, Start and Length in bars.beats.sixteenths, Gain). Click in the waveform to work on
   the clip there; click the song above to go back. The transport sits along the top.
-- Playback mixes the layers live as it plays, as Live does, so edits and tempo changes are heard
+- Playback mixes the tracks live as it plays, as Live does, so edits and tempo changes are heard
   at once with nothing to render first. Dragging the tempo re-pitches what you hear straight away.
-- Recording puts the take on a new top layer. Layers ▸ Flatten Layers turns everything heard
-  into one plain clip.
+- Recording puts the take on the selected track at the insert marker. Tracks ▸ Mix Down to One
+  Track mixes everything into one clip.
 
 **Guide:** https://johnnyhawk02.github.io/photosound/
 
@@ -61,17 +51,16 @@ clips on the layers above to patch over parts of it.
   before), Random Reverse, Drop Out, and BBCut (breakbeat cutting in the style of Nick Collins' BBCut: the selection is re-cut in blocks, some jump to other parts of the loop, some become stutter rolls). BBCut comes in styles: Jungle (3+3+2 eighths, accelerating rolls), House (straight quarters, a fill roll at the end of a bar), Hip-Hop (beat chops shuffled), Dembow (3+3+2 sixteenths), Footwork (sixteenths in threes, busy rolls), Trap (triplet rolls), Breakcore (everything, plus reversed bits) and Halftime (long blocks, sparse fills). Mangle Again (⌘Y) re-rolls the last one. Also on the
   clip's right-click menu, along with Reverse.
 - To mangle a stretch of time instead of whole clips, drag across the ruler to set the loop and turn Loop on. Mangle then cuts the clips at the loop's edges, slices what's inside at the grid, and mangles only that, on the track you're working on (or the tracks of the selected clips). You hear it looping, and ⌘Y gives a new variation.
-- Auto Arrange (in the top bar, or Clip ▸ Auto Arrange) builds a 4-minute track from the loops in the song. Each loop is warped to the song tempo and cut into 8 or 16 bar sections, and the sections are laid end to end on one layer, following an intro, a build, a breakdown and an outro: calm loops for the quiet parts, busy ones for the peaks. ◀ ▶ step through variations; each number always gives the same layout, so you can go back to one you liked. Loops shorter than a section repeat to fill it.
+- Auto Arrange (in the top bar, or Clip ▸ Auto Arrange) builds a 4-minute track from the loops in the song. Each loop is warped to the song tempo and cut into 8 or 16 bar sections, and the sections are laid end to end on one track, following an intro, a build, a breakdown and an outro: calm loops for the quiet parts, busy ones for the peaks. ◀ ▶ step through variations; each number always gives the same layout, so you can go back to one you liked. Loops shorter than a section repeat to fill it.
 - Clip edges get a short fade, as in Live: none where the audio crosses zero at the edge (so a
   transient stays sharp), up to 4 ms where the edge cuts through a loud part of the wave and would
   click.
-- Clips on a layer never overlap, as in Live: drop, paste or drag a clip onto another on the same
-  layer and it cuts a gap in the one underneath the length of the dropped clip. (Stacking is what
-  layers are for.) Dragging a clip's edge over its neighbour instead overlaps the two, and they
+- Clips on a track never overlap, as in Live: drop, paste or drag a clip onto another on the same
+  track and it cuts a gap in the one underneath the length of the dropped clip. Dragging a clip's edge over its neighbour instead overlaps the two, and they
   crossfade across the overlap (equal power), shown by an X.
 - Swap Section (⇧R, or Clip ▸ Auto Arrange ▸ Swap Section): click a clip and press ⇧R to replace it with a random section of the same length from the loop pool, in the same place. Press ⇧R again for another; ⌘Z undoes it.
-- The Loop Pool (View ▸ Panels ▸ Loop Pool, ⌘7) lists the loops in the song, warped to its tempo. Drag one onto a layer to add it there at the grid line you drop it on, or below the last layer for a new one. Auto Arrange and Swap Section draw from the same pool; Grouped clips count as loops too, and Clip ▸ Add to Pool (also on the right-click menu) puts any selected clip in as it is, trimmed or grouped. × takes a loop out of the pool and Add Loops from Song brings in new ones.
-- The Master strip under the layers holds the output volume (saved in the project, double-click to reset), its meters, and a headphone button for Headphone Crossfeed. Control ▸ Headphone Crossfeed makes headphones sound like speakers: each ear also hears a delayed, filtered share of the other side. The filters are measured from Johnny's CanOpener setting (a click through each side) and match it to within -100 dB. It only changes what you hear, never what you export, and it stays on between runs.
+- The Loop Pool (View ▸ Panels ▸ Loop Pool, ⌘7) lists the loops in the song, warped to its tempo. Drag one onto a track to add it there at the grid line you drop it on, or below the last track for a new one. Auto Arrange and Swap Section draw from the same pool; Grouped clips count as loops too, and Clip ▸ Add to Pool (also on the right-click menu) puts any selected clip in as it is, trimmed or grouped. × takes a loop out of the pool and Add Loops from Song brings in new ones.
+- The Master strip under the tracks holds the output volume (saved in the project, double-click to reset), its meters, and a headphone button for Headphone Crossfeed. Control ▸ Headphone Crossfeed makes headphones sound like speakers: each ear also hears a delayed, filtered share of the other side. The filters are measured from Johnny's CanOpener setting (a click through each side) and match it to within -100 dB. It only changes what you hear, never what you export, and it stays on between runs.
 - The tool palette floats: a strip of the tools, then a row of Mangle buttons and a row of
   BBCut styles. Drag it by its title, collapse it with the triangle, close it with the cross
   (Window ▸ Tools brings it back). Window ▸ Dock Tools on the Left puts it back in the left column.
@@ -96,14 +85,14 @@ file. Open it again by double-clicking it in Finder, with File ▸ Open, or by d
 window. (Audio files can be opened from Finder with Open With ▸ PhotoSound too.) Export (⇧⌘R) writes
 what you hear as a WAV/AIFF. The unsaved-changes prompt offers to save the project. When you open the app on its own, it reopens the last project you opened or saved.
 
-**Arrangement and clips (like Ableton's Arrangement view).** A sound is a stack of layers,
+**Arrangement and clips (like Ableton's Arrangement view).** A sound is a stack of tracks,
 and audio sits on them as clips. Opening a file gives one track with one clip.
 
 - Drag a clip to move it along its track or onto another track (⌥-drag drags a copy instead; dragging below the last track makes a new track for it); drag its left or right edge to
   trim it (the audio underneath is kept, so you can drag the edge back out). Moves and trims snap
   to other clips' edges and the playhead; hold ⌘ to turn snapping off.
 - Selecting works like Live's: drag across empty space, or across a clip's waveform, to select a
-  stretch of time on one or more layers (a light blue wash, snapped to the grid; ⌘ for free). ⌫
+  stretch of time on one or more tracks (a light blue wash, snapped to the grid; ⌘ for free). ⌫
   deletes that stretch, ⌘E splits the clips at its ends, ⌘L / Set Loop loops it, ⌘D duplicates
   it right after itself (⇧⌘D Duplicate Time pushes the rest later), Edit ▸ Delete Time (⇧⌘⌫) takes it
   out and closes the gap, Insert Time (⌘I) opens up empty time, and Mangle, BBCut
@@ -142,9 +131,9 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   Set Loop to Selection in the arrangement sets it to the selected clips. Both are saved in the
   project.
 - **Right-click menus:** right-click a clip for Edit/Open, Cut, Copy, Duplicate, Delete, Split,
-  Loop, Group/Ungroup, Collapse to Audio and Set Tempo from Clip. Right-click a layer (its header
-  or empty lane space) for New/Duplicate/Delete Layer, Move Layer Up/Down, Hide, Colour, Collapse
-  Layer to One Clip and Import File as Clip. **Collapse** (Clip ▸ Collapse to Audio, ⌘J) renders a group,
+  Loop, Group/Ungroup, Collapse to Audio and Set Tempo from Clip. Right-click a track (its header
+  or empty lane space) for New/Duplicate/Delete Track, Move Track Up/Down, Mute, Colour, Collapse
+  Track to One Clip and Import File as Clip. **Collapse** (Clip ▸ Collapse to Audio, ⌘J) renders a group,
   looped or trimmed clip down to one plain audio clip that sounds the same.
 - **Clips within clips:** shift-click clips (or ⌘A for all) and choose Clip ▸ Group into Clip (⌘G).
   They become one group clip holding them, in the same places and keeping their tracks' settings.
@@ -165,14 +154,14 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   following the tempo. Clips that don't follow the tempo show "no warp" in their name strip. Warping is saved in projects, and the Ableton export hands Live the original audio with
   warp markers, so the clips follow Live's tempo too.
 - File ▸ Export Ableton Live Set makes a "<name> Project" folder with a Live 12 set (.als) and a
-  Samples folder. The layers are flattened onto one audio track: each clip is cut down to the parts
-  that are heard and sits where it is, with clip loops as Live
+  Samples folder. Each track becomes an audio track with its name, colour, volume, pan, mute and
+  solo; clips sit where they are, with clip loops as Live
   loops, and the tempo and beats per bar carry over. Clips are warped so they play at their own
   speed. Groups come across as their rendered audio. The set is built from Live's own default set
   (`assets/ableton_template.xml`).
 - A fine line runs across the arrangement every 4 bars, counting from bar 1, so phrases are easy to
   see. PhotoSound ▸ Preferences (⌘,) sets how many bars apart (0 turns them off).
-- Shortcuts follow Ableton Live wherever the two apps share a feature: ⌘E split, ⌘D duplicate, ⌘J consolidate (Collapse to Audio), ⌘G / ⇧⌘G group and ungroup, ⌘L loop on/off, R reverse clip, Z zoom to selection, X zoom back, W fit the song in the window, ⌘1 / ⌘2 narrow and widen the grid, ⌘4 snap, B draw (Pencil), ⌘T new layer, ⇧⌘J crop (Trim), ⇧⌘R export, F9 record, ⇧Tab switch between the arrangement and the clip editor. Select None is ⇧⌘A.
+- Shortcuts follow Ableton Live wherever the two apps share a feature: ⌘E split, ⌘D duplicate, ⌘J consolidate (Collapse to Audio), ⌘G / ⇧⌘G group and ungroup, ⌘L loop on/off, R reverse clip, Z zoom to selection, X zoom back, W fit the song in the window, ⌘1 / ⌘2 narrow and widen the grid, ⌘4 snap, B draw (Pencil), ⌘T new track, ⇧⌘J crop (Trim), ⇧⌘R export, F9 record, ⇧Tab switch between the arrangement and the clip editor. Select None is ⇧⌘A.
 
 
 A clean black, white and grey layout: tools on the left, the waveform in the middle, the transport
@@ -223,10 +212,10 @@ level meters. **Info** shows the format, length, selection and peak level.
 | Export | ⇧⌘R the mix, ⌥⇧⌘S the selection (editor) or selected clip (arrangement). Bit depth is under File ▸ Export Format. |
 | Split into sounds | ⇧⌘K — see below |
 
-**Layers:** the Layers menu adds layers: New Layer (⌘T), Import File as Layer… (⇧⌘O), Duplicate
-Layer and Delete Layer. Each one has a header with its name, an eye (show/hide), a colour swatch and
-a volume slider. Click a layer, or use ⌥⌘↑ / ⌥⌘↓, to make it the one you're editing. Layers ▸
-Flatten Layers turns what you hear into a single clip (undoable).
+**Tracks:** the Tracks menu adds tracks: New Track (⌘T), Import File as Track… (⇧⌘O), Duplicate
+Track and Delete Track. Each one has a header with its name, an activator (mute), Solo, a volume slider,
+a colour swatch and pan. Click a track, or use ⌥⌘↑ / ⌥⌘↓, to make it the one you're editing. Tracks ▸
+Mix Down to One Track turns what you hear into a single clip (undoable).
 
 **Quality:** sample-rate changes (Convert Format, Batch Convert, pasting between files) use a
 Kaiser-windowed sinc resampler, so nothing aliases when converting down. Writing 8/16/24-bit files
@@ -243,7 +232,7 @@ in WAV files.
 View ▸ Ruler Units switches the ruler, counter and fields between minutes:seconds, samples and
 30 fps timecode.
 
-**Layers, further:** More ▸ Layers ▸ Offset Layer moves a layer later or earlier.
+**Tracks, further:** More ▸ Tracks ▸ Offset Track moves a track later or earlier.
 
 **Spectrum** (Window ▸ Spectrum, ⌘4): 2D shows the frequencies in the selection (or at the cursor,
 following playback live); 3D shows a waterfall of spectra across the selection.
@@ -306,7 +295,7 @@ macOS needs for recording, signs it ad hoc and copies it to /Applications.
 - `src/project.rs` — the .sndproj project file
 - `src/ableton.rs` — Ableton Live Set export
 - `src/recorder.rs` — recording from the default input
-- `src/player.rs` — playback through the default output device (resamples to the device rate)
+- `src/ptrack.rs` — playback through the default output device (resamples to the device rate)
 - `src/actions.rs` — every command with its label, icon and shortcut; the menu and palette layouts
 - `src/menu.rs` — the native macOS menu bar (muda)
 - `src/app.rs` — the app's state, undo/redo, playback, the action dispatcher, shortcuts and the frame loop
