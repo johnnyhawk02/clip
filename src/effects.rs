@@ -486,6 +486,41 @@ pub fn noise(rate: u32, channels: usize, secs: f32, level_db: f32) -> Audio {
     Audio { rate, channels: chans }
 }
 
+/// Equal-power pan gains (left, right) for pan -1 (left) .. 1 (right).
+pub fn pan_gains(pan: f32) -> (f32, f32) {
+    let a = (pan.clamp(-1.0, 1.0) + 1.0) * PI / 4.0;
+    (a.cos() * std::f32::consts::SQRT_2, a.sin() * std::f32::consts::SQRT_2)
+}
+
+/// Mix several sounds (each with a linear gain) into one. All must share a sample rate. The
+/// result is as long as the longest input and has as many channels as the widest one; mono
+/// inputs are spread across every channel.
+/// Each input has a pan (-1 left .. 1 right); any panned input makes the result stereo.
+pub fn mix_panned(inputs: &[(&Audio, f32, f32)], rate: u32) -> Audio {
+    let frames = inputs.iter().map(|(a, _, _)| a.frames()).max().unwrap_or(0);
+    let widest = inputs.iter().map(|(a, _, _)| a.num_channels()).max().unwrap_or(1).max(1);
+    let channels = if inputs.iter().any(|(_, _, p)| *p != 0.0) { widest.max(2) } else { widest };
+    let mut out = vec![vec![0.0f32; frames]; channels];
+    for &(a, gain, pan) in inputs {
+        if a.num_channels() == 0 || gain == 0.0 {
+            continue;
+        }
+        let (pl, pr) = if pan != 0.0 { pan_gains(pan) } else { (1.0, 1.0) };
+        for (ci, o) in out.iter_mut().enumerate() {
+            let src = &a.channels[ci.min(a.num_channels() - 1)];
+            let g = gain * match ci {
+                0 => pl,
+                1 => pr,
+                _ => 1.0,
+            };
+            for (d, s) in o.iter_mut().zip(src) {
+                *d += s * g;
+            }
+        }
+    }
+    Audio { rate, channels: out }
+}
+
 pub fn silence(rate: u32, channels: usize, secs: f32) -> Audio {
     let n = (secs * rate as f32) as usize;
     Audio { rate, channels: vec![vec![0.0; n]; channels.max(1)] }

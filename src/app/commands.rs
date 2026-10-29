@@ -52,7 +52,6 @@ impl App {
                 Action::PasteTime => self.time_clip.is_some(),
                 Action::Trim => self.time_sel.is_some(),
                 Action::LayerDown => self.active + 1 < self.tracks.len(),
-                Action::MergeDown => self.can_merge_down(),
                 _ => false,
             };
         }
@@ -68,7 +67,7 @@ impl App {
             Action::AutoWarp => return true,
             Action::AutoArrange | Action::PrevVariation | Action::NextVariation | Action::SwapSection | Action::AddToPool => return false,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::DeleteTrack | Action::MixDown => return false,
-            Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::MergeDown | Action::DuplicateTime | Action::DeleteTime | Action::InsertTime | Action::CopyTime | Action::CutTime | Action::PasteTime | Action::AddLocator | Action::RenameLocator | Action::PrevLocator | Action::NextLocator => return false,
+            Action::NextTrack | Action::PrevTrack | Action::OffsetTrack | Action::LayerUp | Action::LayerDown | Action::DuplicateTime | Action::DeleteTime | Action::InsertTime | Action::CopyTime | Action::CutTime | Action::PasteTime | Action::AddLocator | Action::RenameLocator | Action::PrevLocator | Action::NextLocator => return false,
             _ => {}
         }
         let has = self.audio.is_some();
@@ -509,7 +508,6 @@ impl App {
             Action::DeleteTime => self.delete_time(),
             Action::InsertTime => self.insert_time(),
             Action::Preferences => self.prefs_open = Some((self.phrase_bars, repitch_mode())),
-            Action::MergeDown => self.merge_down(),
             Action::TrackColor => {
                 let t = &mut self.tracks[self.active];
                 t.color = (t.color + 1) % TRACK_COLORS.len();

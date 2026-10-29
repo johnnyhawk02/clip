@@ -1,4 +1,4 @@
-//! The song as the audio thread plays it: the layers' clips, mixed live a block at a time (as
+//! The song as the audio thread plays it: the tracks' clips, mixed live a block at a time (as
 //! Live does) instead of rendered to one buffer first. Edits and tempo changes only swap in a
 //! new `Song`, which is cheap, so nothing waits on a render.
 
@@ -6,14 +6,6 @@ use std::f32::consts::FRAC_PI_2;
 use std::sync::Arc;
 
 use crate::audio::Audio;
-
-/// How a piece of a layer comes in: fully, or fading in or out where one layer cuts another off.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Ramp {
-    Full,
-    In,
-    Out,
-}
 
 /// One clip, ready to read from the audio thread. Positions are song frames at the tempo the
 /// song is laid out for.
@@ -160,14 +152,15 @@ fn click(t: f64, beat: f64, bpb: u32, rate: u32) -> f32 {
 /// One layer: its volume and its clips in time order.
 pub struct LayerSrc {
     pub gain: f32,
+    /// Left and right gains from the track's pan.
+    pub pan: (f32, f32),
     pub clips: Vec<ClipSrc>,
 }
 
 /// The whole song for the audio thread.
 pub struct Song {
+    /// The heard tracks, mixed.
     pub layers: Vec<LayerSrc>,
-    /// Which layer is heard when: (layer, from, to, ramp), from `layers::pieces`.
-    pub pieces: Vec<(usize, usize, usize, Ramp)>,
     pub end: usize,
     pub rate: u32,
     pub master: f32,
@@ -179,8 +172,7 @@ impl Song {
     /// Mix song frames `from`, `from + step`, … into `out` (stereo pairs).
     pub fn render(&self, from: f64, step: f64, out: &mut [[f32; 2]]) {
         let to = from + step * out.len() as f64 + 1.0;
-        // Only the pieces and clips this block touches.
-        let pieces: Vec<&(usize, usize, usize, Ramp)> = self.pieces.iter().filter(|p| (p.1 as f64) < to && (p.2 as f64) > from).collect();
+        // Only the clips this block touches.
         let clips: Vec<Vec<&ClipSrc>> = self
             .layers
             .iter()
@@ -190,24 +182,16 @@ impl Song {
             let t = from + step * k as f64;
             let ti = t as usize;
             *frame = [0.0, 0.0];
-            for &&(li, a, b, ramp) in &pieces {
-                if ti < a || ti >= b {
-                    continue;
-                }
-                let x = (ti - a) as f32 + 0.5;
-                let w = self.layers[li].gain
-                    * match ramp {
-                        Ramp::Full => 1.0,
-                        Ramp::In => (x / (b - a) as f32 * FRAC_PI_2).sin(),
-                        Ramp::Out => (x / (b - a) as f32 * FRAC_PI_2).cos(),
-                    };
+            for (li, layer) in self.layers.iter().enumerate() {
+                let w = layer.gain;
                 for c in &clips[li] {
                     if ti < c.start || ti >= c.end() {
                         continue;
                     }
                     let g = w * c.gain(ti);
-                    frame[0] += c.sample(t, 0) * g;
-                    frame[1] += c.sample(t, 1) * g;
+                    let (pl, pr) = self.layers[li].pan;
+                    frame[0] += c.sample(t, 0) * g * pl;
+                    frame[1] += c.sample(t, 1) * g * pr;
                 }
             }
             frame[0] *= self.master;
@@ -228,7 +212,7 @@ mod tests {
     #[test]
     fn metronome_clicks_on_beats_higher_on_the_bar() {
         // A beat every 22050 frames (120 BPM at 44.1 kHz), 4 to a bar.
-        let song = Song { layers: Vec::new(), pieces: Vec::new(), end: 200_000, rate: 44100, master: 1.0, click: Some((22050.0, 4)) };
+        let song = Song { layers: Vec::new(), end: 200_000, rate: 44100, master: 1.0, click: Some((22050.0, 4)) };
         let mut out = vec![[0.0; 2]; 400];
         song.render(22050.0, 1.0, &mut out);
         assert!(out.iter().any(|f| f[0].abs() > 0.05), "a click on beat 2");
@@ -241,7 +225,7 @@ mod tests {
         // A ramp 0, 1, 2… read at speed 2: song frame t hears source frame 2t.
         let audio = Arc::new(Audio { rate: 1000, channels: vec![(0..100).map(|i| i as f32).collect()] });
         let clip = ClipSrc { audio, speed: 2.0, start: 10, len: 40, trim: 0, looping: None, frames: 50, fades: (0, 0), gain: 1.0 };
-        let song = Song { layers: vec![LayerSrc { gain: 1.0, clips: vec![clip] }], pieces: vec![(0, 10, 50, Ramp::Full)], end: 50, rate: 1000, master: 1.0, click: None };
+        let song = Song { layers: vec![LayerSrc { gain: 1.0, pan: (1.0, 1.0), clips: vec![clip] }], end: 50, rate: 1000, master: 1.0, click: None };
         let mut out = vec![[0.0; 2]; 4];
         song.render(20.0, 1.0, &mut out);
         assert_eq!(out.iter().map(|f| f[0]).collect::<Vec<_>>(), vec![20.0, 22.0, 24.0, 26.0]);

@@ -303,9 +303,6 @@ impl App {
         if item(ui, "Move Layer Down", t + 1 < self.tracks.len()) {
             chosen = Some(Action::LayerDown);
         }
-        if item(ui, "Merge Down", self.can_merge_down()) {
-            chosen = Some(Action::MergeDown);
-        }
         if item(ui, if mute { "Show Layer" } else { "Hide Layer" }, true) {
             chosen = Some(Action::MuteTrack);
         }
@@ -1349,7 +1346,6 @@ impl App {
             }
         }
         // Lanes and clips.
-        let hidden = layers::covered_above(&self.tracks);
         for (ti, t) in self.tracks.iter().enumerate() {
             let l = lane(ti);
             if ti == self.active {
@@ -1368,15 +1364,6 @@ impl App {
                 let selected = self.sel_clip == Some((ti, ci)) || self.sel_extra.contains(&(ti, ci));
                 let hovered = self.arr_hover.is_some_and(|h| (h.0, h.1) == (ti, ci));
                 draw_clip(&painter, r, c, color, selected, muted || !c.active, selected || hovered || self.fade_drag.is_some_and(|d| (d.0, d.1) == (ti, ci)), lanes);
-                // Parts a layer above plays over are washed out: they are not heard.
-                for &(s, e) in &hidden[ti] {
-                    let (s, e) = (s.max(c.start), e.min(c.end()));
-                    if e > s {
-                        let (hx0, hx1) = (f_to_x(s as f64, vs, vl), f_to_x(e as f64, vs, vl));
-                        let h = Rect::from_min_max(Pos2::new(hx0, r.top()), Pos2::new(hx1, r.bottom())).intersect(lanes);
-                        painter.rect_filled(h, 0.0, Color32::from_white_alpha(185));
-                    }
-                }
             }
             // Crossfades: an X across each overlap, drawn over both clips.
             for (c, &(_, fout)) in t.clips.iter().zip(&fades) {

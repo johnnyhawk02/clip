@@ -262,10 +262,10 @@ impl App {
                 .map(|t| TrackData {
                     name: t.name.clone(),
                     gain: t.gain,
-                    pan: 0.0,
+                    pan: t.pan,
                     color: t.color,
                     mute: t.mute,
-                    solo: false,
+                    solo: t.solo,
                     clips: t
                         .clips
                         .iter()
@@ -343,7 +343,7 @@ impl App {
             data.iter()
                 .map(|t| {
                     let mut track = Track::new(t.name.clone());
-                    (track.gain, track.color, track.mute) = (t.gain, t.color, t.mute);
+                    (track.gain, track.pan, track.color, track.mute, track.solo) = (t.gain, t.pan, t.color, t.mute, t.solo);
                     for c in &t.clips {
                         let a = c.audio.and_then(|i| audio.get(i).cloned()).unwrap_or_else(|| Arc::new(Audio { rate, channels: vec![Vec::new()] }));
                         let mut clip = Clip::new(c.name.clone(), a, c.start);
@@ -518,9 +518,6 @@ impl App {
     pub(super) fn write_ableton(&self, tracks: &[Track], dir: &Path, name: &str) -> Result<PathBuf, String> {
         // Live's palette indices closest to each track colour (grey, blue, green, amber, red, purple).
         const LIVE_COLORS: [u32; 6] = [27, 22, 19, 15, 14, 24];
-        // Live gets what is heard: the layers flattened onto one track.
-        let flat = [layers::flatten_clips(tracks, 0, 0)];
-        let tracks = &flat[..];
         let samples = dir.join("Samples").join("Imported");
         std::fs::create_dir_all(&samples).map_err(|e| e.to_string())?;
         // This (empty) folder is what makes Live treat the folder as a project, so it finds
@@ -584,7 +581,7 @@ impl App {
                     sample_beats: src.frames() as f64 / rate as f64 * c.warp.as_ref().map_or(self.tempo, |w| w.bpm) / 60.0,
                 });
             }
-            live.push(ableton::LiveTrack { name: t.name.clone(), color, gain: t.gain, pan: 0.0, mute: t.mute, solo: false, clips });
+            live.push(ableton::LiveTrack { name: t.name.clone(), color, gain: t.gain, pan: t.pan, mute: t.mute, solo: t.solo, clips });
         }
         let als = dir.join(format!("{name}.als"));
         ableton::write(&als, self.tempo, self.beats_per_bar, &live)?;

@@ -1,0 +1,107 @@
+//! Tracks, as in Live: they all play together, mixed with their volume and pan (solo wins over
+//! mute). Building the song for the live engine, and adding, moving and removing tracks.
+
+use super::*;
+use crate::engine;
+
+/// The song as the live engine plays it: the heard tracks' clips, read straight from their audio
+/// (a re-pitched clip from its original, at the speed the tempo needs), mixed as in Live.
+pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32, click: Option<(f64, u32)>) -> engine::Song {
+    let visible: Vec<&Track> = heard(tracks).collect();
+    let layers: Vec<engine::LayerSrc> = visible
+        .iter()
+        .map(|t| engine::LayerSrc {
+            gain: t.gain,
+            pan: if t.pan == 0.0 { (1.0, 1.0) } else { effects::pan_gains(t.pan) },
+            clips: t.clips.iter().zip(crossfades(&t.clips)).filter(|(c, _)| c.len > 0 && c.active).map(|(c, cross)| clip_src(c, cross, rate)).collect(),
+        })
+        .collect();
+    engine::Song { layers, end, rate, master, click }
+}
+
+fn clip_src(c: &Clip, cross: (usize, usize), rate: u32) -> engine::ClipSrc {
+    let (audio, speed, frames) = match c.warp.as_ref().filter(|_| repitch_mode()) {
+        // Re-pitched live from the original, so a new tempo needs no re-render.
+        Some(w) => (w.source.clone(), w.tempo / w.bpm, (w.source.frames() as f64 * w.bpm / w.tempo).round() as usize),
+        None => (c.audio.clone(), 1.0, c.audio.frames()),
+    };
+    let looping = c.looping.then(|| c.loop_points.map(|(s, e)| (s.min(frames), e.min(frames))).filter(|(s, e)| e > s).unwrap_or((0, frames)));
+    let mut src = engine::ClipSrc { audio, speed, start: c.start, len: c.len, trim: c.trim, looping, frames, fades: (0, 0), gain: c.gain };
+    let level = |t: usize| (0..2).map(|ch| src.sample_at(t, ch).abs()).fold(0.0f32, f32::max);
+    let (first, last) = (level(c.start), level(c.end() - 1));
+    src.fades = with_clip_fades(c, edge_fades_for(first, last, c.len, rate, cross));
+    src
+}
+
+impl App {
+    pub(super) fn set_active(&mut self, i: usize) {
+        if i < self.tracks.len() {
+            self.active = i;
+        }
+    }
+
+    pub(super) fn add_track(&mut self, track: Track, label: &'static str) {
+        self.push_undo(label);
+        let at = (self.active + 1).min(self.tracks.len());
+        self.tracks.insert(at, track);
+        self.active = at;
+        self.dirty = true;
+        self.refresh_playback();
+    }
+
+    pub(super) fn new_track(&mut self) {
+        let n = (1..).find(|i| !self.tracks.iter().any(|t| t.name == format!("Track {i}"))).unwrap();
+        self.add_track(Track::new(format!("Track {n}")), "New Track");
+        self.status = "New empty track — paste, record or import clips into it".into();
+    }
+
+    pub(super) fn duplicate_track(&mut self) {
+        let Some(t) = self.tracks.get(self.active) else { return };
+        let mut t = t.clone();
+        t.name = format!("{} copy", t.name);
+        self.add_track(t, "Duplicate Track");
+    }
+
+    pub(super) fn delete_track(&mut self) {
+        if self.tracks.len() < 2 {
+            return;
+        }
+        self.push_undo("Delete Track");
+        self.tracks.remove(self.active);
+        self.active = self.active.min(self.tracks.len() - 1);
+        self.sel_clip = None;
+        self.dirty = true;
+        self.refresh_playback();
+    }
+
+    /// Move the active layer above or below its neighbour, changing which one is heard.
+    pub(super) fn move_layer(&mut self, up: bool) {
+        let a = self.active;
+        let Some(b) = (if up { a.checked_sub(1) } else { Some(a + 1) }).filter(|&b| b < self.tracks.len()) else { return };
+        self.push_undo(if up { "Move Layer Up" } else { "Move Layer Down" });
+        self.tracks.swap(a, b);
+        let swap = |t: usize| if t == a { b } else if t == b { a } else { t };
+        self.sel_clip = self.sel_clip.map(|(t, c)| (swap(t), c));
+        self.sel_extra = self.sel_extra.iter().map(|&(t, c)| (swap(t), c)).collect();
+        self.active = b;
+        self.dirty = true;
+        self.refresh_playback();
+    }
+
+    pub(super) fn mix_down(&mut self) {
+        if self.tracks.len() < 2 {
+            return;
+        }
+        let mix = Arc::new(self.mixdown());
+        self.push_undo("Mix Down");
+        let mut t = Track::new("Mix");
+        t.clips.push(Clip::new("Mix", mix, 0));
+        self.tracks = vec![t];
+        self.active = 0;
+        self.sel_clip = Some((0, 0));
+        self.dirty = true;
+        self.refresh_playback();
+        self.status = "Mixed all tracks into one — ⌘Z to undo".into();
+    }
+}
+

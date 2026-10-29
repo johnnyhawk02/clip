@@ -29,7 +29,7 @@ mod panels;
 mod look;
 mod automation;
 mod autoarrange;
-mod layers;
+mod tracks;
 mod commands;
 mod undo;
 mod clipruler;
@@ -378,6 +378,12 @@ fn on_time_sel(a: Action) -> bool {
     matches!(a, ReverseClip | SwapSection | SliceClip | CollapseClip | WarpClip | LoopClip | Copy | Cut | AddToPool | GroupClips)
 }
 
+/// The tracks that are heard: the soloed ones if any are, otherwise all but the muted ones.
+fn heard(tracks: &[Track]) -> impl Iterator<Item = &Track> {
+    let any_solo = tracks.iter().any(|t| t.solo);
+    tracks.iter().filter(move |t| if any_solo { t.solo } else { !t.mute })
+}
+
 /// The clip in the detail view: (layer, clip), its audio, trim, length and whether it loops.
 type DetailKey = ((usize, usize), usize, usize, usize, bool);
 
@@ -614,7 +620,7 @@ impl App {
             View::Arrangement => {
                 // The song is mixed live as it plays: just hand over what to play.
                 let click = self.metronome.then(|| (self.beat_frames(), self.beats_per_bar));
-                let song = layers::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain, click);
+                let song = tracks::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain, click);
                 self.player.set_song(Arc::new(song));
                 self.play_audio = None;
                 return;
@@ -695,15 +701,11 @@ impl App {
         c.group = Some(Arc::new(tracks));
     }
 
-    /// What a set of layers sounds like: at each moment only the topmost visible layer with a
-    /// clip there is heard.
+    /// The mix of a set of tracks, with their volumes and pan (solo wins over mute), as in Live.
     fn render_tracks(&self, tracks: &[Track]) -> Audio {
-        let layers: Vec<layers::Layer> = tracks
-            .iter()
-            .filter(|t| !t.mute)
-            .map(|t| layers::Layer::of(t, self.render_track(t)))
-            .collect();
-        layers::flatten(&layers, self.rate())
+        let rendered: Vec<(Audio, f32, f32)> = heard(tracks).map(|t| (self.render_track(t), t.gain, t.pan)).collect();
+        let inputs: Vec<(&Audio, f32, f32)> = rendered.iter().map(|(a, g, p)| (a, *g, *p)).collect();
+        effects::mix_panned(&inputs, self.rate())
     }
 
     /// Extent of the timeline: the clip's length in the editor, or the end of the last clip
