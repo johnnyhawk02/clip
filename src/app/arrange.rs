@@ -583,8 +583,18 @@ impl App {
             (Some(DragMode::Move), _) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing),
             (Some(_), _) | (None, Some(DragMode::TrimStart | DragMode::TrimEnd)) => ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal),
             (None, Some(DragMode::Move)) => {
+                // The hand only over the name strip, which is what moves a clip; the body selects
+                // time, so it keeps the plain pointer (⌥ shows the copy cursor anywhere).
                 let alt = ui.input(|i| i.modifiers.alt);
-                ui.ctx().set_cursor_icon(if alt { egui::CursorIcon::Copy } else { egui::CursorIcon::Grab });
+                let on_strip = match (resp.hover_pos(), hover_hit) {
+                    (Some(q), Some((t, _, _))) => q.y <= lane(t).top() + 19.0,
+                    _ => false,
+                };
+                if alt {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Copy);
+                } else if on_strip {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                }
             }
             _ => {}
         }
