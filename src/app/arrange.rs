@@ -538,6 +538,10 @@ impl App {
                             ui.selectable_value(&mut self.grid, i, *label);
                         }
                     });
+                    if ui.add(Button::new("Metronome").selected(self.metronome)).on_hover_text("Click on every beat while playing").clicked() {
+                        self.metronome = !self.metronome;
+                        self.refresh_playback();
+                    }
                     ui.checkbox(&mut self.snap, "Snap").on_hover_text("Snap moves, trims and the playhead to the grid (hold ⌘ to bypass)");
                     ui.separator();
                     let can_arrange = self.nest.is_empty() && self.tracks.iter().any(|t| !t.clips.is_empty());

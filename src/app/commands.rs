@@ -12,7 +12,7 @@ impl App {
                 Action::New | Action::Open | Action::Quit | Action::Preferences | Action::BatchConvert | Action::Record | Action::NewClip | Action::ImportClip => true,
                 Action::SaveProject | Action::SaveProjectAs => doc,
                 Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Dither | Action::AutoGain => true,
-                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed | Action::Follow => true,
+                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed | Action::Follow | Action::Metronome => true,
                 Action::Continue | Action::AddLocator => doc,
                 Action::PrevLocator | Action::NextLocator => !self.locators.is_empty(),
                 Action::Quantize => has_clip,
@@ -73,7 +73,7 @@ impl App {
         let not_empty = self.frames() > 0;
         match a {
             Action::New | Action::Open | Action::Quit | Action::Preferences => true,
-            Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop | Action::Crossfeed | Action::Follow | Action::Continue => true,
+            Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop | Action::Crossfeed | Action::Follow | Action::Metronome | Action::Continue => true,
             Action::ShowCues | Action::Record => true,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack => has,
             Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack => has && self.tracks.len() > 1,
@@ -135,6 +135,7 @@ impl App {
             Action::ShowPool => self.show_pool,
             Action::Crossfeed => self.crossfeed,
             Action::Follow => self.follow,
+            Action::Metronome => self.metronome,
             Action::ToggleSnap => self.snap,
             Action::AutoWarp => self.auto_warp,
             Action::WarpClip => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.warp.is_some()),
@@ -485,6 +486,10 @@ impl App {
             Action::NextLocator => self.jump_locator(true),
             Action::Continue => self.continue_play(),
             Action::Follow => self.follow = !self.follow,
+            Action::Metronome => {
+                self.metronome = !self.metronome;
+                self.refresh_playback();
+            }
             Action::DuplicateTime => self.duplicate_time(),
             Action::DeleteTime => self.delete_time(),
             Action::InsertTime => self.insert_time(),

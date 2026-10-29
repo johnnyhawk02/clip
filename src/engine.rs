@@ -142,6 +142,21 @@ fn interpolate(ch: &[f32], x: f64) -> f32 {
     acc
 }
 
+/// The metronome's sound at song frame `t`: a short blip on each beat, higher on the bar's
+/// first beat (as Live's).
+fn click(t: f64, beat: f64, bpb: u32, rate: u32) -> f32 {
+    if beat <= 0.0 {
+        return 0.0;
+    }
+    let k = (t / beat).floor();
+    let off = (t - k * beat) / rate as f64;
+    if off > 0.03 {
+        return 0.0;
+    }
+    let hz = if (k as i64).rem_euclid(bpb.max(1) as i64) == 0 { 1600.0 } else { 1000.0 };
+    ((2.0 * std::f64::consts::PI * hz * off).sin() * (-off / 0.006).exp() * 0.35) as f32
+}
+
 /// One layer: its volume and its clips in time order.
 pub struct LayerSrc {
     pub gain: f32,
@@ -156,6 +171,8 @@ pub struct Song {
     pub end: usize,
     pub rate: u32,
     pub master: f32,
+    /// The metronome, when on: a beat's length in song frames and the beats in a bar.
+    pub click: Option<(f64, u32)>,
 }
 
 impl Song {
@@ -195,6 +212,11 @@ impl Song {
             }
             frame[0] *= self.master;
             frame[1] *= self.master;
+            if let Some((beat, bpb)) = self.click {
+                let c = click(t, beat, bpb, self.rate);
+                frame[0] += c;
+                frame[1] += c;
+            }
         }
     }
 }
@@ -204,11 +226,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn metronome_clicks_on_beats_higher_on_the_bar() {
+        // A beat every 22050 frames (120 BPM at 44.1 kHz), 4 to a bar.
+        let song = Song { layers: Vec::new(), pieces: Vec::new(), end: 200_000, rate: 44100, master: 1.0, click: Some((22050.0, 4)) };
+        let mut out = vec![[0.0; 2]; 400];
+        song.render(22050.0, 1.0, &mut out);
+        assert!(out.iter().any(|f| f[0].abs() > 0.05), "a click on beat 2");
+        song.render(30000.0, 1.0, &mut out);
+        assert!(out.iter().all(|f| f[0] == 0.0), "silence between beats");
+    }
+
+    #[test]
     fn repitched_clip_reads_its_source_faster() {
         // A ramp 0, 1, 2… read at speed 2: song frame t hears source frame 2t.
         let audio = Arc::new(Audio { rate: 1000, channels: vec![(0..100).map(|i| i as f32).collect()] });
         let clip = ClipSrc { audio, speed: 2.0, start: 10, len: 40, trim: 0, looping: None, frames: 50, fades: (0, 0), gain: 1.0 };
-        let song = Song { layers: vec![LayerSrc { gain: 1.0, clips: vec![clip] }], pieces: vec![(0, 10, 50, Ramp::Full)], end: 50, rate: 1000, master: 1.0 };
+        let song = Song { layers: vec![LayerSrc { gain: 1.0, clips: vec![clip] }], pieces: vec![(0, 10, 50, Ramp::Full)], end: 50, rate: 1000, master: 1.0, click: None };
         let mut out = vec![[0.0; 2]; 4];
         song.render(20.0, 1.0, &mut out);
         assert_eq!(out.iter().map(|f| f[0]).collect::<Vec<_>>(), vec![20.0, 22.0, 24.0, 26.0]);

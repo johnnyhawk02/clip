@@ -194,6 +194,8 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// The metronome clicks along while the song plays (Control ▸ Metronome).
+    metronome: bool,
     /// Named markers in the song (frame, name), in time order, as Live's locators.
     locators: Vec<(usize, String)>,
     /// A right-click in the ruler: the locator under it (if any) and the frame there.
@@ -417,6 +419,7 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            metronome: false,
             locators: Vec::new(),
             loc_menu: None,
             fade_drag: None,
@@ -580,7 +583,8 @@ impl App {
             },
             View::Arrangement => {
                 // The song is mixed live as it plays: just hand over what to play.
-                let song = layers::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain);
+                let click = self.metronome.then(|| (self.beat_frames(), self.beats_per_bar));
+                let song = layers::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain, click);
                 self.player.set_song(Arc::new(song));
                 self.play_audio = None;
                 return;

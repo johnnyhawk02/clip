@@ -86,7 +86,7 @@ pub(super) fn flatten_clips(tracks: &[Track], resume: usize, cut: usize) -> Trac
 /// The song as the live engine plays it: the visible layers' clips, read straight from their
 /// audio (a re-pitched clip from its original, at the speed the tempo needs), and the plan of
 /// which layer is heard when.
-pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32) -> engine::Song {
+pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32, click: Option<(f64, u32)>) -> engine::Song {
     let visible: Vec<&Track> = tracks.iter().filter(|t| !t.mute).collect();
     let plan: Vec<Layer> = visible.iter().map(|t| Layer::of(t, Audio { rate, channels: Vec::new() })).collect();
     let layers = visible
@@ -96,7 +96,7 @@ pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32) -> engi
             clips: t.clips.iter().zip(crossfades(&t.clips)).filter(|(c, _)| c.len > 0).map(|(c, cross)| clip_src(c, cross, rate)).collect(),
         })
         .collect();
-    engine::Song { layers, pieces: pieces(&plan, rate), end, rate, master }
+    engine::Song { layers, pieces: pieces(&plan, rate), end, rate, master, click }
 }
 
 fn clip_src(c: &Clip, cross: (usize, usize), rate: u32) -> engine::ClipSrc {

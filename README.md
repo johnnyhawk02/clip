@@ -24,7 +24,9 @@ clips on the layers above to patch over parts of it.
   between them, a click on one jumps there, and right-click renames it, deletes it or loops to the
   next one.
 - Playback starts from where you last clicked (the insert marker) and stopping leaves it there;
-  ⇧Space carries on from where you stopped. Control ▸ Follow (⌘F) turns view scrolling on or off.
+  ⇧Space carries on from where you stopped. Control ▸ Follow (⌘F) turns view scrolling on or off,
+  and the Metronome button in the top bar (or Control ▸ Metronome) clicks along on every beat, higher
+  on the first of the bar. It's only heard, never exported.
   Clip ▸ Quantize (⌘U) snaps clip starts to the grid (Slice at Grid moved to ⌥⌘U).
 - Select one clip and the Clip View appears under the layers, as in Live: Warp on/off and the
   clip's own BPM, Loop, Start and Length (bars.beats.sixteenths), Gain, Reverse and Edit.
