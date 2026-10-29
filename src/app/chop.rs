@@ -286,13 +286,21 @@ impl App {
         self.status = format!("BBCut {style:?}: {} cuts (⌘Y cuts again)", new_sel.len());
     }
 
-    /// The arrangement loop, when Loop is on: Mangle then works on that span of time.
+    /// The span of time Mangle works on: the time selection (the blue one), or else the
+    /// arrangement loop when Loop is on.
     pub(super) fn loop_span(&self) -> Option<Sel> {
+        if let Some((range, _)) = self.time_sel.filter(|_| self.view == View::Arrangement) {
+            return Some(range);
+        }
         self.arr_loop.filter(|&(s, e)| self.looping && e > s)
     }
 
-    /// The tracks a loop-span Mangle works on: those of the selected clips, or the active track.
+    /// The layers a span Mangle works on: those of the time selection, or of the selected
+    /// clips, or the active one.
     fn loop_tracks(&self) -> Vec<usize> {
+        if let Some((_, (t0, t1))) = self.time_sel.filter(|_| self.view == View::Arrangement) {
+            return (t0..=t1.min(self.tracks.len().saturating_sub(1))).collect();
+        }
         let mut tracks: Vec<usize> = self.selected_clips().iter().map(|p| p.0).collect();
         if tracks.is_empty() {
             tracks.push(self.active);
@@ -336,7 +344,7 @@ impl App {
         if let Some((ls, le)) = span {
             let touches = self.loop_tracks().iter().any(|&t| self.tracks[t].clips.iter().any(|c| c.start < le && c.end() > ls));
             if !touches {
-                self.status = "Nothing inside the loop to mangle on this track".into();
+                self.status = "Nothing inside the selection to mangle".into();
                 return;
             }
         } else if sel.is_empty() {

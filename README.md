@@ -79,7 +79,8 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   to other clips' edges and the playhead; hold ⌘ to turn snapping off.
 - Selecting works like Live's: drag across empty space, or across a clip's waveform, to select a
   stretch of time on one or more layers (a light blue wash, snapped to the grid; ⌘ for free). ⌫
-  deletes that stretch, ⌘E splits the clips at its ends, and ⌘L / Set Loop loops it. Drag a clip by
+  deletes that stretch, ⌘E splits the clips at its ends, ⌘L / Set Loop loops it, and Mangle and
+  BBCut work only inside it. Drag a clip by
   its name strip to move it; click clips (shift-click for more) to select whole clips.
 - Click empty space to move the playhead. Space plays the whole arrangement from the playhead.
 - **Double-click a clip (or press Return) to edit it** in the waveform editor below, with every
