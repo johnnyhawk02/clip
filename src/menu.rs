@@ -29,6 +29,7 @@ impl NativeMenu {
 
         let app_menu = Submenu::new("PhotoSound", true);
         let quit = MenuItem::with_id(Action::Quit.id(), Action::Quit.label(), true, accel(Action::Quit));
+        let prefs = MenuItem::with_id(Action::Preferences.id(), Action::Preferences.label(), true, accel(Action::Preferences));
         let _ = app_menu.append_items(&[
             &PredefinedMenuItem::about(
                 Some("About PhotoSound"),
@@ -39,6 +40,8 @@ impl NativeMenu {
                 }),
             ),
             &PredefinedMenuItem::separator(),
+            &prefs,
+            &PredefinedMenuItem::separator(),
             &PredefinedMenuItem::hide(Some("Hide PhotoSound")),
             &PredefinedMenuItem::hide_others(None),
             &PredefinedMenuItem::show_all(None),
@@ -47,6 +50,7 @@ impl NativeMenu {
             &quit,
         ]);
         entries.insert(Action::Quit, Entry::Plain(quit));
+        entries.insert(Action::Preferences, Entry::Plain(prefs));
         let _ = menu.append(&app_menu);
 
         for (title, items) in MENUS {

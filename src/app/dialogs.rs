@@ -662,6 +662,41 @@ impl App {
         self.show_spectrum = open;
     }
 
+    /// PhotoSound ▸ Preferences (⌘,).
+    pub(super) fn prefs_dialog(&mut self, ctx: &egui::Context) {
+        let Some(before) = self.prefs_open else { return };
+        let mut ok = false;
+        let mut cancel = false;
+        let resp = dialog_modal("prefs").show(ctx, |ui| {
+            ui.set_width(380.0);
+            dialog_header(ui, "Preferences", "");
+            dialog_grid("prefsgrid").show(ui, |ui| {
+                ui.label("Phrase lines");
+                ui.horizontal(|ui| {
+                    ui.label("every");
+                    ui.add(egui::DragValue::new(&mut self.phrase_bars).range(0..=64));
+                    ui.label(if self.phrase_bars == 0 { "bars (off)" } else { "bars" });
+                });
+                ui.end_row();
+            });
+            ui.label(egui::RichText::new("A fine line across the arrangement, counting from bar 1. 0 turns them off.").color(MUTED));
+            (ok, cancel) = dialog_buttons(ui, "Done", true, |_| {});
+        });
+        if cancel || resp.should_close() {
+            self.phrase_bars = before;
+            self.prefs_open = None;
+        } else if ok {
+            if std::env::var_os("SOUND_EDIT_ACTIONS").is_none() {
+                let p = phrase_pref();
+                if let Some(dir) = p.parent() {
+                    let _ = std::fs::create_dir_all(dir);
+                }
+                let _ = std::fs::write(p, self.phrase_bars.to_string());
+            }
+            self.prefs_open = None;
+        }
+    }
+
     /// Tracks ▸ Mix: choose tracks and their levels and pan, then mix into a new track or
     /// replace all tracks with the mix.
     pub(super) fn mix_dialog(&mut self, ctx: &egui::Context) {

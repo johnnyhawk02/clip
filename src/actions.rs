@@ -100,6 +100,7 @@ pub enum Action {
     LayerUp,
     LayerDown,
     MergeDown,
+    Preferences,
     ShowRegions,
     Dither,
     CutGaps,
@@ -160,7 +161,7 @@ pub const ALL: &[Action] = &[
     ZoomIn, ZoomOut, ZoomSel, ZoomFit, ZoomBack, Crossfeed, NarrowGrid, WidenGrid, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
     ShowControls, ShowInfo, Convert, Equalizer, Envelope, Bender, Record, AddCue, NextCue, PrevCue,
     ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, SoloTrack, NextTrack,
-    PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, LayerUp, LayerDown, MergeDown, ShowRegions, Dither, CutGaps,
+    PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, MixDialog, OffsetTrack, TrackColor, LayerUp, LayerDown, MergeDown, Preferences, ShowRegions, Dither, CutGaps,
     AutoGain, EditClip, BackToArrangement, SplitClip, DuplicateClip, NewClip, ImportClip,
     GroupClips, Ungroup, SaveProject, SaveProjectAs, TempoFromClip,
     ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp, SliceClip, ReverseClip,
@@ -462,6 +463,7 @@ impl Action {
             LayerUp => "Move Layer Up",
             LayerDown => "Move Layer Down",
             MergeDown => "Merge Down",
+            Preferences => "Preferences…",
             ShowRegions => "Regions",
             ShowPool => "Loop Pool",
             AddToPool => "Add to Pool",
@@ -489,6 +491,7 @@ impl Action {
             SaveProject => "CmdOrCtrl+S",
             SaveProjectAs => "CmdOrCtrl+Shift+S",
             Quit => "CmdOrCtrl+Q",
+            Preferences => "CmdOrCtrl+Comma",
             Undo => "CmdOrCtrl+Z",
             Redo => "CmdOrCtrl+Shift+Z",
             Cut => "CmdOrCtrl+X",
@@ -545,6 +548,7 @@ impl Action {
     /// Shortcut text for tooltips, including the plain-key ones handled in the window.
     pub fn shortcut(self) -> Option<&'static str> {
         Some(match self {
+            Preferences => "⌘,",
             New => "⌘N",
             Open => "⌘O",
             Export => "⇧⌘R",

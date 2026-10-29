@@ -128,6 +128,8 @@ and audio sits on them as clips. Opening a file gives one track with one clip.
   loops, and the tempo and beats per bar carry over. Clips are warped so they play at their own
   speed. Groups come across as their rendered audio. The set is built from Live's own default set
   (`assets/ableton_template.xml`).
+- A fine line runs across the arrangement every 4 bars, counting from bar 1, so phrases are easy to
+  see. PhotoSound ▸ Preferences (⌘,) sets how many bars apart (0 turns them off).
 - Shortcuts follow Ableton Live wherever the two apps share a feature: ⌘E split, ⌘D duplicate, ⌘J consolidate (Collapse to Audio), ⌘G / ⇧⌘G group and ungroup, ⌘L loop on/off, R reverse clip, Z zoom to selection, X zoom back, W fit the song in the window, ⌘1 / ⌘2 narrow and widen the grid, ⌘4 snap, B draw (Pencil), ⌘T new layer, ⇧⌘J crop (Trim), ⇧⌘R export, F9 record, ⇧Tab switch between the arrangement and the clip editor. Select None is ⇧⌘A.
 
 

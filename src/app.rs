@@ -181,6 +181,10 @@ pub struct App {
     arr_loop_drag: Option<usize>,
     /// A tempo or time-signature edit in progress (one undo step however long it's dragged).
     song_edit: bool,
+    /// A fine line across the arrangement every this many bars (0 = none), from Preferences.
+    phrase_bars: u32,
+    /// Preferences window open, holding the settings to go back to on Cancel.
+    prefs_open: Option<u32>,
     /// Dragging the loop brace: where it was grabbed (frames), the range then, and which part
     /// (the whole brace moves, an end resizes).
     arr_loop_grab: Option<(f64, Sel, LoopGrab)>,
@@ -313,6 +317,11 @@ fn crossfeed_pref() -> PathBuf {
     home.join("Library/Application Support/Sound Edit/crossfeed-on")
 }
 
+/// A file holding the Preferences setting for the phrase lines (bars between them).
+fn phrase_pref() -> PathBuf {
+    crossfeed_pref().with_file_name("phrase-bars")
+}
+
 /// A file holding the path of the project last opened or saved, reopened at launch.
 fn last_project_pref() -> PathBuf {
     crossfeed_pref().with_file_name("last-project")
@@ -360,6 +369,8 @@ impl App {
             arr_loop: None,
             arr_loop_drag: None,
             song_edit: false,
+            phrase_bars: std::fs::read_to_string(phrase_pref()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(4),
+            prefs_open: None,
             arr_loop_grab: None,
             ruler_zoom: None,
             ctx_menu_track: None,
@@ -1024,7 +1035,7 @@ impl App {
         if self.view == View::Arrangement {
             let has_clip = self.sel_clip.and_then(|p| self.clip(p)).is_some();
             return match a {
-                Action::New | Action::Open | Action::Quit | Action::BatchConvert | Action::Record | Action::NewClip | Action::ImportClip => true,
+                Action::New | Action::Open | Action::Quit | Action::Preferences | Action::BatchConvert | Action::Record | Action::NewClip | Action::ImportClip => true,
                 Action::SaveProject | Action::SaveProjectAs => doc,
                 Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Dither | Action::AutoGain => true,
                 Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed => true,
@@ -1082,7 +1093,7 @@ impl App {
         let sel = has && self.sel.is_some();
         let not_empty = self.frames() > 0;
         match a {
-            Action::New | Action::Open | Action::Quit => true,
+            Action::New | Action::Open | Action::Quit | Action::Preferences => true,
             Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop | Action::Crossfeed => true,
             Action::ShowCues | Action::Record => true,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack | Action::SoloTrack => has,
@@ -1488,6 +1499,7 @@ impl App {
             Action::MixDialog => self.mix_include = Some(vec![true; self.tracks.len()]),
             Action::LayerUp => self.move_layer(true),
             Action::LayerDown => self.move_layer(false),
+            Action::Preferences => self.prefs_open = Some(self.phrase_bars),
             Action::MergeDown => self.merge_down(),
             Action::TrackColor => {
                 let t = &mut self.tracks[self.active];
@@ -1786,6 +1798,7 @@ impl eframe::App for App {
             self.batch_window(&ctx);
         }
         self.mix_dialog(&ctx);
+        self.prefs_dialog(&ctx);
 
         // Highlight when a file is dragged over the window.
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {

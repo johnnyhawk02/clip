@@ -1146,6 +1146,20 @@ impl App {
         if self.tracks.is_empty() {
             painter.text(lanes.center(), Align2::CENTER_CENTER, "Drop a sound here, or choose File ▸ Open", FontId::proportional(16.0), Color32::from_gray(120));
         }
+        // Phrase lines: a fine darker line every few bars (Preferences), counting from bar 1, drawn over the clips.
+        if self.phrase_bars > 0 {
+            let every = self.bar_frames() * self.phrase_bars as f64;
+            if every / spp > 6.0 {
+                let mut k = (vs / every).ceil() as i64;
+                while (k as f64 * every) <= vs + vl {
+                    let x = f_to_x(k as f64 * every, vs, vl);
+                    if x >= lanes.left() {
+                        painter.line_segment([Pos2::new(x, lanes.top()), Pos2::new(x, lanes.bottom())], Stroke::new(1.0, Color32::from_black_alpha(70)));
+                    }
+                    k += 1;
+                }
+            }
+        }
         // Playhead (or the playback position).
         let ph = if playing { play_pos } else { self.arr_cursor };
         let x = f_to_x(ph as f64, vs, vl);
