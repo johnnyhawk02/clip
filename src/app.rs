@@ -789,19 +789,10 @@ impl App {
             if self.tracks.is_empty() {
                 self.new_sound();
             }
-            // Recordings land on a new top layer, so they are heard over everything else.
-            let (t, c) = self.add_clip("Recording", Arc::new(clip), "Record");
-            if self.tracks.len() > 1 || self.tracks[t].clips.len() > 1 {
-                let c = self.tracks[t].clips.remove(c);
-                let mut layer = Track::new("Recording");
-                layer.color = self.tracks.len() % TRACK_COLORS.len();
-                layer.clips.push(c);
-                self.tracks.insert(0, layer);
-                self.active = 0;
-                self.sel_clip = Some((0, 0));
-                self.refresh_playback();
-            }
-            self.status = format!("Recorded {} on a new top layer", fmt_time(secs));
+            // The take goes on the selected track at the insert marker, over what was there.
+            let p = self.add_clip("Recording", Arc::new(clip), "Record");
+            self.place_over(p);
+            self.status = format!("Recorded {} on the selected track", fmt_time(secs));
         } else {
             self.insert_clip("Record", clip);
             self.status = format!("Recorded {} — ⌘Z to undo", fmt_time(secs));

@@ -455,7 +455,7 @@ impl App {
                 if !self.tracks.is_empty() {
                     let clips: usize = self.tracks.iter().map(|t| t.clips.len()).sum();
                     let plural = |n: usize, w: &str| format!("{n} {w}{}", if n == 1 { "" } else { "s" });
-                    ui.label(format!("{} Hz · {} · {} · {}", self.rate(), plural(self.tracks.len(), "layer"), plural(clips, "clip"), self.fmt_pos(self.arrangement_frames())));
+                    ui.label(format!("{} Hz · {} · {} · {}", self.rate(), plural(self.tracks.len(), "track"), plural(clips, "clip"), self.fmt_pos(self.arrangement_frames())));
                     ui.separator();
                     ui.label(format!("Playhead {}", self.fmt_pos(self.arr_cursor)));
                     ui.separator();

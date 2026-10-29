@@ -84,32 +84,6 @@ pub(super) fn clean_style(ctx: &egui::Context) {
 }
 
 /// Monochrome vector icons for the Tools and Controls palettes.
-/// A layer's show/hide eye: open when the layer is heard, crossed out when hidden.
-pub(super) fn paint_eye(p: &egui::Painter, r: Rect, shown: bool, hovered: bool) {
-    if hovered {
-        p.rect_filled(r, 3.0, Color32::from_black_alpha(14));
-    }
-    let col = if shown { INK } else { MUTED };
-    let c = r.center();
-    let (w, h) = (8.0, 4.5);
-    let n = 12;
-    let mut pts = Vec::new();
-    for k in 0..=n {
-        let t = k as f32 / n as f32 * std::f32::consts::PI;
-        pts.push(Pos2::new(c.x - w * t.cos(), c.y - h * t.sin()));
-    }
-    for k in 1..n {
-        let t = k as f32 / n as f32 * std::f32::consts::PI;
-        pts.push(Pos2::new(c.x + w * t.cos(), c.y + h * t.sin()));
-    }
-    p.add(egui::Shape::closed_line(pts, Stroke::new(1.3, col)));
-    if shown {
-        p.circle_filled(c, 2.4, col);
-    } else {
-        p.line_segment([c + Vec2::new(-7.0, 6.0), c + Vec2::new(7.0, -6.0)], Stroke::new(1.3, col));
-    }
-}
-
 pub(super) fn paint_icon(p: &egui::Painter, rect: Rect, a: Action, color: Color32, playing: bool) {
     let c = rect.center();
     let st = Stroke::new(1.5, color);

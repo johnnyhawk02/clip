@@ -287,30 +287,30 @@ impl App {
             }
             clicked
         };
-        if item(ui, "New Layer", true) {
+        if item(ui, "New Track", true) {
             chosen = Some(Action::NewTrack);
         }
-        if item(ui, "Duplicate Layer", true) {
+        if item(ui, "Duplicate Track", true) {
             chosen = Some(Action::DuplicateTrack);
         }
-        if item(ui, "Delete Layer", self.tracks.len() > 1) {
+        if item(ui, "Delete Track", self.tracks.len() > 1) {
             chosen = Some(Action::DeleteTrack);
         }
         ui.separator();
-        if item(ui, "Move Layer Up", t > 0) {
+        if item(ui, "Move Track Up", t > 0) {
             chosen = Some(Action::LayerUp);
         }
-        if item(ui, "Move Layer Down", t + 1 < self.tracks.len()) {
+        if item(ui, "Move Track Down", t + 1 < self.tracks.len()) {
             chosen = Some(Action::LayerDown);
         }
-        if item(ui, if mute { "Show Layer" } else { "Hide Layer" }, true) {
+        if item(ui, if mute { "Unmute" } else { "Mute" }, true) {
             chosen = Some(Action::MuteTrack);
         }
         if item(ui, "Next Colour", true) {
             chosen = Some(Action::TrackColor);
         }
         ui.separator();
-        if item(ui, "Collapse Layer to One Clip", has_clips) {
+        if item(ui, "Collapse Track to One Clip", has_clips) {
             collapse = true;
         }
         if item(ui, "Import File as Clip…", true) {
@@ -324,7 +324,7 @@ impl App {
         }
     }
 
-    /// Per-layer controls beside each lane: name, show/hide, volume and colour.
+    /// Per-track controls beside each lane, as in Live: name, activator, Solo, volume, colour and pan.
     fn track_headers(&mut self, ui: &mut egui::Ui, header: Rect, n_tracks: usize, lane: &dyn Fn(usize) -> Rect) {
         // The whole column, including the corners beside the ruler and scroll bar.
         let column = Rect::from_min_max(Pos2::new(header.left(), header.top() - 22.0 - LOOP_H - LOC_H), Pos2::new(header.right(), header.bottom() + 15.0));
@@ -359,20 +359,46 @@ impl App {
                 }
                 if inner.height() > 44.0 {
                     ui.horizontal(|ui| {
-                        let (eye, eye_r) = ui.allocate_exact_size(Vec2::new(24.0, 20.0), Sense::click());
-                        paint_eye(ui.painter(), eye, !t.mute, eye_r.hovered());
-                        if eye_r.on_hover_text(if t.mute { "Show layer" } else { "Hide layer" }).clicked() {
+                        // Live's track activator (its number, lit while the track plays) and Solo.
+                        let (act, act_r) = ui.allocate_exact_size(Vec2::new(22.0, 20.0), Sense::click());
+                        let on = !t.mute;
+                        ui.painter().rect(act, 3.0, if on { INK } else { Color32::TRANSPARENT }, Stroke::new(1.0, INK), egui::StrokeKind::Inside);
+                        ui.painter().text(act.center(), Align2::CENTER_CENTER, (ti + 1).to_string(), FontId::proportional(11.0), if on { Color32::WHITE } else { INK });
+                        if act_r.on_hover_text(if on { "Track on (click to mute)" } else { "Track muted (click to turn on)" }).clicked() {
                             t.mute = !t.mute;
                             changed = true;
                         }
-                        let (sw, swr) = ui.allocate_exact_size(Vec2::new(20.0, 20.0), Sense::click());
-                        ui.painter().rect_filled(sw.shrink(3.0), 3.0, TRACK_COLORS[t.color % TRACK_COLORS.len()]);
-                        if swr.on_hover_text("Layer colour (click to change)").clicked() {
-                            t.color = (t.color + 1) % TRACK_COLORS.len();
+                        if ui.add(Button::new("S").selected(t.solo).min_size(Vec2::new(22.0, 20.0))).on_hover_text("Solo").clicked() {
+                            t.solo = !t.solo;
+                            changed = true;
                         }
                         ui.spacing_mut().slider_width = (inner.width() - 60.0).max(30.0);
                         let vol = ui.add(egui::Slider::new(&mut t.gain, 0.0..=2.0).show_value(false)).on_hover_text(format!("Volume {:.0}%", t.gain * 100.0));
                         if vol.drag_stopped() || (vol.changed() && !vol.dragged()) {
+                            changed = true;
+                        }
+                    });
+                }
+                if inner.height() > 70.0 {
+                    ui.horizontal(|ui| {
+                        let (sw, swr) = ui.allocate_exact_size(Vec2::new(22.0, 20.0), Sense::click());
+                        ui.painter().rect_filled(sw.shrink(3.0), 3.0, TRACK_COLORS[t.color % TRACK_COLORS.len()]);
+                        if swr.on_hover_text("Track colour (click to change)").clicked() {
+                            t.color = (t.color + 1) % TRACK_COLORS.len();
+                        }
+                        ui.label(egui::RichText::new("Pan").size(11.0).color(MUTED));
+                        ui.spacing_mut().slider_width = (inner.width() - 64.0).max(30.0);
+                        let tip = match t.pan {
+                            p if p.abs() < 0.01 => "Pan centre".to_string(),
+                            p if p < 0.0 => format!("Pan {:.0}% left", -p * 100.0),
+                            p => format!("Pan {:.0}% right", p * 100.0),
+                        };
+                        let pan = ui.add(egui::Slider::new(&mut t.pan, -1.0..=1.0).show_value(false)).on_hover_text(tip);
+                        if pan.double_clicked() {
+                            t.pan = 0.0;
+                            changed = true;
+                        }
+                        if pan.drag_stopped() || (pan.changed() && !pan.dragged()) {
                             changed = true;
                         }
                     });

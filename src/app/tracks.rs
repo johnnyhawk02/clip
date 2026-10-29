@@ -78,7 +78,7 @@ impl App {
     pub(super) fn move_layer(&mut self, up: bool) {
         let a = self.active;
         let Some(b) = (if up { a.checked_sub(1) } else { Some(a + 1) }).filter(|&b| b < self.tracks.len()) else { return };
-        self.push_undo(if up { "Move Layer Up" } else { "Move Layer Down" });
+        self.push_undo(if up { "Move Track Up" } else { "Move Track Down" });
         self.tracks.swap(a, b);
         let swap = |t: usize| if t == a { b } else if t == b { a } else { t };
         self.sel_clip = self.sel_clip.map(|(t, c)| (swap(t), c));

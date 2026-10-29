@@ -1,7 +1,6 @@
 //! Auto Arrange: lay out a whole track from a pool of loops. Each loop is fitted to the song
-//! tempo and cut into 8 or 16 bar sections, and the sections are laid end to end on one layer
-//! following an intro, build, breakdown and outro shape: calm loops for quiet phrases, busy
-//! ones for peaks. Every variation number gives the same
+//! tempo and cut into 8 or 16 bar sections, and the sections are placed on one track per loop
+//! following an intro, build, breakdown and outro shape. Every variation number gives the same
 //! layout again, so ◀ ▶ can step back to one you liked.
 
 use super::*;
@@ -248,41 +247,62 @@ impl App {
                 (base + (rand() - 0.5) * 0.3).clamp(0.05, 1.0)
             })
             .collect();
-        // Loops from calmest to busiest: a quiet phrase picks from the calm end, a peak from the
-        // busy end. Only one loop plays at a time, on a single layer.
-        let mut by_level: Vec<usize> = (0..n).collect();
-        let level: Vec<f64> = self.pool.iter().map(|p| rms(&p.clip.audio)).collect();
-        by_level.sort_by(|&a, &b| level[a].total_cmp(&level[b]));
-        let mut layer = self.tracks.first().cloned().unwrap_or_else(|| Track::new("Arrangement"));
-        layer.clips.clear();
-        layer.mute = false;
-        layer.name = "Arrangement".into();
+        let mut tracks: Vec<Track> = self
+            .pool
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                // Keep the mixer settings of a track that already plays this loop.
+                let mut t = self.tracks.iter().find(|t| t.name == p.clip.name).cloned().unwrap_or_else(|| Track::new(p.clip.name.clone()));
+                t.clips.clear();
+                if !self.tracks.iter().any(|o| o.name == p.clip.name) {
+                    t.color = i % TRACK_COLORS.len();
+                }
+                t
+            })
+            .collect();
+        let mut active: Vec<bool> = vec![false; n];
         let mut last_section: Vec<Option<usize>> = vec![None; n];
         for (pi, &e) in energy.iter().enumerate() {
-            let at = (e * (n - 1) as f64 + (rand() - 0.5) * 1.5).round().clamp(0.0, (n - 1) as f64) as usize;
-            let li = by_level[at];
+            let want = ((e * n as f64).round() as usize).clamp(1, n);
+            // Change a layer now and then even when the count stays the same.
+            if rand() < 0.35 {
+                let on: Vec<usize> = (0..n).filter(|&i| active[i]).collect();
+                if let Some(&i) = on.get((rand() * on.len() as f64) as usize) {
+                    active[i] = false;
+                }
+            }
+            while active.iter().filter(|&&a| a).count() > want {
+                let on: Vec<usize> = (0..n).filter(|&i| active[i]).collect();
+                active[on[(rand() * on.len() as f64) as usize % on.len()]] = false;
+            }
+            while active.iter().filter(|&&a| a).count() < want {
+                let off: Vec<usize> = (0..n).filter(|&i| !active[i]).collect();
+                active[off[(rand() * off.len() as f64) as usize % off.len()]] = true;
+            }
             let start = (pi as f64 * sec_bars * bar).round() as usize;
             let end = ((pi + 1) as f64 * sec_bars * bar).round() as usize;
-            let mut clip = self.pool[li].clip.clone();
-            let frames = clip.audio.frames();
-            let sections = ((frames as f64 / bar + 0.05) / sec_bars).floor() as usize;
-            clip.start = start;
-            clip.len = end - start;
-            if sections == 0 {
-                // Shorter than a section: loop it to fill.
-                clip.looping = true;
-            } else {
-                let s = match last_section[li] {
-                    Some(s) if rand() < 0.5 => s,
-                    _ => (rand() * sections as f64) as usize % sections,
-                };
-                last_section[li] = Some(s);
-                clip.trim = (s as f64 * sec_bars * bar).round() as usize;
-                clip.len = clip.len.min(frames - clip.trim.min(frames));
+            for li in (0..n).filter(|&i| active[i]) {
+                let mut clip = self.pool[li].clip.clone();
+                let frames = clip.audio.frames();
+                let sections = ((frames as f64 / bar + 0.05) / sec_bars).floor() as usize;
+                clip.start = start;
+                clip.len = end - start;
+                if sections == 0 {
+                    // Shorter than a section: loop it to fill.
+                    clip.looping = true;
+                } else {
+                    let s = match last_section[li] {
+                        Some(s) if rand() < 0.5 => s,
+                        _ => (rand() * sections as f64) as usize % sections,
+                    };
+                    last_section[li] = Some(s);
+                    clip.trim = (s as f64 * sec_bars * bar).round() as usize;
+                    clip.len = clip.len.min(frames - clip.trim.min(frames));
+                }
+                tracks[li].clips.push(clip);
             }
-            layer.clips.push(clip);
         }
-        let tracks = vec![layer];
         self.tracks = tracks;
         self.active = 0;
         self.sel_clip = None;
@@ -295,10 +315,4 @@ impl App {
         let mins = phrases as f64 * sec_bars * bar / self.rate() as f64 / 60.0;
         self.status = format!("Variation {}: {} loops, {} sections of {} bars, {:.1} min (◀ ▶ for others)", self.variation, n, phrases, self.section_bars, mins);
     }
-}
-
-/// Loudness of a loop (RMS over all channels), used to tell calm loops from busy ones.
-fn rms(a: &Audio) -> f64 {
-    let (sum, n) = a.channels.iter().flatten().fold((0.0f64, 0usize), |(s, n), &v| (s + (v as f64) * (v as f64), n + 1));
-    if n == 0 { 0.0 } else { (sum / n as f64).sqrt() }
 }

@@ -387,6 +387,6 @@ impl App {
             self.clear_span(t, (s, e));
             self.tracks[t].clips.push(clip);
         }
-        self.finish_time_edit("Consolidated the selection into one clip per layer — ⌘Z to undo");
+        self.finish_time_edit("Consolidated the selection into one clip per track — ⌘Z to undo");
     }
 }
