@@ -131,6 +131,14 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 <section id="tracks">
   <h2><span class="n">03</span>Tracks</h2>
   <p>Tracks play together, mixed, as in Live. Each has Live's track activator (its number, lit while it plays; click to mute), Solo, a volume slider, a colour and pan. Solo wins over mute.</p>
+  <h3>The Session view <kbd>Tab</kbd></h3>
+  <p><kbd>Tab</kbd> flips between the song and the Session view: a grid of clip slots, a column per track and a row per scene, for audio loops only. Eight scenes to start; <b>+ Scene</b> adds more.</p>
+  <ul>
+    <li><b>Fill slots</b> by dropping loops from the Finder or the Loop Pool. Drag a clip to another slot to move it, <kbd>⌥</kbd>-drag to copy. Right-click a song clip ▸ <span class="path">Copy to Session</span> puts it in the first empty slot.</li>
+    <li><b>Launch</b> a clip with its triangle. Launches wait for the next bar (change it with Launch quantize), each track plays one clip, the scene buttons launch a row, a column's square stops its track and <b>Stop All Clips</b> stops everything.</li>
+    <li><b>Edit</b>: click a clip to see it in the detail view under the grid, double-click to open the full clip editor. Shift-click slots and <kbd>⌘G</kbd> groups them into one clip whose parts play in turn.</li>
+    <li><b>Back to the song:</b> a track playing from the session drowns out its song clips until you press <b>Back to Arrangement</b>. Turn on <b>● Record to Song</b> and what you launch is written into the song view when you stop.</li>
+  </ul>
 </section>
 
 <section id="chop">
@@ -253,6 +261,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <div class="table"><table>
     <tr><th>Keys</th><th>Does</th></tr>
     <tr><td><kbd>Space</kbd></td><td>Play / pause. <kbd>Esc</kbd> stops.</td></tr>
+    <tr><td><kbd>Tab</kbd></td><td>Song / Session view</td></tr>
     <tr><td><kbd>⌘E</kbd></td><td>Split clip</td></tr>
     <tr><td><kbd>⌘U</kbd> / <kbd>⌥⌘U</kbd></td><td>Quantize / slice at grid</td></tr>
     <tr><td><kbd>⌘D</kbd></td><td>Duplicate clip</td></tr>

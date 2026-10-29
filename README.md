@@ -38,6 +38,23 @@ Solo, a volume slider, a colour and pan; solo wins over mute.
 
 **Guide:** https://johnnyhawk02.github.io/photosound/
 
+## Session view, as in Live
+
+Tab flips between the song (Arrangement) and the Session view, a grid of clip slots: a column per
+track, a row per scene (8 to start; + Scene adds more). It holds audio loops only.
+
+- Drop loops from the Finder or the Loop Pool into a slot; drag a clip to another slot to move it,
+  ⌥-drag to copy. Right-click a song clip ▸ Copy to Session puts it in the track's first empty slot.
+- Click a slot's triangle to launch it; launches wait for the next bar (Launch quantize in the bar
+  above changes that). One clip plays per track, and the scene buttons on the right launch a whole
+  row. Each column's square stops its track; Stop All Clips stops them all.
+- Click a clip to see it in the detail view under the grid; double-click it to open the full clip
+  editor. Shift-click slots and ⌘G groups them into one clip whose parts play in turn, and a group
+  opens like any other.
+- A track playing from the session drowns out its song clips until Back to Arrangement. Turn on
+  ● Record to Song (or Control ▸ Record Session to Song) and what you launch is written into the song
+  view when you stop.
+
 ## Chopping loops
 
 - Drop loops in; ones with a tempo in the name ("118bpm 16bar", "124 BPM") warp to the song tempo.
