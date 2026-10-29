@@ -335,6 +335,12 @@ fn crossfeed_pref() -> PathBuf {
     home.join("Library/Application Support/Sound Edit/crossfeed-on")
 }
 
+/// Clip processes that, with a time selection, work on just the part inside it.
+fn on_time_sel(a: Action) -> bool {
+    use Action::*;
+    matches!(a, ReverseClip | SwapSection | SliceClip | CollapseClip | WarpClip | LoopClip | DuplicateClip | Copy | Cut | AddToPool | GroupClips)
+}
+
 /// A file holding the Preferences setting for the phrase lines (bars between them).
 fn phrase_pref() -> PathBuf {
     crossfeed_pref().with_file_name("phrase-bars")
@@ -1085,7 +1091,8 @@ impl App {
     fn enabled(&self, a: Action) -> bool {
         let doc = !self.tracks.is_empty();
         if self.view == View::Arrangement {
-            let has_clip = self.sel_clip.and_then(|p| self.clip(p)).is_some();
+            // A time selection stands in for selected clips: processes work on what's inside it.
+            let has_clip = self.sel_clip.and_then(|p| self.clip(p)).is_some() || self.time_sel.is_some();
             return match a {
                 Action::New | Action::Open | Action::Quit | Action::Preferences | Action::BatchConvert | Action::Record | Action::NewClip | Action::ImportClip => true,
                 Action::SaveProject | Action::SaveProjectAs => doc,
@@ -1230,6 +1237,9 @@ impl App {
     fn run(&mut self, a: Action, ctx: &egui::Context) {
         if !self.enabled(a) {
             return;
+        }
+        if self.view == View::Arrangement && self.time_sel.is_some() && on_time_sel(a) {
+            return self.run_on_time_sel(a, ctx);
         }
         if self.view == View::Arrangement {
             let mid = self.arr_view_start + self.arr_view_len / 2.0;

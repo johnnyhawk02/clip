@@ -984,6 +984,30 @@ impl App {
         Some(((s, e), (t0, t1)))
     }
 
+    /// Run clip process `a` on just the stretch inside the time selection: the clips there are
+    /// cut at its ends and selected, `a` runs on them, and the selection stays (one undo step).
+    pub(super) fn run_on_time_sel(&mut self, a: Action, ctx: &egui::Context) {
+        let before = self.undo.len();
+        self.push_undo("Process Selection");
+        let Some(((s, e), (t0, t1))) = self.cut_at_time_sel() else { return };
+        let inside: Vec<(usize, usize)> = (t0..=t1.min(self.tracks.len().saturating_sub(1)))
+            .flat_map(|t| self.tracks[t].clips.iter().enumerate().filter(|(_, c)| c.start >= s && c.end() <= e).map(move |(i, _)| (t, i)).collect::<Vec<_>>())
+            .collect();
+        self.sel_clip = inside.first().copied();
+        self.sel_extra = inside.iter().skip(1).copied().collect();
+        let keep = self.time_sel.take();
+        self.run(a, ctx);
+        self.time_sel = keep;
+        // Fold the process's own undo step into ours, so ⌘Z undoes the cuts too.
+        if self.undo.len() == before + 2 {
+            let top = self.undo.pop().unwrap();
+            if let Some(first) = self.undo.last_mut() {
+                first.label = top.label;
+            }
+        }
+        self.refresh_playback();
+    }
+
     /// ⌘E with a time selection: split the clips it covers at its ends.
     pub(super) fn split_time_sel(&mut self) {
         self.push_undo("Split");
