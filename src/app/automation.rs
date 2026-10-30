@@ -211,6 +211,14 @@ impl App {
                         self.status = format!("saveproj {arg}: {r:?}");
                     }
                     "openproj" => self.open_project(PathBuf::from(arg)),
+                    "launch" => {
+                        // launch:t|s launches the clip in track t's slot s.
+                        let v: Vec<usize> = arg.split('|').filter_map(|x| x.parse().ok()).collect();
+                        if let [t, s] = v[..] {
+                            self.launch_slot(t, s);
+                        }
+                        eprintln!("session {:?}", self.session_play.iter().map(|p| (p.owned, p.segments.clone())).collect::<Vec<_>>());
+                    }
                     "device" => {
                         // device:t|Name adds an effect to track t.
                         let mut it = arg.splitn(2, '|');

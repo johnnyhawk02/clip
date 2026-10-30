@@ -218,6 +218,8 @@ where
     let out_rate = config.sample_rate as f64;
     let mut xfeed = Crossfeed::new(out_rate);
     let mut mix: Vec<[f32; 2]> = Vec::new();
+    // Scripted test runs can play silently (SOUND_EDIT_MUTE), so nothing reaches the speakers.
+    let level = if std::env::var_os("SOUND_EDIT_MUTE").is_some() { 0.0 } else { 1.0 };
     device
         .build_output_stream(
             config,
@@ -284,7 +286,7 @@ where
                             1 => r,
                             _ => 0.0,
                         };
-                        *out = T::from_sample(v.clamp(-1.0, 1.0));
+                        *out = T::from_sample((v * level).clamp(-1.0, 1.0));
                     }
                     s.pos += step * if matches!(s.source, Source::Song(_)) { s.speed } else { 1.0 };
                 }

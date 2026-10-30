@@ -81,7 +81,7 @@ track, a row per scene (8 to start; + Scene adds more). It holds audio loops onl
 
 - Drop loops from the Finder or the Loop Pool into a slot; drag a clip to another slot to move it,
   ⌥-drag to copy. Right-click a song clip ▸ Copy to Session puts it in the track's first empty slot.
-- Click a slot's triangle to launch it; launches wait for the next bar (Launch quantize in the bar
+- Click a clip (or its triangle) to launch it; launches wait for the next bar (Launch quantize in the bar
   above changes that). One clip plays per track, and the scene buttons on the right launch a whole
   row from the Main column. The square under each column stops its track; Stop All Clips stops them
   all. The mixer along the bottom has Live's pan knobs, meters, vertical faders (double-click for
