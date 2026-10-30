@@ -671,7 +671,13 @@ impl App {
                 // The brace set inside is what the slot plays round now.
                 c.loop_points = self.arr_loop.filter(|&(s, e)| e > s);
             }
-            self.set_group_content(&mut c, inner);
+            // Closed before its clips were stretched to a new tempo: mixing them now would
+            // give the old speed, so its mix follows from another thread.
+            if tempo::group_stale(&inner) {
+                self.set_group_content_later(&mut c, inner);
+            } else {
+                self.set_group_content(&mut c, inner);
+            }
             if f.clip >= SLOT {
                 c = session::slot_clip(c);
             }

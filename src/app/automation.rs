@@ -16,6 +16,8 @@ pub(super) struct Automation {
     pub(super) dump_menu: bool,
     pub(super) done: Arc<std::sync::atomic::AtomicBool>,
     pub(super) started: std::time::Instant,
+    /// Carry on next frame even while something stretches (`frame`).
+    pub(super) eager: bool,
 }
 
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -37,6 +39,7 @@ impl Automation {
             dump_menu: false,
             done: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             started: std::time::Instant::now(),
+            eager: false,
         })
     }
 }
@@ -51,12 +54,13 @@ impl App {
         ctx.request_repaint();
         // Wait for loading, background stretching and scripted pointer input to finish before
         // the next step.
-        if self.audio.is_none() || self.loading.is_some() || self.stretching.is_some() || !self.synth.is_empty() {
+        if !auto.eager && (self.audio.is_none() || self.loading.is_some() || self.stretching.is_some() || !self.synth.is_empty()) {
             self.automation = Some(auto);
             return;
         }
         auto.frames_after_load += 1;
         if auto.frames_after_load == 3 {
+            auto.eager = false;
             let rate = self.audio.as_ref().unwrap().rate as f64;
             let mut queue = std::mem::take(&mut auto.actions).into_iter();
             while let Some(a) = queue.next() {
@@ -66,6 +70,13 @@ impl App {
                     "wait" => {
                         auto.actions = queue.collect();
                         auto.frames_after_load = 0;
+                        break;
+                    }
+                    // frame: carry on a few frames later, without waiting for stretching.
+                    "frame" => {
+                        auto.actions = queue.collect();
+                        auto.frames_after_load = 0;
+                        auto.eager = true;
                         break;
                     }
                     "sel" => {

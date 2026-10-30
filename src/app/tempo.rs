@@ -123,6 +123,19 @@ impl App {
         self.group_renders.push(rx);
     }
 
+    /// Give group clip `c` new content whose clips aren't fitted to the tempo yet: it plays its
+    /// old mix re-pitched to the tempo until the new one is rendered on another thread.
+    pub(super) fn set_group_content_later(&mut self, c: &mut Clip, tracks: Vec<Track>) {
+        if c.warp.is_none() {
+            let made_at = inner_tempo(c.group.as_deref().map_or(&[][..], |g| &g[..])).unwrap_or(self.tempo);
+            c.warp = Some(Warp { bpm: made_at, source: c.audio.clone(), source_peaks: c.peaks.clone(), tempo: made_at, repitch: true });
+            c.fit_place_to_tempo(self.tempo);
+        }
+        let inner = Arc::new(tracks);
+        c.group = Some(inner.clone());
+        self.render_groups(vec![GroupJob { key: Arc::as_ptr(&inner) as usize, inner, brace: c.loop_points }]);
+    }
+
     /// Put newly rendered group mixes into their clips (wherever they are now, if still the
     /// same content).
     pub(super) fn poll_groups(&mut self) {
@@ -232,6 +245,12 @@ pub(super) struct GroupJob {
     key: usize,
     inner: Arc<Vec<Track>>,
     brace: Option<Sel>,
+}
+
+/// Whether a group's tracks still wait for audio fitted to the tempo (a stretch, or a group's
+/// new mix), so mixing them now would give the old speed.
+pub(super) fn group_stale(tracks: &[Track]) -> bool {
+    tracks.iter().flat_map(|t| &t.clips).any(|c| if c.group.is_some() { c.warp.is_some() } else { c.awaiting_stretch().is_some() })
 }
 
 /// The tempo a group's warped clips were laid out for.
