@@ -189,9 +189,14 @@ impl App {
             let full_clip = ui.clip_rect();
             let track_clip = full_clip.intersect(tracks_clip);
             let top = area.top() + 4.0;
-            // With little room (the detail view open below), the mixer keeps only its buttons.
-            let compact = area.height() < MIX_H + HEAD_H + 6.0 * ROW_H;
-            let mix_top = area.bottom() - if compact { 30.0 } else { MIX_H };
+            // With less room (the detail view open below), the mixer gets shorter, keeping a
+            // few rows of slots; only when there's really no room does it keep just its buttons.
+            let mix_h = MIX_H.min(area.height() * 0.5).min(area.height() - HEAD_H - 3.0 * ROW_H);
+            let compact = mix_h < 100.0;
+            // A short mixer puts the pan knob beside the sends, so the fader keeps its room.
+            let short = mix_h < 200.0;
+            let (pan_y, fader_top) = if short { (12.0, 34.0) } else { (50.0, 72.0) };
+            let mix_top = area.bottom() - if compact { 30.0 } else { mix_h };
             let stop_top = mix_top - ROW_H - 2.0;
             // Title bars: each track's name on its colour (click to select the track).
             ui.set_clip_rect(track_clip);
@@ -323,13 +328,15 @@ impl App {
                         let span = 26.0 * n_ret.saturating_sub(1) as f32;
                         for (r, s) in tr.sends.iter_mut().enumerate() {
                             let letter = ((b'A' + (r % 26) as u8) as char).to_string();
-                            let kc = Pos2::new(c.center().x - span / 2.0 + r as f32 * 26.0, c.top() + 10.0);
+                            let x0 = if short { c.left() + 16.0 } else { c.center().x - span / 2.0 };
+                            let kc = Pos2::new(x0 + r as f32 * 26.0, c.top() + 10.0);
                             let (ch, rel) = send_knob(ui, kc, ui.scope_id().with(("ssend", t, r)), s, &letter);
                             changed |= ch;
                             released |= rel;
                         }
-                        changed |= pan_knob(ui, Pos2::new(c.center().x, c.top() + 50.0), ui.scope_id().with(("span", t)), &mut tr.pan);
-                        let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + 72.0), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
+                        let pan_x = if short { c.right() - 18.0 } else { c.center().x };
+                        changed |= pan_knob(ui, Pos2::new(pan_x, c.top() + pan_y), ui.scope_id().with(("span", t)), &mut tr.pan);
+                        let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + fader_top), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
                         let (ch, rel) = fader(ui, fr, ui.scope_id().with(("sfader", t)), &mut tr.gain, &[level]);
                         changed |= ch;
                         released |= rel;
@@ -379,8 +386,8 @@ impl App {
                 let level = self.return_meter.get(r).copied().unwrap_or(0.0);
                 let ret = &mut self.returns[r];
                 if !compact {
-                    changed |= pan_knob(ui, Pos2::new(c.center().x, c.top() + 50.0), ui.scope_id().with(("rpan", r)), &mut ret.pan);
-                    let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + 72.0), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
+                    changed |= pan_knob(ui, Pos2::new(c.center().x, c.top() + pan_y), ui.scope_id().with(("rpan", r)), &mut ret.pan);
+                    let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + fader_top), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
                     let (ch, rel) = fader(ui, fr, ui.scope_id().with(("rfader", r)), &mut ret.gain, &[level]);
                     changed |= ch;
                     released |= rel;
@@ -400,7 +407,7 @@ impl App {
             // The Main track's fader, with the output meters.
             if !compact {
                 let c = Rect::from_min_max(Pos2::new(main_x, mix_top + 6.0), Pos2::new(main_x + SCENE_W, area.bottom() - 6.0));
-                let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + 72.0), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
+                let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + fader_top), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
                 let meters = [self.meter.first().copied().unwrap_or(0.0), self.meter.get(1).copied().unwrap_or(0.0)];
                 let (ch, rel) = fader(ui, fr, ui.scope_id().with("smain"), &mut self.master_gain, &meters);
                 changed |= ch;
