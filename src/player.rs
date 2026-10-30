@@ -1,5 +1,6 @@
-//! Playback through the default output device (cpal). The stream runs for the app's
-//! lifetime; the UI controls it through a small shared state.
+//! Playback through the chosen output device (cpal; the Mac's default unless Preferences ▸
+//! Audio picks one). The stream runs for the app's lifetime, rebuilt when the audio setup
+//! changes; the UI controls it through a small shared state.
 
 use std::sync::{Arc, Mutex};
 
@@ -51,16 +52,83 @@ pub struct Shared {
     pub wrapped: bool,
     /// Song frames per output frame, as last played.
     pub step: f64,
+    /// Preferences ▸ Audio's test tone: a quiet 440 Hz sine over whatever plays.
+    pub test_tone: bool,
+}
+
+/// The audio setup, as Live's Preferences ▸ Audio: devices by name and the sample rate and
+/// buffer size asked for (`None` = the Mac's default).
+#[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AudioSetup {
+    #[serde(default)]
+    pub output: Option<String>,
+    #[serde(default)]
+    pub input: Option<String>,
+    #[serde(default)]
+    pub rate: Option<u32>,
+    #[serde(default)]
+    pub buffer: Option<u32>,
+}
+
+/// What the output stream is actually running at.
+#[derive(Clone, Default)]
+pub struct Running {
+    pub device: String,
+    pub rate: u32,
+    /// Frames per buffer (`None` when the device's own default was left).
+    pub buffer: Option<u32>,
+}
+
+/// The sample rates offered in Preferences (those a device supports).
+pub const RATES: [u32; 6] = [44100, 48000, 88200, 96000, 176400, 192000];
+/// The buffer sizes offered (those a device supports).
+pub const BUFFERS: [u32; 8] = [32, 64, 128, 256, 512, 1024, 2048, 4096];
+
+/// The names of the Mac's output (or input) devices.
+pub fn devices(output: bool) -> Vec<String> {
+    let host = cpal::default_host();
+    let list = if output { host.output_devices() } else { host.input_devices() };
+    list.map(|ds| ds.map(|d| d.to_string()).collect()).unwrap_or_default()
+}
+
+/// The device named `name` (or the default when `None` or it's gone).
+fn find_device(name: Option<&str>, output: bool) -> Option<cpal::Device> {
+    let host = cpal::default_host();
+    let named = name.and_then(|n| {
+        let list = if output { host.output_devices() } else { host.input_devices() };
+        list.ok()?.find(|d| d.to_string() == n)
+    });
+    named.or_else(|| if output { host.default_output_device() } else { host.default_input_device() })
+}
+
+/// The sample rates and buffer sizes output device `name` supports, and its default rate.
+pub fn output_options(name: Option<&str>) -> (Vec<u32>, Vec<u32>, u32) {
+    let Some(d) = find_device(name, true) else { return (Vec::new(), Vec::new(), 44100) };
+    let default = d.default_output_config().map_or(44100, |c| c.sample_rate());
+    let configs: Vec<_> = d.supported_output_configs().map(|c| c.collect()).unwrap_or_default();
+    let rates = RATES.iter().copied().filter(|&r| configs.iter().any(|c| (c.min_sample_rate()..=c.max_sample_rate()).contains(&r))).collect();
+    let buffers = BUFFERS
+        .iter()
+        .copied()
+        .filter(|&b| configs.iter().any(|c| matches!(c.buffer_size(), cpal::SupportedBufferSize::Range { min, max } if (*min..=*max).contains(&b)) || matches!(c.buffer_size(), cpal::SupportedBufferSize::Unknown)))
+        .collect();
+    (rates, buffers, default)
+}
+
+/// Input device `name`, for the recorder (the default when it's gone).
+pub fn input_device(name: Option<&str>) -> Option<cpal::Device> {
+    find_device(name, false)
 }
 
 pub struct Player {
     pub shared: Arc<Mutex<Shared>>,
     _stream: Option<cpal::Stream>,
     pub error: Option<String>,
+    pub running: Running,
 }
 
 impl Player {
-    pub fn new() -> Player {
+    pub fn new(setup: &AudioSetup) -> Player {
         let shared = Arc::new(Mutex::new(Shared {
             source: Source::Buffer(Arc::new(Audio { rate: 44100, channels: vec![Vec::new()] })),
             pos: 0.0,
@@ -73,13 +141,33 @@ impl Player {
             crossfeed: false,
             wrapped: false,
             step: 1.0,
+            test_tone: false,
         }));
-        match build_stream(shared.clone()) {
-            Ok(stream) => {
-                Player { shared, _stream: Some(stream), error: None }
+        let mut p = Player { shared, _stream: None, error: None, running: Running::default() };
+        p.reopen(setup);
+        p
+    }
+
+    /// (Re)start the output stream with `setup`, carrying on from where playback was.
+    pub fn reopen(&mut self, setup: &AudioSetup) {
+        self._stream = None;
+        match build_stream(self.shared.clone(), setup) {
+            Ok((stream, running)) => {
+                (self._stream, self.running, self.error) = (Some(stream), running, None);
             }
-            Err(e) => Player { shared, _stream: None, error: Some(e) },
+            Err(e) => {
+                // Fall back to the Mac's default rather than staying silent.
+                let fallback = build_stream(self.shared.clone(), &AudioSetup { input: setup.input.clone(), ..Default::default() });
+                if let Ok((stream, running)) = fallback {
+                    (self._stream, self.running) = (Some(stream), running);
+                }
+                self.error = Some(e);
+            }
         }
+    }
+
+    pub fn set_test_tone(&self, on: bool) {
+        self.shared.lock().unwrap().test_tone = on;
     }
 
     pub fn set_audio(&self, audio: Arc<Audio>) {
@@ -256,12 +344,18 @@ impl Player {
     }
 }
 
-fn build_stream(shared: Arc<Mutex<Shared>>) -> Result<cpal::Stream, String> {
-    let host = cpal::default_host();
-    let device = host.default_output_device().ok_or("No audio output device")?;
+fn build_stream(shared: Arc<Mutex<Shared>>, setup: &AudioSetup) -> Result<(cpal::Stream, Running), String> {
+    let device = find_device(setup.output.as_deref(), true).ok_or("No audio output device")?;
     let supported = device.default_output_config().map_err(|e| e.to_string())?;
     let format = supported.sample_format();
-    let config: StreamConfig = supported.into();
+    let mut config: StreamConfig = supported.into();
+    if let Some(r) = setup.rate {
+        config.sample_rate = r;
+    }
+    if let Some(b) = setup.buffer {
+        config.buffer_size = cpal::BufferSize::Fixed(b);
+    }
+    let running = Running { device: device.to_string(), rate: config.sample_rate, buffer: setup.buffer };
     let stream = match format {
         SampleFormat::F32 => run::<f32>(&device, config, shared),
         SampleFormat::I16 => run::<i16>(&device, config, shared),
@@ -271,7 +365,7 @@ fn build_stream(shared: Arc<Mutex<Shared>>) -> Result<cpal::Stream, String> {
         other => Err(format!("Unsupported output sample format {other}")),
     }?;
     stream.play().map_err(|e| e.to_string())?;
-    Ok(stream)
+    Ok((stream, running))
 }
 
 fn run<T>(
@@ -288,6 +382,7 @@ where
     let mut mix: Vec<[f32; 2]> = Vec::new();
     // Scripted test runs can play silently (SOUND_EDIT_MUTE), so nothing reaches the speakers.
     let level = if std::env::var_os("SOUND_EDIT_MUTE").is_some() { 0.0 } else { 1.0 };
+    let mut tone = 0.0f64;
     device
         .build_output_stream(
             config,
@@ -308,10 +403,20 @@ where
                 if let (true, Source::Song(song)) = (s.playing, &s.source) {
                     song.render(s.pos, step * s.speed, &mut mix[..frames]);
                 }
+                // The test tone: −20 dB, 440 Hz, on every channel.
+                let tone_on = s.test_tone;
+                let mut next_tone = || {
+                    if !tone_on {
+                        return 0.0;
+                    }
+                    tone = (tone + 440.0 / out_rate).fract();
+                    (tone * std::f64::consts::TAU).sin() as f32 * 0.1
+                };
                 for (k, frame) in data.chunks_mut(out_ch).enumerate() {
+                    let t = next_tone();
                     if !s.playing {
                         xfeed.reset();
-                        frame.fill(T::from_sample(0.0));
+                        frame.fill(T::from_sample(t * level));
                         continue;
                     }
                     if s.pos >= s.end as f64 {
@@ -325,7 +430,7 @@ where
                         } else {
                             s.playing = false;
                             s.pos = s.end as f64;
-                            frame.fill(T::from_sample(0.0));
+                            frame.fill(T::from_sample(t * level));
                             continue;
                         }
                     }
@@ -356,7 +461,7 @@ where
                             1 => r,
                             _ => 0.0,
                         };
-                        *out = T::from_sample((v * level).clamp(-1.0, 1.0));
+                        *out = T::from_sample(((v + t) * level).clamp(-1.0, 1.0));
                     }
                     s.pos += step * if matches!(s.source, Source::Song(_)) { s.speed } else { 1.0 };
                 }

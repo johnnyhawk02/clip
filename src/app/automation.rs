@@ -280,6 +280,18 @@ impl App {
                             }
                         }
                     }
+                    "buffer" => {
+                        // buffer:N restarts the output at N frames a buffer and prints what runs.
+                        self.audio_setup.buffer = arg.parse().ok();
+                        self.player.reopen(&self.audio_setup);
+                        let r = &self.player.running;
+                        eprintln!("audio: {} {} Hz buffer {:?} error {:?}", r.device, r.rate, r.buffer, self.player.error);
+                    }
+                    "prefs" => {
+                        // prefs:N opens Preferences at tab N (1 = Audio).
+                        self.run(Action::Preferences, ctx);
+                        self.prefs_tab = arg.parse().unwrap_or(0);
+                    }
                     "device" => {
                         // device:t|Name adds an effect to track t (`main` for the Main track).
                         let mut it = arg.splitn(2, '|');

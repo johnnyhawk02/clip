@@ -15,7 +15,7 @@ use crate::actions::{self, Action};
 use crate::audio::{self, Audio, Cue, Markers, Peaks, Region, WavFormat};
 use crate::effects::{self, Wave};
 use crate::menu::NativeMenu;
-use crate::player::Player;
+use crate::player::{self, Player};
 use crate::project::{self, ClipData, ProjectFile, TrackData};
 use crate::recorder::Recorder;
 use crate::devices;
@@ -43,6 +43,7 @@ mod locators;
 mod session;
 mod deviceview;
 mod mixer;
+mod audioprefs;
 
 use self::clip::*;
 use self::chop::*;
@@ -278,6 +279,14 @@ pub struct App {
     phrase_bars: u32,
     /// Preferences window open, holding the settings to go back to on Cancel.
     prefs_open: Option<(u32, bool, usize)>,
+    /// Which Preferences tab shows (0 Look/Feel, 1 Audio).
+    prefs_tab: usize,
+    /// The audio setup (Preferences ▸ Audio) and the one Preferences opened with.
+    audio_setup: player::AudioSetup,
+    audio_before: player::AudioSetup,
+    audio_lists: Option<audioprefs::AudioLists>,
+    /// Preferences ▸ Audio's test tone is on.
+    test_tone: bool,
     /// Dragging the loop brace: where it was grabbed (frames), the range then, and which part
     /// (the whole brace moves, an end resizes).
     arr_loop_grab: Option<(f64, Sel, LoopGrab)>,
@@ -509,7 +518,8 @@ fn remember_project(path: &Path) {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<PathBuf>) -> App {
         clean_style(&cc.egui_ctx);
-        let player = Player::new();
+        let audio_setup = audioprefs::load_audio_setup();
+        let player = Player::new(&audio_setup);
         player.set_crossfeed(crossfeed_pref().exists());
         let status = match &player.error {
             Some(e) => format!("Audio output unavailable: {e}"),
@@ -570,6 +580,11 @@ impl App {
             tempo_drag: None,
             laid_out_tempo: 120.0,
             phrase_bars: std::fs::read_to_string(phrase_pref()).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(4),
+            prefs_tab: 0,
+            audio_before: audio_setup.clone(),
+            audio_setup,
+            audio_lists: None,
+            test_tone: false,
             prefs_open: {
                 REPITCH.store(!keep_pitch_pref().exists(), std::sync::atomic::Ordering::Relaxed);
                 let look = std::env::var("SOUND_EDIT_APPEARANCE").ok().or_else(|| std::fs::read_to_string(appearance_pref()).ok());
@@ -910,7 +925,7 @@ impl App {
 
     fn start_recording(&mut self) {
         self.player.stop();
-        match Recorder::start() {
+        match Recorder::start(self.audio_setup.input.as_deref()) {
             Ok(r) => {
                 self.status = format!("Recording at {} Hz, {} ch…", r.rate, r.channels);
                 self.recorder = Some(r);

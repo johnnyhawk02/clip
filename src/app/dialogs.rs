@@ -670,8 +670,22 @@ impl App {
         let mut repitch = repitch_mode();
         let mut look = APPEARANCE.load(std::sync::atomic::Ordering::Relaxed);
         let resp = dialog_modal("prefs").show(ctx, |ui| {
-            ui.set_width(420.0);
+            ui.set_width(460.0);
             dialog_header(ui, "Preferences", "");
+            // Live's tabs.
+            ui.horizontal(|ui| {
+                for (i, name) in ["Look/Feel", "Audio"].iter().enumerate() {
+                    if ui.selectable_label(self.prefs_tab == i, *name).clicked() {
+                        self.prefs_tab = i;
+                    }
+                }
+            });
+            ui.separator();
+            if self.prefs_tab == 1 {
+                self.audio_prefs(ui);
+                (ok, cancel) = dialog_buttons(ui, "Done", true, |_| {});
+                return;
+            }
             dialog_grid("prefsgrid").show(ui, |ui| {
                 ui.label("Appearance");
                 // Live's themes, shown as you pick them.
@@ -706,6 +720,7 @@ impl App {
             APPEARANCE.store(look_before, std::sync::atomic::Ordering::Relaxed);
             REPITCH.store(repitch_before, std::sync::atomic::Ordering::Relaxed);
             self.prefs_open = None;
+            self.close_audio_prefs(false, self.audio_before.clone());
         } else if ok {
             if std::env::var_os("SOUND_EDIT_ACTIONS").is_none() {
                 let p = phrase_pref();
@@ -721,6 +736,7 @@ impl App {
                 }
             }
             self.prefs_open = None;
+            self.close_audio_prefs(true, self.audio_before.clone());
             if repitch != repitch_before {
                 self.stretch_in_background();
             }

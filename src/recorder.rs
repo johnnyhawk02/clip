@@ -1,8 +1,8 @@
-//! Recording from the default input device (cpal).
+//! Recording from the chosen input device (cpal; the Mac's default unless Preferences ▸ Audio picks one).
 
 use std::sync::{Arc, Mutex};
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
 
 use crate::audio::Audio;
@@ -23,10 +23,9 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    /// Start capturing from the default input straight away.
-    pub fn start() -> Result<Recorder, String> {
-        let host = cpal::default_host();
-        let device = host.default_input_device().ok_or("No audio input device found")?;
+    /// Start capturing from input device `name` (the default when `None`) straight away.
+    pub fn start(name: Option<&str>) -> Result<Recorder, String> {
+        let device = crate::player::input_device(name).ok_or("No audio input device found")?;
         let supported = device.default_input_config().map_err(|e| e.to_string())?;
         let format = supported.sample_format();
         let config: StreamConfig = supported.into();

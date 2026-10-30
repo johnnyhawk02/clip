@@ -551,7 +551,10 @@ impl App {
             Action::PasteTime => self.paste_time(),
             Action::DeleteTime => self.delete_time(),
             Action::InsertTime => self.insert_time(),
-            Action::Preferences => self.prefs_open = Some((self.phrase_bars, repitch_mode(), APPEARANCE.load(std::sync::atomic::Ordering::Relaxed))),
+            Action::Preferences => {
+                self.prefs_open = Some((self.phrase_bars, repitch_mode(), APPEARANCE.load(std::sync::atomic::Ordering::Relaxed)));
+                self.audio_before = self.audio_setup.clone();
+            }
             Action::Spacer => self.add_device(self.active, "Spacer"),
             Action::AddReturn => self.add_return(),
             Action::TrackColor => {
