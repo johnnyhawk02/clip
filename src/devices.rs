@@ -10,6 +10,7 @@ use crate::chorus;
 use crate::pultec;
 use crate::riser;
 use crate::tame;
+use crate::opto;
 
 /// One device in a track's chain, with its settings.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -25,6 +26,7 @@ pub enum Device {
     Pultec(pultec::Settings),
     Riser(riser::Settings),
     Tame(tame::Settings),
+    Opto(opto::Settings),
 }
 
 /// The effects there are to add: name and a line on what it does.
@@ -38,6 +40,7 @@ pub const ALL: &[(&str, &str)] = &[
     ("Pultec", "The Pultec EQP-1A's passive EQ: broad, musical boosts and cuts; boost and cut the lows together for the low-end trick (after Barrera's model)"),
     ("Riser", "One knob for a build-up: as Amount goes up the sound thins, drives into tape, widens and washes out into echoes and reverb"),
     ("Tame", "Finds the frequencies ringing out above the rest, moment by moment, and turns down just those: harshness, boom and whistle"),
+    ("Opto", "An optical leveller, as in the LA-2A: smooth, gentle levelling that lets go slowly, more slowly the harder it has worked"),
     ("Spacer", "Ducks this track only at the frequencies another track is playing, so they sit together"),
 ];
 
@@ -55,6 +58,7 @@ impl Device {
             "Pultec" => Some(Device::Pultec(pultec::Settings::default())),
             "Riser" => Some(Device::Riser(riser::Settings::default())),
             "Tame" => Some(Device::Tame(tame::Settings::default())),
+            "Opto" => Some(Device::Opto(opto::Settings::default())),
             _ => None,
         }
     }
@@ -71,6 +75,7 @@ impl Device {
             Device::Pultec(_) => "Pultec",
             Device::Riser(_) => "Riser",
             Device::Tame(_) => "Tame",
+            Device::Opto(_) => "Opto",
         }
     }
 
@@ -86,6 +91,7 @@ impl Device {
             Device::Pultec(s) => s.on,
             Device::Riser(s) => s.on,
             Device::Tame(s) => s.on,
+            Device::Opto(s) => s.on,
         }
     }
 
@@ -101,6 +107,7 @@ impl Device {
             Device::Pultec(s) => s.on = on,
             Device::Riser(s) => s.on = on,
             Device::Tame(s) => s.on = on,
+            Device::Opto(s) => s.on = on,
         }
     }
 
@@ -116,7 +123,7 @@ impl Device {
     pub fn source(&self) -> Option<usize> {
         match self {
             Device::Spacer(s) => Some(s.source),
-            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Riser(_) | Device::Tame(_) => None,
+            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Riser(_) | Device::Tame(_) | Device::Opto(_) => None,
         }
     }
 
@@ -124,7 +131,7 @@ impl Device {
     pub fn remap(mut self, f: &impl Fn(usize) -> Option<usize>) -> Option<Device> {
         match &mut self {
             Device::Spacer(s) => s.source = f(s.source)?,
-            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Riser(_) | Device::Tame(_) => {}
+            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Riser(_) | Device::Tame(_) | Device::Opto(_) => {}
         }
         Some(self)
     }
@@ -142,6 +149,7 @@ pub enum State {
     Pultec(Box<pultec::Pultec>),
     Riser(Box<riser::Riser>),
     Tame(Box<tame::Tame>),
+    Opto(Box<opto::Opto>),
 }
 
 impl State {
@@ -157,6 +165,7 @@ impl State {
             Device::Pultec(_) => State::Pultec(Box::new(pultec::Pultec::new(rate))),
             Device::Riser(_) => State::Riser(Box::new(riser::Riser::new(rate))),
             Device::Tame(_) => State::Tame(Box::new(tame::Tame::new(rate))),
+            Device::Opto(_) => State::Opto(Box::new(opto::Opto::new(rate))),
         }
     }
 
@@ -178,6 +187,7 @@ impl State {
             (State::Pultec(st), Device::Pultec(s)) => st.process(s, main),
             (State::Riser(st), Device::Riser(s)) => st.process(s, main, beat),
             (State::Tame(st), Device::Tame(s)) => st.process(s, main),
+            (State::Opto(st), Device::Opto(s)) => st.process(s, main),
             _ => {}
         }
     }
@@ -194,6 +204,14 @@ impl State {
     pub fn tame_view(&self) -> Option<([f32; tame::CURVE], [f32; tame::CURVE])> {
         match self {
             State::Tame(t) => Some((t.curve, t.level)),
+            _ => None,
+        }
+    }
+
+    /// Opto's gain reduction right now, dB.
+    pub fn opto_gr(&self) -> Option<f32> {
+        match self {
+            State::Opto(o) => Some(o.gr),
             _ => None,
         }
     }

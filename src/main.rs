@@ -17,6 +17,8 @@ mod tape;
 mod phaser;
 mod chorus;
 mod tame;
+mod dynamics;
+mod opto;
 mod pultec;
 mod riser;
 mod recorder;

@@ -11,6 +11,7 @@ use crate::chorus;
 use crate::pultec;
 use crate::riser;
 use crate::tame;
+use crate::opto;
 
 /// Width of one device panel.
 const DEV_W: f32 = 560.0;
@@ -81,6 +82,7 @@ impl App {
         let playing = self.player.is_playing();
         let cuts: Vec<_> = (0..chain.len()).map(|i| self.player.spacer_cuts(t, i).filter(|_| playing)).collect();
         let tames: Vec<_> = (0..chain.len()).map(|i| self.player.tame_view(t, i).filter(|_| playing)).collect();
+        let optos: Vec<_> = (0..chain.len()).map(|i| self.player.opto_gr(t, i).filter(|_| playing)).collect();
         let mut remove = None;
         let mut add = None;
         let mut active = false;
@@ -95,6 +97,7 @@ impl App {
                             Device::Tape(_) => DEV_W + 300.0,
                             // Riser is one knob.
                             Device::Riser(_) => 180.0,
+                            Device::Opto(_) => 520.0,
                             _ => DEV_W,
                         };
                         let (panel, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
@@ -130,6 +133,7 @@ impl App {
                             Device::Pultec(s) => pultec_panel(&mut inner, s),
                             Device::Riser(s) => riser_panel(&mut inner, s, false),
                             Device::Tame(s) => tame_panel(&mut inner, s, tames[i]),
+                            Device::Opto(s) => opto_panel(&mut inner, s, optos[i]),
                         };
                     }
                     // + Add Effect, as Live's "Drop Audio Effects Here".
@@ -169,7 +173,7 @@ impl App {
         if !active {
             self.device_edit = false;
         }
-        if cuts.iter().any(|c| c.is_some()) || tames.iter().any(|c| c.is_some()) {
+        if cuts.iter().any(|c| c.is_some()) || tames.iter().any(|c| c.is_some()) || optos.iter().any(|c| c.is_some()) {
             ui.ctx().request_repaint();
         }
     }
@@ -337,6 +341,63 @@ pub(super) fn tame_panel(ui: &mut egui::Ui, s: &mut tame::Settings, view: Option
             p.text(r.center(), Align2::CENTER_CENTER, "play to see the cuts", FontId::proportional(9.5), muted());
         }
         p.text(r.left_top() + Vec2::new(3.0, 2.0), Align2::LEFT_TOP, "cut", FontId::proportional(9.0), muted());
+    }
+    active
+}
+
+/// Opto's controls, and beside them its gain reduction meter (while playing; in the print
+/// dialog, `gr` is `None` and there is no meter).
+pub(super) fn opto_panel(ui: &mut egui::Ui, s: &mut opto::Settings, gr: Option<f32>) -> bool {
+    let mut active = false;
+    let full = ui.max_rect();
+    let live = full.width() > 300.0 && full.height() < 400.0;
+    ui.spacing_mut().slider_width = 140.0;
+    let mut controls = |ui: &mut egui::Ui| egui::Grid::new("optogrid").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+        ui.label("Peak Reduction").on_hover_text("How much it levels: turn up until the meter moves the way you want");
+        active |= pct(ui, &mut s.peak_reduction);
+        ui.end_row();
+        ui.label("Gain").on_hover_text("Make-up gain, after the levelling");
+        let w = ui.add(egui::Slider::new(&mut s.gain, -12.0..=24.0).suffix(" dB").fixed_decimals(1));
+        active |= busy(&w);
+        ui.end_row();
+        ui.label("Mode");
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut s.limit, false, "Compress").on_hover_text("Gentle, about 3:1");
+            ui.radio_value(&mut s.limit, true, "Limit").on_hover_text("Firmer, about 12:1, with a harder knee");
+        });
+        ui.end_row();
+        ui.label("Colour").on_hover_text("Valve and transformer warmth after the levelling");
+        active |= pct(ui, &mut s.colour);
+        ui.end_row();
+        ui.label("Dry / Wet");
+        active |= pct(ui, &mut s.mix);
+        ui.end_row();
+    });
+    let side = Rect::from_min_max(Pos2::new(full.left() + 380.0, full.top()), full.max);
+    if live {
+        let left = Rect::from_min_max(full.min, Pos2::new(side.left() - 10.0, full.bottom()));
+        ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| controls(ui));
+    } else {
+        controls(ui);
+    }
+    // Gain reduction, 0 to -20 dB down the height, as the hardware's meter shows it.
+    if live && side.width() > 40.0 && side.height() > 40.0 {
+        let p = ui.painter();
+        let r = Rect::from_min_max(side.min + Vec2::new(0.0, 14.0), side.max - Vec2::new(0.0, 16.0));
+        let bar = Rect::from_center_size(r.center(), Vec2::new(r.width().min(36.0), r.height()));
+        p.rect_filled(bar, 3.0, gray(238));
+        let y_of = |db: f32| bar.top() + bar.height() * (db / 20.0).clamp(0.0, 1.0);
+        for db in [0.0, 3.0, 6.0, 10.0, 20.0] {
+            let y = y_of(db);
+            p.line_segment([Pos2::new(bar.left(), y), Pos2::new(bar.left() - 4.0, y)], Stroke::new(1.0, gray(180)));
+            p.text(Pos2::new(bar.left() - 6.0, y), Align2::RIGHT_CENTER, format!("{}", -(db as i32)), FontId::proportional(9.0), muted());
+        }
+        if let Some(g) = gr {
+            p.rect_filled(Rect::from_min_max(bar.min, Pos2::new(bar.right(), y_of(g))), 3.0, ink());
+        }
+        p.text(Pos2::new(bar.center().x, side.top()), Align2::CENTER_TOP, "GR", FontId::proportional(9.0), muted());
+        let label = gr.map_or("play to see".into(), |g| format!("-{g:.1} dB"));
+        p.text(Pos2::new(bar.center().x, side.bottom()), Align2::CENTER_BOTTOM, label, FontId::proportional(9.5), muted());
     }
     active
 }

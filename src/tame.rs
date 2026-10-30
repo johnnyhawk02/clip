@@ -144,19 +144,6 @@ impl Fft {
     }
 }
 
-/// Giannoulis et al.'s soft-knee gain computer at ratio ∞, as the cut it makes (dB) for a
-/// level `x` against threshold `t` with knee `w`.
-fn knee_cut(x: f32, t: f32, w: f32) -> f32 {
-    let d = x - t;
-    if 2.0 * d < -w {
-        0.0
-    } else if 2.0 * d <= w {
-        (d + w / 2.0).powi(2) / (2.0 * w)
-    } else {
-        d
-    }
-}
-
 /// `v` averaged over a box `oct` octaves wide (at least `min` bins each side) around each bin;
 /// `sum` is scratch, one longer than `v`.
 fn box_smooth(v: &mut [f32], sum: &mut [f32], oct: f32, min: usize) {
@@ -269,9 +256,9 @@ impl Core {
             // over a couple of octaves either side), as harshness lives there.
             let o = if f > 0.0 { (f / 3500.0).log2() / 1.5 } else { 9.0 };
             let t = SOFT_T - PRESENCE * (-o * o).exp();
-            let mut c = knee_cut(self.db[k] - self.env[k], t, KNEE);
+            let mut c = crate::dynamics::excess(self.db[k] - self.env[k], t, KNEE);
             if p.hard {
-                c = c.min(knee_cut(self.db[k], p.threshold, KNEE));
+                c = c.min(crate::dynamics::excess(self.db[k], p.threshold, KNEE));
             }
             self.raw[k] = c.min(MAX_CUT) * depth * w;
         }

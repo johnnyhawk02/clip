@@ -1,7 +1,7 @@
 //! Track effects used offline, as the sound-editor effects are: a track device's settings in a
 //! dialog, printed into the selection (or the whole clip) when you press Apply.
 
-use super::deviceview::{chorus_panel, delay_panel, phaser_panel, pultec_panel, reverb_panel, riser_panel, spring_panel, tame_panel, tape_panel};
+use super::deviceview::{chorus_panel, delay_panel, phaser_panel, pultec_panel, reverb_panel, riser_panel, spring_panel, tame_panel, opto_panel, tape_panel};
 use super::*;
 use crate::devices::{Device, State};
 
@@ -22,7 +22,7 @@ impl App {
                 Device::Reverb(s) => s.mix = 0.3,
                 Device::Spring(s) => s.mix = 0.3,
                 Device::Tape(s) => s.mix = 0.35,
-                Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Tame(_) => {}
+                Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Tame(_) | Device::Opto(_) => {}
                 // Printed, it rises across the selection: all the way, to a full wash.
                 Device::Riser(s) => s.amount = 1.0,
                 Device::Delay(s) => s.mix = 0.35,
@@ -48,6 +48,8 @@ impl App {
             let about = match d {
                 // No tail; printed, its cuts look ahead.
                 Device::Tame(_) => format!("The track effect, printed into {scope}, its cuts opening just ahead of each resonance."),
+                // No tail either.
+                Device::Opto(_) => format!("The track effect, printed into {scope}."),
                 _ => format!("The track effect, printed into {scope}. Its tail rings on past the end."),
             };
             dialog_header(ui, &format!("{} Device", d.name()), &about);
@@ -61,11 +63,17 @@ impl App {
                 Device::Pultec(s) => _ = pultec_panel(ui, s),
                 Device::Riser(s) => _ = riser_panel(ui, s, true),
                 Device::Tame(s) => _ = tame_panel(ui, s, None),
+                Device::Opto(s) => _ = opto_panel(ui, s, None),
                 Device::Spacer(_) => {}
             }
             if whole && !matches!(d, Device::Tame(_)) {
                 ui.add_space(8.0);
-                ui.checkbox(&mut wrap, "Wrap the tail round to the start instead (a loop keeps its length)");
+                let text = if matches!(d, Device::Opto(_)) {
+                    "Run the clip round first, so it starts already levelling (a loop stays seamless)"
+                } else {
+                    "Wrap the tail round to the start instead (a loop keeps its length)"
+                };
+                ui.checkbox(&mut wrap, text);
             }
             (apply, cancel) = dialog_buttons(ui, "Apply", true, |_| {});
         });
@@ -98,6 +106,7 @@ impl App {
             Device::Pultec(_) => "Pultec Device",
             Device::Riser(_) => "Riser Device",
             Device::Tame(_) => "Tame Device",
+            Device::Opto(_) => "Opto Device",
             Device::Spacer(_) => return,
         };
         let Some(a) = self.audio.clone() else { return };
@@ -126,7 +135,8 @@ impl App {
             _ => st.process(&d, &mut frames, None, beat),
         }
         let mut out = frames.split_off(n * lead);
-        if !wrap {
+        // (Opto has no tail: just the half-sample its colour stage lags by.)
+        if !wrap && !matches!(d, Device::Opto(_)) {
             // Run on through silence until the tail has died away.
             let block = rate as usize / 4;
             for _ in 0..(TAIL_MAX_SECS * 4.0) as usize {

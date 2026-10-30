@@ -163,6 +163,13 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <li><b>Delta</b> plays only what's being taken away, so you can hear what it removes. <b>Dry / Wet</b> blends it with the untouched sound.</li>
     <li>While the song plays, the panel shows the cut across the spectrum (black) over the sound's level (grey). Its analysis takes 2048 samples (about 46 ms at 44.1 kHz); delay compensation keeps the other tracks in time with it. Printed into a clip (<span class="path">More ▸ Effects ▸ Tame Device…</span>) there is no delay, and the cuts look ahead, opening just before each resonance.</li>
   </ul>
+  <p><b>Opto</b> is an optical leveller in the manner of the LA-2A. A light and a light-dependent resistor do the turning down, so it moves smoothly and lets go slowly, and the longer and harder it has been working, the more slowly it lets go. It listens to its own output (feedback, as the hardware does), both sides linked. The levelling is a soft-knee gain computer (after Giannoulis, Massberg and Reiss, JAES 2012) feeding a model of the opto cell after Eichas and Zölzer (SPIE 2016): a fast stage and a slow one, so it attacks in about 10 ms, recovers about half way in 60–70 ms, then creeps back over 1 to 15 seconds.</p>
+  <ul>
+    <li><b>Peak Reduction</b> sets how much it levels: turn it up until the meter moves the way you want. <b>Gain</b> is the make-up gain afterwards.</li>
+    <li><b>Compress</b> is gentle, about 3:1; <b>Limit</b> is firmer, about 12:1, with a harder knee.</li>
+    <li><b>Colour</b> adds the warmth of the valve and transformer stage after the cell (the Tape device's saturation, driven gently). <b>Dry / Wet</b> blends in the untouched sound, for parallel compression.</li>
+    <li>While the song plays, the meter shows the gain reduction, 0 to −20 dB. There is no look-ahead, so no delay. Printed into a clip (<span class="path">More ▸ Effects ▸ Opto Device…</span>) it works in place; on a whole clip, tick <b>Run the clip round first</b> so a loop starts already levelling and stays seamless.</li>
+  </ul>
   <p><b>Delay compensation</b>, as in Live: when an effect delays a track (Tame does, by 2048 samples), every other track, its sends and the return tracks wait for it, so everything stays in time. The playhead is shifted to match, so what you see is what you hear, and exports and mixdowns come out lined up with the song. It's on by default; turn it off with <span class="path">Control ▸ Delay Compensation</span> (saved with the project).</p>
   <p><b>Spacer</b> is a Trackspacer-style ducker: add it and pick the track to make room for. Wherever that track plays, this one is turned down only at the same frequencies, across 32 bands from 30 Hz to 18 kHz with no latency, so a bass sits under a kick or a pad under a vocal without the whole sound pumping.</p>
   <ul>
@@ -268,7 +275,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
     <tr><td>Split</td><td><kbd>C</kbd></td><td>Click a clip in the arrangement to cut it there.</td></tr>
   </table></div>
   <p>The older sound-editor features live under the <b>More</b> menu: effects (Normalize, fades, Reverb, Delay, Echo, EQ, Compressor, Noise Gate, Pitch, Tempo and more), Insert (silence, tones, noise, FM synthesis), cue points and regions, recording, Spectrum and Batch Convert.</p>
-  <p>The track effects can be used the same way: <span class="path">More ▸ Effects ▸ Reverb Device… / Spring Device… / Delay Device… / Tape Device… / Phaser Device… / Chorus Device… / Pultec Device… / Riser Device… / Tame Device…</span> opens the device's controls and prints it into the selection, or the whole clip. The tail rings on past the end, over what follows and lengthening the clip if it needs to. On a whole clip you can wrap the tail round to the start instead, so a loop keeps its length and stays seamless. (Tame has no tail: it prints in place.)</p>
+  <p>The track effects can be used the same way: <span class="path">More ▸ Effects ▸ Reverb Device… / Spring Device… / Delay Device… / Tape Device… / Phaser Device… / Chorus Device… / Pultec Device… / Riser Device… / Tame Device… / Opto Device…</span> opens the device's controls and prints it into the selection, or the whole clip. The tail rings on past the end, over what follows and lengthening the clip if it needs to. On a whole clip you can wrap the tail round to the start instead, so a loop keeps its length and stays seamless. (Tame and Opto have no tail: they print in place.)</p>
 </section>
 
 <section id="headphones">
