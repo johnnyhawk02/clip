@@ -21,6 +21,7 @@ impl App {
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
                 Action::Export | Action::ExportAbleton => doc && self.arrangement_frames() > 0,
                 Action::Delete => has_clip || self.time_sel.is_some() || self.selected_locator.is_some() || (self.show_session && self.sel_slot.is_some()),
+                Action::Cut | Action::Copy if self.show_session && self.view == View::Arrangement => self.sel_slot.and_then(|(t, s)| self.tracks.get(t)?.slots.get(s)?.as_ref()).is_some(),
                 Action::ExportSelection | Action::EditClip | Action::DuplicateClip | Action::Cut | Action::Copy => has_clip,
                 Action::SplitClip => doc,
                 Action::ToolSelect | Action::ToolSplit => true,
@@ -41,7 +42,8 @@ impl App {
                 Action::Ungroup => self.sel_clip.and_then(|p| self.clip(p)).is_some_and(|c| c.group.is_some()),
                 Action::SelectAll => doc,
                 Action::BackToArrangement => !self.nest.is_empty(),
-                Action::Paste => self.clipboard.is_some(),
+                Action::Paste if self.show_session && self.view == View::Arrangement => !self.clip_board.is_empty() && self.sel_slot.is_some(),
+                Action::Paste => self.clipboard.is_some() || !self.clip_board.is_empty(),
                 Action::Undo => !self.undo.is_empty(),
                 Action::Redo => !self.redo.is_empty(),
                 Action::PlayPause | Action::Stop | Action::GoStart | Action::GoEnd | Action::ZoomIn | Action::ZoomOut | Action::ZoomFit => doc,
@@ -179,6 +181,8 @@ impl App {
             let mid = self.arr_view_start + self.arr_view_len / 2.0;
             match a {
                 Action::Delete if self.show_session => return self.clear_slot(),
+                Action::Copy | Action::Cut if self.show_session => return self.copy_slots(a == Action::Cut),
+                Action::Paste if self.show_session => return self.paste_slots(),
                 Action::Delete if self.time_sel.is_some() => return self.delete_time_sel(),
                 Action::Delete if self.sel_clip.is_none() && self.selected_locator.is_some() => return self.delete_locator(),
                 Action::Delete => return self.delete_clip(),
@@ -188,12 +192,20 @@ impl App {
                         ctx.copy_text(format!("[audio clip, {}]", fmt_time(clip.duration_secs())));
                         self.status = format!("Copied clip {}", c.name);
                         self.clipboard = Some(clip);
+                        // The whole clips too, for pasting here or into the Session view.
+                        let mut ps = self.selected_clips();
+                        ps.sort();
+                        let t0 = ps.iter().map(|p| p.0).min().unwrap_or(0);
+                        self.clip_board = ps.iter().filter_map(|&p| Some((p.0 - t0, self.clip(p)?.clone()))).collect();
+                        self.clip_board.sort_by_key(|(dt, c)| (*dt, c.start));
+                        self.board_from_session = false;
                         if a == Action::Cut {
                             self.delete_clip();
                         }
                     }
                     return;
                 }
+                Action::Paste if !self.clip_board.is_empty() => return self.paste_clips(),
                 Action::Paste => {
                     if let Some(c) = self.clipboard.clone() {
                         let p = self.add_clip("Pasted", Arc::new(c), "Paste Clip");

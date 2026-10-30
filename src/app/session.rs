@@ -446,6 +446,86 @@ impl App {
     }
 
     /// Delete the selected slot's clip.
+    /// ⌘C / ⌘X in the Session view: the selected slots' clips go on the clipboard, to paste
+    /// into other slots or into the song view.
+    pub(super) fn copy_slots(&mut self, cut: bool) {
+        let mut picked: Vec<(usize, usize)> = self.sel_slots.iter().copied().chain(self.sel_slot).collect();
+        picked.sort();
+        picked.dedup();
+        picked.retain(|&(t, s)| self.tracks.get(t).and_then(|tr| tr.slots.get(s)).is_some_and(|c| c.is_some()));
+        let Some(t0) = picked.iter().map(|p| p.0).min() else { return };
+        self.clip_board = picked.iter().filter_map(|&(t, s)| Some((t - t0, self.tracks[t].slots[s].clone()?))).collect();
+        self.board_from_session = true;
+        self.status = format!("Copied {} clip{}", picked.len(), if picked.len() == 1 { "" } else { "s" });
+        if cut {
+            self.push_undo("Cut");
+            for (t, s) in picked {
+                self.tracks[t].slots[s] = None;
+            }
+            self.dirty = true;
+        }
+    }
+
+    /// ⌘V in the Session view: the copied clips go into the slots from the selected one down
+    /// (each copied track's clips one under another, further tracks to the right), making
+    /// scenes if needed.
+    pub(super) fn paste_slots(&mut self) {
+        let Some((t0, s0)) = self.sel_slot else { return };
+        if self.clip_board.is_empty() {
+            return;
+        }
+        self.push_undo("Paste");
+        let mut row: HashMap<usize, usize> = HashMap::new();
+        for (dt, c) in self.clip_board.clone() {
+            let t = t0 + dt;
+            if t >= self.tracks.len() {
+                continue;
+            }
+            let k = row.entry(dt).or_insert(0);
+            let s = s0 + *k;
+            *k += 1;
+            while self.scenes.len() <= s {
+                let n = self.scenes.len() + 1;
+                self.scenes.push(n.to_string());
+            }
+            self.fit_slots();
+            self.tracks[t].slots[s] = Some(slot_clip(c));
+        }
+        self.dirty = true;
+        self.refresh_playback();
+    }
+
+    /// ⌘V in the song view with whole clips copied: they go in at the insert marker from the
+    /// selected track down, keeping their spacing (Session clips one after another).
+    pub(super) fn paste_clips(&mut self) {
+        if self.tracks.is_empty() {
+            return;
+        }
+        self.push_undo("Paste");
+        let base = self.clip_board.iter().map(|(_, c)| c.start).min().unwrap_or(0);
+        let mut next: HashMap<usize, usize> = HashMap::new();
+        let mut last = None;
+        for (dt, mut c) in self.clip_board.clone() {
+            let t = self.active + dt;
+            if t >= self.tracks.len() {
+                continue;
+            }
+            c.start = if self.board_from_session {
+                let at = next.entry(dt).or_insert(self.arr_cursor);
+                let s = *at;
+                *at += c.len;
+                s
+            } else {
+                self.arr_cursor + (c.start - base)
+            };
+            self.tracks[t].clips.push(c);
+            last = Some(self.place_over((t, self.tracks[t].clips.len() - 1)));
+        }
+        self.sel_clip = last;
+        self.dirty = true;
+        self.refresh_playback();
+    }
+
     pub(super) fn clear_slot(&mut self) {
         let Some((t, s)) = self.sel_slot else { return };
         if self.tracks.get(t).and_then(|tr| tr.slots.get(s)).is_some_and(|c| c.is_some()) {

@@ -311,6 +311,11 @@ pub struct App {
     play_origin: usize,
 
     clipboard: Option<Audio>,
+    /// Whole clips copied in the song or Session view (with their warp, loop and colour), each
+    /// with its track offset from the first; pasted into either view.
+    clip_board: Vec<(usize, Clip)>,
+    /// Whether `clip_board` came from Session slots (so it pastes one after another).
+    board_from_session: bool,
     wav_format: WavFormat,
     params: HashMap<&'static str, f32>,
     tone_wave: Wave,
@@ -545,6 +550,8 @@ impl App {
             looping: false,
             play_origin: 0,
             clipboard: None,
+            clip_board: Vec::new(),
+            board_from_session: false,
             wav_format: WavFormat::Pcm16,
             params: Dialog::ALL.iter().flat_map(|d| d.fields()).map(|f| (f.key, f.default)).collect(),
             tone_wave: Wave::Sine,

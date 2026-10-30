@@ -69,6 +69,9 @@ track, a row per scene (8 to start; + Scene adds more). It holds audio loops onl
   all. The mixer along the bottom has Live's pan knobs, meters, vertical faders (double-click for
   0 dB), track activators and Solo; it folds to just the buttons while the detail view is open.
 - Click a clip to see it in the detail view under the grid; double-click it to open the full clip
+  editor. ⌘C, ⌘X and ⌘V copy clips between slots and the song view, both ways: paste into the
+  Session view goes into the selected slot (and the ones below), paste into the song view goes
+  in at the insert marker on the selected track, keeping warp, loop and colour.
   editor. Shift-click slots and ⌘G groups them into one clip whose parts play in turn, and a group
   opens like any other.
 - A track playing from the session drowns out its song clips until Back to Arrangement. Turn on

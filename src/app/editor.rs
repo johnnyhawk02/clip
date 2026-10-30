@@ -134,6 +134,7 @@ impl App {
         ctx.copy_text(format!("[audio clip, {}]", fmt_time(clip.duration_secs())));
         self.status = format!("Copied {}", fmt_time(clip.duration_secs()));
         self.clipboard = Some(clip);
+        self.clip_board.clear();
         true
     }
 
