@@ -336,6 +336,7 @@ impl App {
             locators: self.locators.clone(),
             scenes: self.scenes.clone(),
             returns: Some(tracks_data(&self.returns, &mut pool)),
+            main_devices: self.main.devices.clone(),
             looping: self.looping,
             master_gain: self.master_gain,
             view: Some(self.view_state()),
@@ -421,6 +422,7 @@ impl App {
         let tracks = build(self, &file.tracks, &audio, rate);
         self.tracks = tracks;
         self.returns = file.returns.as_ref().map_or_else(default_returns, |r| build(self, r, &audio, rate));
+        self.main.devices = file.main_devices.clone();
         self.nest.clear();
         self.undo.clear();
         self.redo.clear();

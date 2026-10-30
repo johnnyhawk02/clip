@@ -38,6 +38,9 @@ pub struct ProjectFile {
     /// Return tracks (none in projects from before them: they get the default two).
     #[serde(default)]
     pub returns: Option<Vec<TrackData>>,
+    /// The Main track's effects.
+    #[serde(default)]
+    pub main_devices: Vec<crate::devices::Device>,
     /// How the window and views were when it was saved (as a Live Set keeps them).
     #[serde(default)]
     pub view: Option<ViewState>,
@@ -237,6 +240,7 @@ mod tests {
             locators: Vec::new(),
             scenes: Vec::new(),
             returns: None,
+            main_devices: Vec::new(),
             view: Some(ViewState { session: true, window: Some([10.0, 20.0, 1100.0, 560.0]), ..Default::default() }),
             rate: 1000,
             tracks: vec![TrackData {

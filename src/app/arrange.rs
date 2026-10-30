@@ -1311,12 +1311,22 @@ impl App {
         let right = r.left() + header_w - 1.0;
         let levels = [self.meter.first().copied().unwrap_or(0.0), self.meter.get(1).copied().unwrap_or(0.0)];
         meters(p, Rect::from_min_max(Pos2::new(right - 12.0, r.top() + 6.0), Pos2::new(right - 5.0, r.bottom() - 6.0)), &levels);
-        p.text(Pos2::new(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, "Main", FontId::proportional(12.5), ink());
         let mut toggle = false;
         let mut changed = false;
         let mut live = false;
         let vol = Rect::from_min_size(Pos2::new(right - 18.0 - 52.0, r.center().y - 9.0), Vec2::new(52.0, 18.0));
         let b = Rect::from_min_size(Pos2::new(vol.left() - 6.0 - 26.0, r.center().y - 11.0), Vec2::new(26.0, 22.0));
+        // Its name shows its effects, as a track's does.
+        let name = Rect::from_min_max(r.left_top(), Pos2::new(b.left() - 4.0, r.bottom()));
+        let nr = ui.interact(name, ui.scope_id().with("main_name"), Sense::click());
+        let shown = self.show_devices && self.device_target == crate::engine::MAIN;
+        if shown {
+            ui.painter().rect_stroke(name.shrink(3.0), 2.0, Stroke::new(1.5, ink()), egui::StrokeKind::Inside);
+        }
+        ui.painter().text(Pos2::new(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, "Main", FontId::proportional(12.5), if nr.hovered() || shown { ink() } else { muted() });
+        if nr.on_hover_text("Show the Main track's effects").clicked() {
+            self.show_main_devices();
+        }
         let resp = ui.interact(b, ui.scope_id().with("crossfeed"), Sense::click());
         let on = self.crossfeed;
         ui.painter().rect(b, 2.0, if on { ink() } else if resp.hovered() { gray(214) } else { gray(225) }, Stroke::new(1.0, gray(170)), egui::StrokeKind::Inside);

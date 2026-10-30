@@ -115,8 +115,12 @@ impl App {
             ui.set_clip_rect(full_clip);
             let p = ui.painter().clone();
             let main_head = Rect::from_min_size(Pos2::new(main_x, top), Vec2::new(SCENE_W, HEAD_H));
-            p.rect_filled(main_head, 0.0, gray(200));
+            let mr = ui.interact(main_head, ui.scope_id().with("mainhead"), Sense::click());
+            p.rect_filled(main_head, 0.0, if mr.hovered() { gray(190) } else { gray(200) });
             p.text(main_head.left_center() + Vec2::new(6.0, 0.0), Align2::LEFT_CENTER, "Main", FontId::proportional(11.5), ink());
+            if mr.on_hover_text("Show the Main track's effects").clicked() {
+                self.show_main_devices();
+            }
             for r in 0..n_ret {
                 let head = Rect::from_min_size(Pos2::new(ret_x(r), top), Vec2::new(COL_W - 1.0, HEAD_H));
                 let hr = ui.interact(head, ui.scope_id().with(("rhead", r)), Sense::click());

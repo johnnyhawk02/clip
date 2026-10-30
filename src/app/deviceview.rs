@@ -117,16 +117,16 @@ fn note(p: &egui::Painter, pos: Pos2, align: Align2, text: impl ToString) {
 }
 
 /// Return track `r` is device target `RETURN + r`; a plain number is a track.
-use crate::engine::RETURN;
+use crate::engine::{MAIN, RETURN};
 
 impl App {
     /// The track (or return track) device target `k` names.
     pub(super) fn dev_track(&self, k: usize) -> Option<&Track> {
-        if k >= RETURN { self.returns.get(k - RETURN) } else { self.tracks.get(k) }
+        if k == MAIN { Some(&self.main) } else if k >= RETURN { self.returns.get(k - RETURN) } else { self.tracks.get(k) }
     }
 
     fn dev_track_mut(&mut self, k: usize) -> Option<&mut Track> {
-        if k >= RETURN { self.returns.get_mut(k - RETURN) } else { self.tracks.get_mut(k) }
+        if k == MAIN { Some(&mut self.main) } else if k >= RETURN { self.returns.get_mut(k - RETURN) } else { self.tracks.get_mut(k) }
     }
 
     /// Show track `t`'s effects in the detail view (clicking its name, as in Live).
@@ -144,6 +144,13 @@ impl App {
         self.devices_over = (self.sel_clip, self.sel_slot);
     }
 
+    /// Show the Main track's effects (clicking its name, as in Live).
+    pub(super) fn show_main_devices(&mut self) {
+        self.device_target = MAIN;
+        self.show_devices = true;
+        self.devices_over = (self.sel_clip, self.sel_slot);
+    }
+
     /// Add effect `name` to track (or return track) `k` and show its chain.
     pub(super) fn add_device(&mut self, k: usize, name: &str) {
         let Some(d) = Device::new(name, k, self.tracks.len()) else { return };
@@ -154,7 +161,13 @@ impl App {
         let t = self.dev_track_mut(k).unwrap();
         t.devices.push(d);
         let tn = t.name.clone();
-        if k >= RETURN { self.show_return_devices(k - RETURN) } else { self.show_track_devices(k) }
+        if k == MAIN {
+            self.show_main_devices()
+        } else if k >= RETURN {
+            self.show_return_devices(k - RETURN)
+        } else {
+            self.show_track_devices(k)
+        }
         self.dirty = true;
         self.refresh_playback();
         self.status = format!("Added {name} to {tn}");

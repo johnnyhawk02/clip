@@ -7,7 +7,7 @@ use crate::engine;
 /// The song as the live engine plays it: the heard tracks' clips, read straight from their audio
 /// (a re-pitched clip from its original, at the speed the tempo needs), mixed as in Live.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn song(tracks: &[Track], returns: &[Track], rate: u32, end: usize, master: f32, click: Option<(f64, u32)>, beat: f64, session: &[TrackPlay], pdc: bool) -> engine::Song {
+pub(super) fn song(tracks: &[Track], returns: &[Track], rate: u32, end: usize, master: f32, click: Option<(f64, u32)>, beat: f64, session: &[TrackPlay], pdc: bool, main: &Track) -> engine::Song {
     let any_solo = tracks.iter().any(|t| t.solo);
     let mut open = false;
     let layers: Vec<engine::LayerSrc> = tracks
@@ -59,7 +59,14 @@ pub(super) fn song(tracks: &[Track], returns: &[Track], rate: u32, end: usize, m
     // While a Session clip plays on, so does the transport; else it runs on until the last of
     // the song has come through the delay.
     let end = if open { end.max(1) + FOREVER } else { end + if pdc { comp + ret_comp } else { 0 } };
-    engine::Song { layers, end, rate, master, click, returns, beat, pdc, comp, ret_comp, bus: Default::default() }
+    // The Main track's effects, when it has any.
+    let main = (!main.devices.is_empty()).then(|| {
+        let mut l = engine::LayerSrc::new(engine::MAIN, 1.0, (1.0, 1.0), Vec::new());
+        l.devices = main.devices.iter().map(|d| (*d, None)).collect();
+        l
+    });
+    let end = end + if pdc { main.as_ref().map_or(0, |m| m.latency()) } else { 0 };
+    engine::Song { layers, end, rate, master, click, returns, beat, pdc, comp, ret_comp, bus: Default::default(), main }
 }
 
 impl App {
@@ -73,7 +80,7 @@ impl App {
         let chain = |t: &Track| t.devices.iter().map(|d| d.latency()).sum::<usize>();
         // (Inside a group the return tracks aren't played.)
         let returns = if self.nest.is_empty() { self.returns.iter().map(chain).max().unwrap_or(0) } else { 0 };
-        self.tracks.iter().map(chain).max().unwrap_or(0) + returns
+        self.tracks.iter().map(chain).max().unwrap_or(0) + returns + chain(&self.main)
     }
 }
 

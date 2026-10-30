@@ -216,6 +216,8 @@ pub struct LayerSrc {
 
 /// Return track `r` counts as track `RETURN + r` (for meters and carrying effects over).
 pub const RETURN: usize = 1 << 20;
+/// The Main track's effects count as track `MAIN`.
+pub const MAIN: usize = 1 << 21;
 
 impl LayerSrc {
     /// How many samples late its effects make it.
@@ -250,6 +252,8 @@ pub struct Song {
     pub ret_comp: usize,
     /// The tracks' mix's delay line, for `ret_comp`.
     pub bus: std::sync::Mutex<Comp>,
+    /// The Main track's effects (no clips), run on the whole mix before its volume, as in Live.
+    pub main: Option<LayerSrc>,
 }
 
 /// Run `layer`'s effects on `buf`; `dry` holds every layer's sound (for sidechains).
@@ -347,6 +351,10 @@ impl Song {
                 ret.peak.store(peak.to_bits(), std::sync::atomic::Ordering::Relaxed);
             }
         }
+        // The Main track's effects, on everything.
+        if let Some(main) = &self.main {
+            run_devices(&[], None, main, out, &[], self.rate, self.beat, from);
+        }
         // The metronome is held back with the music, so it stays in time with it.
         let late = self.latency() as f64 * step;
         for (k, frame) in out.iter_mut().enumerate() {
@@ -371,7 +379,12 @@ impl Song {
     /// How many frames late the mix is heard, with delay compensation on (else 0: tracks with
     /// latency are simply heard late).
     pub fn latency(&self) -> usize {
-        if self.pdc { self.comp + self.ret_comp } else { 0 }
+        if self.pdc { self.comp + self.ret_comp + self.main.as_ref().map_or(0, |m| m.latency()) } else { 0 }
+    }
+
+    /// Every track with effects: the heard tracks, the return tracks and Main.
+    pub fn every(&self) -> impl Iterator<Item = &LayerSrc> {
+        self.layers.iter().chain(&self.returns).chain(&self.main)
     }
 
     /// Each heard track's loudest level since the last look, as (track, level), resetting them.
@@ -387,7 +400,7 @@ mod tests {
     #[test]
     fn metronome_clicks_on_beats_higher_on_the_bar() {
         // A beat every 22050 frames (120 BPM at 44.1 kHz), 4 to a bar.
-        let song = Song { layers: Vec::new(), end: 200_000, rate: 44100, master: 1.0, click: Some((22050.0, 4)), returns: Vec::new(), beat: 22050.0, pdc: true, comp: 0, ret_comp: 0, bus: Default::default() };
+        let song = Song { layers: Vec::new(), end: 200_000, rate: 44100, master: 1.0, click: Some((22050.0, 4)), returns: Vec::new(), beat: 22050.0, pdc: true, comp: 0, ret_comp: 0, bus: Default::default(), main: None };
         let mut out = vec![[0.0; 2]; 400];
         song.render(22050.0, 1.0, &mut out);
         assert!(out.iter().any(|f| f[0].abs() > 0.05), "a click on beat 2");
@@ -400,7 +413,7 @@ mod tests {
         // A ramp 0, 1, 2… read at speed 2: song frame t hears source frame 2t.
         let audio = Arc::new(Audio { rate: 1000, channels: vec![(0..100).map(|i| i as f32).collect()] });
         let clip = ClipSrc { audio, speed: 2.0, start: 10, len: 40, trim: 0, looping: None, frames: 50, fades: (0, 0), gain: 1.0 };
-        let song = Song { layers: vec![LayerSrc::new(0, 1.0, (1.0, 1.0), vec![clip])], end: 50, rate: 1000, master: 1.0, click: None, returns: Vec::new(), beat: 1000.0, pdc: true, comp: 0, ret_comp: 0, bus: Default::default() };
+        let song = Song { layers: vec![LayerSrc::new(0, 1.0, (1.0, 1.0), vec![clip])], end: 50, rate: 1000, master: 1.0, click: None, returns: Vec::new(), beat: 1000.0, pdc: true, comp: 0, ret_comp: 0, bus: Default::default(), main: None };
         let mut out = vec![[0.0; 2]; 4];
         song.render(20.0, 1.0, &mut out);
         assert_eq!(out.iter().map(|f| f[0]).collect::<Vec<_>>(), vec![20.0, 22.0, 24.0, 26.0]);
@@ -416,7 +429,7 @@ mod tests {
         let mut layer = LayerSrc::new(0, 1.0, (1.0, 1.0), vec![clip]);
         layer.sends = vec![1.0];
         let ret = LayerSrc::new(RETURN, 1.0, (1.0, 1.0), Vec::new());
-        let song = Song { layers: vec![layer], end: 100, rate: 1000, master: 1.0, click: None, returns: vec![ret], beat: 500.0, pdc: true, comp: 0, ret_comp: 0, bus: Default::default() };
+        let song = Song { layers: vec![layer], end: 100, rate: 1000, master: 1.0, click: None, returns: vec![ret], beat: 500.0, pdc: true, comp: 0, ret_comp: 0, bus: Default::default(), main: None };
         let mut out = vec![[0.0; 2]; 4];
         song.render(10.0, 1.0, &mut out);
         assert_eq!(out[0], [0.5, 0.5]);
@@ -441,7 +454,7 @@ mod tests {
             a.devices = vec![(tame, None)];
         }
         let (comp, ret_comp) = (a.latency().max(b.latency()), returns.iter().map(|r| r.latency()).max().unwrap_or(0));
-        Song { layers: vec![a, b], end: 20000, rate: 44100, master: 1.0, click: None, returns, beat: 22050.0, pdc, comp, ret_comp, bus: Default::default() }
+        Song { layers: vec![a, b], end: 20000, rate: 44100, master: 1.0, click: None, returns, beat: 22050.0, pdc, comp, ret_comp, bus: Default::default(), main: None }
     }
 
     /// `song`'s first 8192 frames, played in blocks.

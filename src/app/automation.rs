@@ -281,9 +281,9 @@ impl App {
                         }
                     }
                     "device" => {
-                        // device:t|Name adds an effect to track t.
+                        // device:t|Name adds an effect to track t (`main` for the Main track).
                         let mut it = arg.splitn(2, '|');
-                        if let (Some(t), Some(name)) = (it.next().and_then(|v| v.parse::<usize>().ok()), it.next()) {
+                        if let (Some(t), Some(name)) = (it.next().and_then(|v| if v == "main" { Some(crate::engine::MAIN) } else { v.parse::<usize>().ok() }), it.next()) {
                             self.add_device(t, name);
                         }
                     }
@@ -311,7 +311,7 @@ impl App {
                     "playhead" => self.arr_cursor = (arg.parse::<f64>().unwrap_or(0.0) * rate) as usize,
                     "liveexport" => {
                         // What the live engine plays, rendered start to end (to compare with export).
-                        let song = tracks::song(&self.tracks, &self.returns, self.rate(), self.arrangement_frames(), self.master_gain, None, self.beat_frames(), &self.session_play, self.delay_comp);
+                        let song = tracks::song(&self.tracks, &self.returns, self.rate(), self.arrangement_frames(), self.master_gain, None, self.beat_frames(), &self.session_play, self.delay_comp, &self.main);
                         let mut out = vec![[0.0f32; 2]; song.end];
                         song.render(0.0, 1.0, &mut out);
                         let a = Audio { rate: song.rate, channels: vec![out.iter().map(|f| f[0]).collect(), out.iter().map(|f| f[1]).collect()] };

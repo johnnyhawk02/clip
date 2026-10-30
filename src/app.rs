@@ -124,6 +124,7 @@ struct Snapshot {
     audio: Option<Arc<Audio>>,
     tracks: Vec<Track>,
     returns: Vec<Track>,
+    main: Track,
     nest: Vec<NestFrame>,
     active: usize,
     sel_clip: Option<(usize, usize)>,
@@ -419,6 +420,8 @@ pub struct App {
     restore_window: Option<(Option<[f32; 4]>, bool, bool)>,
     /// Return tracks (Live's A, B…), fed by each track's sends.
     returns: Vec<Track>,
+    /// The Main track: only its effects are used (its volume is `master_gain`).
+    main: Track,
     /// Each return track's level meter.
     return_meter: Vec<f32>,
     /// The Session clips that were playing when the transport last stopped (track, slot).
@@ -672,6 +675,7 @@ impl App {
             session_scroll: 0.0,
             session_last: Vec::new(),
             returns: default_returns(),
+            main: Track::new_return("Main"),
             return_meter: Vec::new(),
             device_edit: false,
             rec_meter: 0.0,
@@ -747,7 +751,7 @@ impl App {
                 let returns = if self.nest.is_empty() { &self.returns[..] } else { &[] };
                 // A loop running past the last clip plays on through silence to its end, as in Live.
                 let end = self.arrangement_frames().max(self.arr_loop.filter(|_| self.looping).map_or(0, |l| l.1));
-                let song = tracks::song(&self.tracks, returns, self.rate(), end, self.master_gain, click, self.beat_frames(), session, self.delay_comp);
+                let song = tracks::song(&self.tracks, returns, self.rate(), end, self.master_gain, click, self.beat_frames(), session, self.delay_comp, &self.main);
                 self.player.set_song(Arc::new(song));
                 self.play_audio = None;
                 return;
@@ -785,8 +789,11 @@ impl App {
         if self.auto_gain { auto_gain(mix) } else { mix }
     }
 
-    /// The master channel's volume on a mix.
+    /// The Main track on a mix: its effects, then its volume.
     fn master(&self, mut mix: Audio) -> Audio {
+        if self.main.devices.iter().any(|d| d.on()) {
+            mix = main_fx(&self.main.devices, mix, self.beat_frames(), self.delay_comp);
+        }
         if self.master_gain != 1.0 {
             for ch in &mut mix.channels {
                 ch.iter_mut().for_each(|v| *v *= self.master_gain);
@@ -1704,6 +1711,25 @@ fn mix_tracks(tracks: &[Track], returns: &[Track], rate: u32, beat: f64, pdc: bo
     }
     let inputs: Vec<(&Audio, f32, f32)> = rendered.iter().map(|(a, g, p)| (a, *g, *p)).collect();
     effects::mix_panned(&inputs, rate)
+}
+
+/// The Main track's effects on a whole mix (a tail's room after the end; with delay
+/// compensation their latency is taken off, as `mix_tracks` does a track's).
+fn main_fx(chain: &[devices::Device], mix: Audio, beat: f64, pdc: bool) -> Audio {
+    let rate = mix.rate;
+    let late: usize = if pdc { chain.iter().map(|d| d.latency()).sum() } else { 0 };
+    let last = mix.num_channels().saturating_sub(1);
+    let n = mix.frames();
+    let mut buf: Vec<[f32; 2]> = (0..n).map(|i| [mix.channels[0][i], mix.channels[1.min(last)][i]]).collect();
+    buf.resize(n + rate as usize * 3 + late, [0.0; 2]);
+    for d in chain.iter().filter(|d| d.on()) {
+        devices::State::new(d, rate).process(d, &mut buf, None, beat, 0.0);
+    }
+    buf.drain(..late);
+    // Keep a tail only as long as it's heard.
+    let end = buf.iter().rposition(|f| f[0].abs().max(f[1].abs()) > 1e-5).map_or(n, |i| (i + 1).max(n));
+    buf.truncate(end);
+    Audio { rate, channels: vec![buf.iter().map(|f| f[0]).collect(), buf.iter().map(|f| f[1]).collect()] }
 }
 
 /// One track rendered to audio: its clips placed at their positions, crossfading where they
