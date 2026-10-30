@@ -86,7 +86,9 @@ impl App {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     for (i, d) in chain.iter_mut().enumerate() {
                         let h = ui.available_height();
-                        let (panel, _) = ui.allocate_exact_size(Vec2::new(DEV_W, h), Sense::hover());
+                        // Tape has a third column, for its LFO.
+                        let w = if matches!(d, Device::Tape(_)) { DEV_W + 300.0 } else { DEV_W };
+                        let (panel, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
                         ui.painter().rect_filled(panel, 3.0, gray(250));
                         ui.painter().rect_stroke(panel, 3.0, Stroke::new(1.0, rule()), egui::StrokeKind::Inside);
                         // Title strip: on/off, name, remove.
@@ -385,6 +387,33 @@ pub(super) fn tape_panel(ui: &mut egui::Ui, s: &mut tape::Settings) -> bool {
             ui.label("Spacing");
             let w = ui.add(egui::Slider::new(&mut s.spacing, 0.0..=30.0).suffix(" µm").fixed_decimals(0)).on_hover_text("Play head to tape: further is darker");
             active |= busy(&w);
+            ui.end_row();
+        });
+        ui.add_space(16.0);
+        // The delay-time LFO.
+        egui::Grid::new("tapegrid3").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+            ui.label("LFO");
+            let shape = tape::LFO_SHAPES.get(s.lfo_shape as usize).copied().unwrap_or("Sine");
+            egui::ComboBox::from_id_salt("tape_lfo").width(110.0).selected_text(shape).show_ui(ui, |ui| {
+                for (i, n) in tape::LFO_SHAPES.iter().enumerate() {
+                    ui.selectable_value(&mut s.lfo_shape, i as u8, *n);
+                }
+            });
+            ui.end_row();
+            ui.label("Rate");
+            ui.horizontal(|ui| {
+                let unit = if s.lfo_slow { " cHz" } else { " Hz" };
+                let w = ui.add(egui::Slider::new(&mut s.lfo_rate, 0.01..=20.0).logarithmic(true).suffix(unit).fixed_decimals(2));
+                active |= busy(&w);
+                ui.checkbox(&mut s.lfo_slow, "×0.01").on_hover_text("A hundredth of the rate, for very slow drifts (cHz: hundredths of a hertz)");
+            });
+            ui.end_row();
+            ui.label("Depth");
+            let w = ui.add(egui::Slider::new(&mut s.lfo_depth, 0.0..=50.0).suffix(" ms").fixed_decimals(1)).on_hover_text("How far the delay time swings each way");
+            active |= busy(&w);
+            ui.end_row();
+            ui.label("Slew");
+            active |= pct(ui, &mut s.lfo_slew);
             ui.end_row();
         });
     });

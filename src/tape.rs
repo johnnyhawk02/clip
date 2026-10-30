@@ -30,6 +30,25 @@ pub struct Settings {
     /// 0..1: wet against dry (all wet on a return track).
     pub mix: f32,
     pub on: bool,
+    /// An LFO on the delay time: its shape (`LFO_SHAPES`), rate (Hz, times 0.01 with `lfo_slow`
+    /// for very slow drifts), depth (ms) and slew (0..1: how slowly it follows its shape).
+    #[serde(default)]
+    pub lfo_shape: u8,
+    #[serde(default = "default_lfo_rate")]
+    pub lfo_rate: f32,
+    #[serde(default)]
+    pub lfo_slow: bool,
+    #[serde(default)]
+    pub lfo_depth: f32,
+    #[serde(default)]
+    pub lfo_slew: f32,
+}
+
+/// The LFO's shapes, by `lfo_shape`.
+pub const LFO_SHAPES: [&str; 7] = ["Sine", "Triangle", "Square", "Saw", "Random", "Smooth Random", "Drunk"];
+
+fn default_lfo_rate() -> f32 {
+    0.5
 }
 
 fn default_bias() -> f32 {
@@ -38,7 +57,7 @@ fn default_bias() -> f32 {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { beats: 0.75, feedback: 0.5, drive: 0.5, bias: default_bias(), wow: 0.3, speed: 15.0, spacing: 5.0, mix: 1.0, on: true }
+        Settings { beats: 0.75, feedback: 0.5, drive: 0.5, bias: default_bias(), wow: 0.3, speed: 15.0, spacing: 5.0, mix: 1.0, on: true, lfo_shape: 0, lfo_rate: default_lfo_rate(), lfo_slow: false, lfo_depth: 0.0, lfo_slew: 0.0 }
     }
 }
 
@@ -173,6 +192,53 @@ pub struct Tape {
     drift: f32,
     drift_to: f32,
     seed: u32,
+    lfo: Lfo,
+}
+
+/// The delay-time LFO's running state.
+#[derive(Default)]
+struct Lfo {
+    phase: f64,
+    /// Random shapes: the value held, the one before (to glide from) and the drunk walk's.
+    held: f32,
+    from: f32,
+    walk: f32,
+    /// Its output after the slew.
+    out: f32,
+}
+
+impl Lfo {
+    /// Advance one sample at `rate` Hz (`sr` samples a second) and give the shape's value, -1..1,
+    /// after a slew of `slew` (0..1, up to about 2 s to follow).
+    fn next(&mut self, shape: u8, rate: f64, slew: f32, sr: f32, rand: &mut impl FnMut() -> f32) -> f32 {
+        self.phase += rate / sr as f64;
+        if self.phase >= 1.0 {
+            self.phase -= self.phase.floor();
+            // A new cycle: new random values.
+            self.from = self.held;
+            self.held = rand();
+            let step = rand() * 0.4;
+            self.walk = if (self.walk + step).abs() > 1.0 { self.walk - step } else { self.walk + step };
+        }
+        let p = self.phase as f32;
+        let tau = std::f32::consts::TAU;
+        let v = match shape {
+            1 => 1.0 - 4.0 * (p - 0.5).abs(),
+            2 => if p < 0.5 { 1.0 } else { -1.0 },
+            3 => 2.0 * p - 1.0,
+            4 => self.held,
+            5 => self.from + (self.held - self.from) * (0.5 - 0.5 * (std::f32::consts::PI * p).cos()),
+            // Drunk: a random walk, gliding to each new step.
+            6 => self.walk,
+            _ => (tau * p).sin(),
+        };
+        // (Never quite instant: a jump in delay time is a click.)
+        let secs = (2.0 * slew.clamp(0.0, 1.0).powi(2)).max(0.002);
+        // (A drunk walk glides a little even with no slew, or each step would click.)
+        let secs = if shape == 6 { secs.max(0.5 / rate.max(1e-3) as f32 * 0.2) } else { secs };
+        self.out += (v - self.out) * (1.0 - (-1.0 / (secs * sr)).exp());
+        self.out
+    }
 }
 
 impl Tape {
@@ -197,6 +263,7 @@ impl Tape {
             drift: 0.0,
             drift_to: 0.0,
             seed: 0x9e37_79b9,
+            lfo: Lfo::default(),
         }
     }
 
@@ -248,7 +315,16 @@ impl Tape {
             }
             self.drift += (self.drift_to - self.drift) * 2.0 / self.rate;
             let wobble = wow * self.rate * (0.0016 * (tau * self.wow_ph).sin() + 0.00012 * (tau * self.flut_ph).sin() + 0.0008 * self.drift);
-            let d = (base + wobble).clamp(2.0, (n - 4) as f32);
+            // The delay-time LFO.
+            let lfo_rate = s.lfo_rate.clamp(0.01, 20.0) as f64 * if s.lfo_slow { 0.01 } else { 1.0 };
+            let seed = &mut self.seed;
+            let mut rand = || {
+                *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (*seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+            };
+            let lfo = self.lfo.next(s.lfo_shape, lfo_rate, s.lfo_slew, self.rate, &mut rand);
+            let swing = lfo * s.lfo_depth.clamp(0.0, 200.0) * 0.001 * self.rate;
+            let d = (base + wobble + swing).clamp(2.0, (n - 4) as f32);
             // Play head: read the tape (cubic interpolation), then its losses.
             let pos = self.i as f32 + n as f32 - d;
             let k = pos.floor() as usize;
@@ -422,5 +498,44 @@ mod bias_sweep {
                 assert!(rms.is_finite() && rms > 0.02, "bias {} drive {drive}: echo gone ({rms})", s.bias);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod lfo_tests {
+    use super::*;
+
+    #[test]
+    fn every_shape_stays_in_range_and_slows_down() {
+        let mut seed = 3u32;
+        let mut rand = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+        };
+        for shape in 0..LFO_SHAPES.len() as u8 {
+            let mut l = Lfo::default();
+            let v: Vec<f32> = (0..44100).map(|_| l.next(shape, 4.0, 0.0, 44100.0, &mut rand)).collect();
+            let (lo, hi) = v.iter().fold((f32::MAX, f32::MIN), |(a, b), &x| (a.min(x), b.max(x)));
+            // Biggest step between samples: no jumps (the 2 ms floor on the slew).
+            let step = v.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+            eprintln!("{}: {lo:.2}..{hi:.2}, biggest step {step:.4}", LFO_SHAPES[shape as usize]);
+            assert!(lo >= -1.001 && hi <= 1.001 && step < 0.05);
+        }
+        // A cycle at 1 Hz × 0.01 takes 100 s: after 1 s a sine has barely moved.
+        let mut l = Lfo::default();
+        let mut v = 0.0;
+        for _ in 0..44100 {
+            v = l.next(0, 0.01, 0.0, 44100.0, &mut rand);
+        }
+        assert!(v.abs() < 0.07, "{v}");
+    }
+
+    #[test]
+    fn echo_with_lfo_is_finite() {
+        let mut t = Tape::new(44100);
+        let s = Settings { lfo_shape: 5, lfo_rate: 2.0, lfo_depth: 30.0, lfo_slew: 0.3, ..Settings::default() };
+        let mut buf: Vec<[f32; 2]> = (0..44100 * 2).map(|i| { let v = if i % 5000 < 50 { 0.8 } else { 0.0 }; [v, v] }).collect();
+        t.process(&s, &mut buf, 22050.0);
+        assert!(buf.iter().all(|f| f[0].is_finite() && f[0].abs() < 4.0));
     }
 }

@@ -41,7 +41,8 @@ impl App {
         let mut wrap = self.device_fx_wrap;
         let (mut apply, mut cancel) = (false, false);
         let resp = dialog_modal("device-fx").show(ctx, |ui| {
-            ui.set_width(DIALOG_W);
+            // (Tape's three columns need more room.)
+            ui.set_width(if matches!(d, Device::Tape(_)) { DIALOG_W + 420.0 } else { DIALOG_W });
             dialog_header(ui, &format!("{} Device", d.name()), &format!("The track effect, printed into {scope}. Its tail rings on past the end."));
             match &mut d {
                 Device::Reverb(s) => _ = reverb_panel(ui, s),
