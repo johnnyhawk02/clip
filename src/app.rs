@@ -69,6 +69,8 @@ struct NestFrame {
     view_len: f64,
     /// It was opened from the Session view (a group in a slot), which comes back on closing it.
     from_session: bool,
+    /// Opened from a playing slot: the song time then, to play on out at the same moment.
+    outer_at: Option<(usize, std::time::Instant)>,
 }
 
 /// Which view is showing: the arrangement of clips, or one clip open in the waveform editor.
@@ -674,7 +676,10 @@ impl App {
             View::Arrangement => {
                 // The song is mixed live as it plays: just hand over what to play.
                 let click = self.metronome.then(|| (self.beat_frames(), self.beats_per_bar));
-                let song = tracks::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain, click, &self.session_play);
+                // Inside an open group its own tracks play, as an arrangement (the Session view's
+                // launches belong to the tracks outside).
+                let session = if self.nest.is_empty() { &self.session_play[..] } else { &[] };
+                let song = tracks::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain, click, session);
                 self.player.set_song(Arc::new(song));
                 self.play_audio = None;
                 return;

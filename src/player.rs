@@ -105,6 +105,15 @@ impl Player {
         }
     }
 
+    /// Play `start..end` (looping it or not) from frame `at` inside it.
+    pub fn play_from(&self, start: usize, end: usize, at: usize, looping: bool) {
+        self.play(start, end, looping);
+        let mut s = self.shared.lock().unwrap();
+        if s.playing && at >= s.start && at < s.end {
+            s.pos = at as f64;
+        }
+    }
+
     pub fn play(&self, start: usize, end: usize, looping: bool) {
         let mut s = self.shared.lock().unwrap();
         let n = s.source.frames();

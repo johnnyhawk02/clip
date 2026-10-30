@@ -601,6 +601,12 @@ impl App {
         let Some(inner) = clip.group.clone() else { return };
         // Playing on into the group: the same moment, now counted from the group's start.
         let playing = self.player.is_playing().then(|| self.player.position());
+        // A playing Session slot: where its loop is now, to carry on from there inside.
+        let in_slot = playing.filter(|_| c >= SLOT).and_then(|pos| {
+            let (_, from, _) = self.session_play.get(t)?.segments.iter().rev().find(|seg| seg.0 == c - SLOT && seg.2.is_none()).copied()?;
+            let inside = pos.saturating_sub(from) % clip.len.max(1);
+            Some((pos, inside))
+        });
         self.nest.push(NestFrame {
             tracks: std::mem::replace(&mut self.tracks, (*inner).clone()),
             track: t,
@@ -609,6 +615,7 @@ impl App {
             view_start: self.arr_view_start,
             view_len: self.arr_view_len,
             from_session: self.show_session,
+            outer_at: in_slot.map(|(pos, _)| (pos, std::time::Instant::now())),
         });
         // A group opens as its own arrangement, whichever view it was launched from.
         self.show_session = false;
@@ -622,6 +629,11 @@ impl App {
         if let Some(pos) = playing.filter(|_| c < SLOT) {
             let inside = (pos.saturating_sub(clip.start) + clip.trim).min(self.arrangement_frames());
             self.go_to_frame(inside);
+        } else if let Some((_, inside)) = in_slot {
+            // It loops inside as it did in its slot.
+            let end = self.arrangement_frames();
+            self.arr_cursor = inside.min(end);
+            self.player.play_from(0, end, inside.min(end.saturating_sub(1)), true);
         }
         self.status = format!("Inside {} — ⌘Return or the path above goes back up", clip.name);
     }
@@ -657,6 +669,10 @@ impl App {
         if let (Some(pos), Some(c)) = (playing.filter(|_| f.clip < SLOT), self.clip((f.track, f.clip))) {
             let out = c.start + pos.saturating_sub(c.trim);
             self.go_to_frame(out);
+        } else if let (true, Some((at, when))) = (playing.is_some(), f.outer_at) {
+            // Back in the Session view, the slot has played on all the while.
+            let now = at + (when.elapsed().as_secs_f64() * self.rate() as f64) as usize;
+            self.player.play(now, usize::MAX, false);
         }
     }
 
