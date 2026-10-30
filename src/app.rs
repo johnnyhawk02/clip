@@ -248,6 +248,8 @@ pub struct App {
     split: bool,
     /// The metronome clicks along while the song plays (Control ▸ Metronome).
     metronome: bool,
+    /// Delay compensation (Live's Options ▸ Delay Compensation), saved with the project.
+    delay_comp: bool,
     /// Named markers in the song (frame, name), in time order, as Live's locators.
     locators: Vec<(usize, String)>,
     /// A right-click in the ruler: the locator under it (if any) and the frame there.
@@ -551,6 +553,7 @@ impl App {
             detail_key: None,
             split: false,
             metronome: false,
+            delay_comp: true,
             locators: Vec::new(),
             loc_menu: None,
             fade_drag: None,
@@ -742,7 +745,7 @@ impl App {
                 let returns = if self.nest.is_empty() { &self.returns[..] } else { &[] };
                 // A loop running past the last clip plays on through silence to its end, as in Live.
                 let end = self.arrangement_frames().max(self.arr_loop.filter(|_| self.looping).map_or(0, |l| l.1));
-                let song = tracks::song(&self.tracks, returns, self.rate(), end, self.master_gain, click, self.beat_frames(), session);
+                let song = tracks::song(&self.tracks, returns, self.rate(), end, self.master_gain, click, self.beat_frames(), session, self.delay_comp);
                 self.player.set_song(Arc::new(song));
                 self.play_audio = None;
                 return;
@@ -827,7 +830,7 @@ impl App {
 
     /// The mix of a set of tracks (see `mix_tracks`), with the song's return tracks if asked.
     fn render_tracks(&self, tracks: &[Track], with_returns: bool) -> Audio {
-        mix_tracks(tracks, if with_returns { &self.returns } else { &[] }, self.rate(), self.beat_frames())
+        mix_tracks(tracks, if with_returns { &self.returns } else { &[] }, self.rate(), self.beat_frames(), self.delay_comp)
     }
 
     /// Extent of the timeline: the clip's length in the editor, or the end of the last clip
@@ -971,7 +974,7 @@ impl App {
             // As in Live, play starts from the insert marker (where you last clicked) and
             // stopping leaves it there; ⇧Space carries on from where playback stopped.
             if self.player.is_playing() {
-                self.stopped_at = self.player.position();
+                self.stopped_at = self.player.heard_position();
                 self.player.stop();
                 self.session_stopped();
                 self.refresh_playback();
@@ -992,7 +995,7 @@ impl App {
                 return;
             }
             self.play_origin = self.arr_cursor;
-            self.player.play(self.arr_cursor, end, false);
+            self.player.play(self.arr_cursor, end + self.comp_latency(), false);
             return;
         }
         if self.audio.is_none() {
@@ -1000,7 +1003,7 @@ impl App {
         }
         if self.player.is_playing() {
             // Pause: leave the cursor where playback got to.
-            self.cursor = self.player.position().min(self.frames());
+            self.cursor = self.player.heard_position().min(self.frames());
             self.player.stop();
             return;
         }
@@ -1027,7 +1030,7 @@ impl App {
             return self.toggle_play();
         }
         if self.player.is_playing() {
-            self.stopped_at = self.player.position();
+            self.stopped_at = self.player.heard_position();
             self.player.stop();
             self.session_stopped();
             self.refresh_playback();
@@ -1038,12 +1041,12 @@ impl App {
             self.stopped_at = 0;
         }
         self.play_origin = self.stopped_at;
-        self.player.play(self.stopped_at, end, false);
+        self.player.play(self.stopped_at, end + self.comp_latency(), false);
     }
 
     fn stop(&mut self) {
         if self.player.is_playing() && self.view == View::Arrangement {
-            self.stopped_at = self.player.position();
+            self.stopped_at = self.player.heard_position();
         }
         self.player.stop();
         self.session_stopped();
@@ -1620,7 +1623,23 @@ mod tests {
 }
 
 /// The mix of a set of tracks, with their volumes and pan (solo wins over mute), as in Live.
-fn mix_tracks(tracks: &[Track], returns: &[Track], rate: u32, beat: f64) -> Audio {
+/// With `pdc` (delay compensation) each track's and return track's effects are run on into
+/// silence for their latency and that much is taken off the front, so everything lines up with
+/// the song (a group's mix always does: it's a bounce).
+fn mix_tracks(tracks: &[Track], returns: &[Track], rate: u32, beat: f64, pdc: bool) -> Audio {
+    let run = |chain: &[devices::Device], main: &mut Vec<[f32; 2]>, side: &dyn Fn(&devices::Device) -> Option<Vec<[f32; 2]>>| {
+        let late: usize = if pdc { chain.iter().map(|d| d.latency()).sum() } else { 0 };
+        let n = main.len();
+        main.resize(n + late, [0.0; 2]);
+        for d in chain.iter().filter(|d| d.on()) {
+            let mut side = side(d);
+            if let Some(s) = side.as_mut() {
+                s.resize(n + late, [0.0; 2]);
+            }
+            devices::State::new(d, rate).process(d, main, side.as_deref(), beat);
+        }
+        main.drain(..late);
+    };
     let any_solo = tracks.iter().any(|t| t.solo);
     let idx: Vec<usize> = (0..tracks.len()).filter(|&i| if any_solo { tracks[i].solo } else { !tracks[i].mute }).collect();
     let mut rendered: Vec<(Audio, f32, f32)> = idx.iter().map(|&i| (render_track_at(&tracks[i], rate), tracks[i].gain, tracks[i].pan)).collect();
@@ -1638,10 +1657,7 @@ fn mix_tracks(tracks: &[Track], returns: &[Track], rate: u32, beat: f64) -> Audi
             };
             let n = rendered[k].0.frames();
             let mut main = frames(&rendered[k].0, 1.0, n);
-            for d in t.devices.iter().filter(|d| d.on()) {
-                let side = d.source().and_then(|s| idx.iter().position(|&i| i == s)).filter(|&s| s != k).map(|s| frames(&rendered[s].0, rendered[s].1, n));
-                devices::State::new(d, rate).process(d, &mut main, side.as_deref(), beat);
-            }
+            run(&t.devices, &mut main, &|d: &devices::Device| d.source().and_then(|s| idx.iter().position(|&i| i == s)).filter(|&s| s != k).map(|s| frames(&rendered[s].0, rendered[s].1, n)));
             Audio { rate: rate, channels: vec![main.iter().map(|f| f[0]).collect(), main.iter().map(|f| f[1]).collect()] }
         })
         .collect();
@@ -1669,9 +1685,7 @@ fn mix_tracks(tracks: &[Track], returns: &[Track], rate: u32, beat: f64) -> Audi
                     f[1] += a.channels[1.min(last)][j] * g * pr;
                 }
             }
-            for d in ret.devices.iter().filter(|d| d.on()) {
-                devices::State::new(d, rate).process(d, &mut buf, None, beat);
-            }
+            run(&ret.devices, &mut buf, &|_: &devices::Device| None);
             let audio = Audio { rate, channels: vec![buf.iter().map(|f| f[0]).collect(), buf.iter().map(|f| f[1]).collect()] };
             outs.push((audio, if ret.mute { 0.0 } else { ret.gain }, ret.pan));
         }

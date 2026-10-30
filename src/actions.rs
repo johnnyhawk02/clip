@@ -62,6 +62,7 @@ pub enum Action {
     ZoomFit,
     ZoomBack,
     Crossfeed,
+    DelayCompensation,
     NarrowGrid,
     WidenGrid,
     ToolSelect,
@@ -181,7 +182,7 @@ pub const ALL: &[Action] = &[
     Cut, Copy, Paste, MixPaste, Delete, SelectAll, SelectNone, Trim, Silence, InsertSilence,
     InsertTone, InsertNoise, InsertDtmf, FadeIn, FadeOut, Normalize, Gain, Reverse, Echo, Reverb, DeviceReverb, DeviceSpring, DeviceDelay, DeviceTape, DevicePhaser, DeviceChorus, DevicePultec, DeviceRiser, DeviceTame, Flanger,
     Smooth, NoiseGate, Pitch, Tempo, Speed, ToMono, Split, PlayPause, Stop, Loop, GoStart, GoEnd,
-    ZoomIn, ZoomOut, ZoomSel, ZoomFit, ZoomBack, Crossfeed, NarrowGrid, WidenGrid, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools,
+    ZoomIn, ZoomOut, ZoomSel, ZoomFit, ZoomBack, Crossfeed, NarrowGrid, WidenGrid, ToolSelect, ToolHand, ToolZoom, ToolPencil, ShowTools, DelayCompensation,
     ShowControls, ShowInfo, Convert, Equalizer, Envelope, Bender, Record, AddCue, NextCue, PrevCue,
     ShowCues, NewTrack, ImportTrack, DuplicateTrack, DeleteTrack, MixDown, MuteTrack, NextTrack,
     PrevTrack, Delay, Emphasize, Compressor, FadeDialog, FmSynth, SetLoop, ClearLoop, AddRegion, ExportRegions, RulerTime, RulerSamples, RulerTimecode, ShowSpectrum, BatchConvert, OffsetTrack, TrackColor, Spacer, AddReturn, LayerUp, LayerDown, Preferences, DuplicateTime, DeleteTime, InsertTime, CopyTime, CutTime, PasteTime, Quantize, ClipOnOff, Continue, Follow, Metronome, RecordToSong, AddLocator, RenameLocator, PrevLocator, NextLocator, ShowRegions, Dither, CutGaps,
@@ -268,7 +269,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(CollapseTrack),
         ],
     ),
-    ("Control", &[Do(PlayPause), Do(Continue), Do(Stop), Do(Loop), Do(Follow), Do(Metronome), Do(RecordToSong), Separator, Do(GoStart), Do(GoEnd), Separator, Do(AddLocator), Do(PrevLocator), Do(NextLocator), Separator, Do(Crossfeed)]),
+    ("Control", &[Do(PlayPause), Do(Continue), Do(Stop), Do(Loop), Do(Follow), Do(Metronome), Do(RecordToSong), Separator, Do(GoStart), Do(GoEnd), Separator, Do(AddLocator), Do(PrevLocator), Do(NextLocator), Separator, Do(DelayCompensation), Do(Crossfeed)]),
     ("View", &[Do(ZoomIn), Do(ZoomOut), Do(ZoomSel), Do(ZoomBack), Do(ZoomFit), Separator, Do(ToolSelect), Do(ToolSplit)]),
     // Everything from the sound-editor days, out of the way.
     (
@@ -363,7 +364,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | ShowPool | Crossfeed | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues | Follow | Metronome | RecordToSong)
+            || matches!(self, Loop | MuteTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | ShowPool | Crossfeed | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues | Follow | Metronome | RecordToSong | DelayCompensation)
     }
 
     pub fn label(self) -> &'static str {
@@ -459,6 +460,7 @@ impl Action {
             ZoomFit => "Show Entire Sound",
             ZoomBack => "Zoom Back",
             Crossfeed => "Headphone Crossfeed",
+            DelayCompensation => "Delay Compensation",
             NarrowGrid => "Narrow Grid",
             WidenGrid => "Widen Grid",
             ToolSelect => "Selection Tool",
@@ -705,6 +707,7 @@ impl Action {
             Normalize | Gain | Reverse | Echo => "Applies to the selection, or the whole sound if nothing is selected",
             Split => "Save each separate sound as sound01.wav, sound02.wav…",
             ZoomFit => "Show the whole sound",
+            DelayCompensation => "Line tracks up when an effect delays one (Tame): every track waits for the most-delayed, so they stay in time",
             Crossfeed => "On headphones, hear the mix as if from speakers (your CanOpener setting). Playback only, never exports",
             ZoomBack => "Back to the zoom before Zoom to Selection",
             NarrowGrid => "A finer grid",

@@ -1177,7 +1177,7 @@ impl App {
                             self.set_active((((q.y - lanes.top()) / lane_h) as usize).min(n_tracks - 1));
                         }
                         if self.player.is_playing() {
-                            let end = self.arrangement_frames();
+                            let end = self.arrangement_frames() + self.comp_latency();
                             self.player.play(self.arr_cursor, end, false);
                         }
                     }
@@ -1200,7 +1200,7 @@ impl App {
 
         // Follow the playhead.
         let playing = self.player.is_playing();
-        let play_pos = self.player.position();
+        let play_pos = self.player.heard_position();
         if playing {
             ui.ctx().request_repaint();
             let p = play_pos as f64;

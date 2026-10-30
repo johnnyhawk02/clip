@@ -7,7 +7,7 @@ use crate::engine;
 /// The song as the live engine plays it: the heard tracks' clips, read straight from their audio
 /// (a re-pitched clip from its original, at the speed the tempo needs), mixed as in Live.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn song(tracks: &[Track], returns: &[Track], rate: u32, end: usize, master: f32, click: Option<(f64, u32)>, beat: f64, session: &[TrackPlay]) -> engine::Song {
+pub(super) fn song(tracks: &[Track], returns: &[Track], rate: u32, end: usize, master: f32, click: Option<(f64, u32)>, beat: f64, session: &[TrackPlay], pdc: bool) -> engine::Song {
     let any_solo = tracks.iter().any(|t| t.solo);
     let mut open = false;
     let layers: Vec<engine::LayerSrc> = tracks
@@ -43,7 +43,7 @@ pub(super) fn song(tracks: &[Track], returns: &[Track], rate: u32, end: usize, m
         l.sends = (0..returns.len()).map(|r| tracks[l.track].sends.get(r).copied().unwrap_or(0.0)).collect();
     }
     // Return tracks (a muted one stays in place, silent, so the sends still line up).
-    let returns = returns
+    let returns: Vec<engine::LayerSrc> = returns
         .iter()
         .enumerate()
         .map(|(r, t)| {
@@ -52,9 +52,29 @@ pub(super) fn song(tracks: &[Track], returns: &[Track], rate: u32, end: usize, m
             l
         })
         .collect();
-    // While a Session clip plays on, so does the transport.
-    let end = if open { end.max(1) + FOREVER } else { end };
-    engine::Song { layers, end, rate, master, click, returns, beat }
+    // Delay compensation lines up with the most-delayed track, heard or not (as Live).
+    let chain = |t: &Track| t.devices.iter().map(|d| d.latency()).sum::<usize>();
+    let comp = tracks.iter().map(chain).max().unwrap_or(0);
+    let ret_comp = returns.iter().map(|l| l.latency()).max().unwrap_or(0);
+    // While a Session clip plays on, so does the transport; else it runs on until the last of
+    // the song has come through the delay.
+    let end = if open { end.max(1) + FOREVER } else { end + if pdc { comp + ret_comp } else { 0 } };
+    engine::Song { layers, end, rate, master, click, returns, beat, pdc, comp, ret_comp, bus: Default::default() }
+}
+
+impl App {
+    /// How late delay compensation makes the song heard (0 with it off): the most-delayed
+    /// track's effects plus the most-delayed return track's, so playback runs on that much past
+    /// the last clip.
+    pub(super) fn comp_latency(&self) -> usize {
+        if !self.delay_comp {
+            return 0;
+        }
+        let chain = |t: &Track| t.devices.iter().map(|d| d.latency()).sum::<usize>();
+        // (Inside a group the return tracks aren't played.)
+        let returns = if self.nest.is_empty() { self.returns.iter().map(chain).max().unwrap_or(0) } else { 0 };
+        self.tracks.iter().map(chain).max().unwrap_or(0) + returns
+    }
 }
 
 /// How long a launched clip can play on for (about a week of frames).

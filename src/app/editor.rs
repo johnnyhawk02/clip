@@ -468,7 +468,7 @@ impl App {
         // Follow the playhead while playing.
         // Song playback isn't shown here: the detail view only follows its own.
         let playing = self.player.is_playing() && self.view != View::Arrangement;
-        let play_pos = self.player.position();
+        let play_pos = self.player.heard_position();
         if playing {
             ui.ctx().request_repaint();
             if self.drag_anchor.is_none() && !self.scrollbar_drag && self.tool != Tool::Hand {

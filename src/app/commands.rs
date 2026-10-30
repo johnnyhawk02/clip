@@ -12,7 +12,7 @@ impl App {
                 Action::New | Action::Open | Action::Quit | Action::Preferences | Action::BatchConvert | Action::Record | Action::NewClip | Action::ImportClip => true,
                 Action::SaveProject | Action::SaveProjectAs => doc,
                 Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Dither | Action::AutoGain => true,
-                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed | Action::Follow | Action::Metronome | Action::DockPalette | Action::RecordToSong => true,
+                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed | Action::Follow | Action::Metronome | Action::DockPalette | Action::RecordToSong | Action::DelayCompensation => true,
                 Action::Continue | Action::AddLocator => doc,
                 Action::PrevLocator | Action::NextLocator => !self.locators.is_empty(),
                 Action::RenameLocator => self.rename_target().is_some(),
@@ -80,7 +80,7 @@ impl App {
         let not_empty = self.frames() > 0;
         match a {
             Action::New | Action::Open | Action::Quit | Action::Preferences => true,
-            Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop | Action::Crossfeed | Action::Follow | Action::Metronome | Action::Continue | Action::DockPalette => true,
+            Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Loop | Action::Crossfeed | Action::Follow | Action::Metronome | Action::Continue | Action::DockPalette | Action::DelayCompensation => true,
             Action::ShowCues | Action::Record => true,
             Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack => has,
             Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack => has && self.tracks.len() > 1,
@@ -143,6 +143,7 @@ impl App {
             Action::Crossfeed => self.crossfeed,
             Action::Follow => self.follow,
             Action::Metronome => self.metronome,
+            Action::DelayCompensation => self.delay_comp,
             Action::RecordToSong => self.session_rec,
             Action::ToggleSnap => self.snap,
             Action::AutoWarp => self.auto_warp,
@@ -535,6 +536,11 @@ impl App {
             Action::RecordToSong => self.session_rec = !self.session_rec,
             Action::Metronome => {
                 self.metronome = !self.metronome;
+                self.refresh_playback();
+            }
+            Action::DelayCompensation => {
+                self.delay_comp = !self.delay_comp;
+                self.dirty = true;
                 self.refresh_playback();
             }
             Action::DuplicateTime => self.duplicate_time(),

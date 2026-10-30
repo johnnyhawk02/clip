@@ -104,6 +104,14 @@ impl Device {
         }
     }
 
+    /// How many samples late its output is (for delay compensation); none while off.
+    pub fn latency(&self) -> usize {
+        match self {
+            Device::Tame(s) if s.on => tame::LATENCY,
+            _ => 0,
+        }
+    }
+
     /// The other track it listens to, if it has one.
     pub fn source(&self) -> Option<usize> {
         match self {

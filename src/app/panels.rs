@@ -156,7 +156,7 @@ impl App {
     /// Transport bar along the bottom: buttons, time counter and level meters.
     pub(super) fn transport_panel(&mut self, ui: &mut egui::Ui) {
         let playing = self.player.is_playing();
-        let pos = self.player.position();
+        let pos = self.player.heard_position();
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             for a in [Action::GoStart, Action::PlayPause, Action::Stop, Action::Loop, Action::GoEnd] {

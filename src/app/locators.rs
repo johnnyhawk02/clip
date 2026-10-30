@@ -18,7 +18,7 @@ impl App {
 
     /// Control ▸ Previous / Next Locator ([ and ]): move the insert marker (and playback) there.
     pub(super) fn jump_locator(&mut self, forward: bool) {
-        let here = if self.player.is_playing() { self.player.position() } else { self.arr_cursor };
+        let here = if self.player.is_playing() { self.player.heard_position() } else { self.arr_cursor };
         let to = if forward {
             self.locators.iter().map(|l| l.0).find(|&f| f > here)
         } else {
@@ -35,7 +35,7 @@ impl App {
         self.arr_cursor = f;
         self.play_origin = f;
         if self.player.is_playing() {
-            let end = self.arrangement_frames();
+            let end = self.arrangement_frames() + self.comp_latency();
             self.player.play(f, end, false);
         }
     }

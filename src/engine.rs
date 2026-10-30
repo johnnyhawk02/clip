@@ -150,6 +150,50 @@ fn click(t: f64, beat: f64, bpb: u32, rate: u32) -> f32 {
     ((2.0 * std::f64::consts::PI * hz * off).sin() * (-off / 0.006).exp() * 0.35) as f32
 }
 
+/// Samples over which a delay line moves to a new delay (a crossfade, so no click).
+const COMP_FADE: usize = 1024;
+
+/// Delay compensation's delay line, as Live's: a track's sound held back by however much it
+/// needs to line up with the most-delayed track. When that changes (an effect with latency
+/// added, removed or switched off), it crossfades from the old delay to the new.
+#[derive(Default)]
+pub struct Comp {
+    buf: Vec<[f32; 2]>,
+    w: usize,
+    cur: usize,
+    from: usize,
+    fade: usize,
+}
+
+impl Comp {
+    /// Delay `buf` (in place) by `delay` frames.
+    pub fn process(&mut self, buf: &mut [[f32; 2]], delay: usize) {
+        let need = (delay + 1).next_power_of_two().max(8192);
+        if self.buf.len() < need {
+            // New (or grown, losing what it held): straight to the delay, nothing to fade from.
+            self.buf = vec![[0.0; 2]; need];
+            (self.w, self.cur, self.fade) = (0, delay, 0);
+        }
+        if delay != self.cur {
+            (self.from, self.cur, self.fade) = (self.cur, delay, COMP_FADE);
+        }
+        let mask = self.buf.len() - 1;
+        for f in buf.iter_mut() {
+            self.buf[self.w] = *f;
+            let a = self.buf[(self.w + mask + 1 - self.cur) & mask];
+            *f = if self.fade > 0 {
+                let b = self.buf[(self.w + mask + 1 - self.from) & mask];
+                let x = self.fade as f32 / COMP_FADE as f32;
+                self.fade -= 1;
+                [a[0] * (1.0 - x) + b[0] * x, a[1] * (1.0 - x) + b[1] * x]
+            } else {
+                a
+            };
+            self.w = (self.w + 1) & mask;
+        }
+    }
+}
+
 /// One layer: its volume and its clips in time order.
 pub struct LayerSrc {
     pub gain: f32,
@@ -166,14 +210,21 @@ pub struct LayerSrc {
     pub device_state: std::sync::Mutex<Vec<Option<devices::State>>>,
     /// How much goes to each return track (post-fader, 0..1).
     pub sends: Vec<f32>,
+    /// Its delay compensation (carried from song to song, as the effects' state is).
+    pub comp: std::sync::Mutex<Comp>,
 }
 
 /// Return track `r` counts as track `RETURN + r` (for meters and carrying effects over).
 pub const RETURN: usize = 1 << 20;
 
 impl LayerSrc {
+    /// How many samples late its effects make it.
+    pub fn latency(&self) -> usize {
+        self.devices.iter().map(|d| d.0.latency()).sum()
+    }
+
     pub fn new(track: usize, gain: f32, pan: (f32, f32), clips: Vec<ClipSrc>) -> LayerSrc {
-        LayerSrc { gain, pan, clips, track, peak: std::sync::atomic::AtomicU32::new(0), devices: Vec::new(), device_state: std::sync::Mutex::new(Vec::new()), sends: Vec::new() }
+        LayerSrc { gain, pan, clips, track, peak: std::sync::atomic::AtomicU32::new(0), devices: Vec::new(), device_state: std::sync::Mutex::new(Vec::new()), sends: Vec::new(), comp: Default::default() }
     }
 }
 
@@ -190,6 +241,15 @@ pub struct Song {
     pub returns: Vec<LayerSrc>,
     /// A beat's length in song frames (for tempo-synced effects).
     pub beat: f64,
+    /// Delay compensation (Live's Options ▸ Delay Compensation): on, every track is held back
+    /// to line up with the most-delayed one (`comp`, the largest latency of any track's effects,
+    /// heard or not, so muting doesn't move things), and the tracks' mix to line up with the
+    /// most-delayed return track (`ret_comp`).
+    pub pdc: bool,
+    pub comp: usize,
+    pub ret_comp: usize,
+    /// The tracks' mix's delay line, for `ret_comp`.
+    pub bus: std::sync::Mutex<Comp>,
 }
 
 /// Run `layer`'s effects on `buf`; `dry` holds every layer's sound (for sidechains).
@@ -244,6 +304,9 @@ impl Song {
         let dry: Vec<Vec<[f32; 2]>> = if self.layers.iter().any(|l| l.devices.iter().any(|d| d.1.is_some())) { bufs.clone() } else { Vec::new() };
         for (li, layer) in self.layers.iter().enumerate() {
             run_devices(&self.layers, Some(li), layer, &mut bufs[li], &dry, self.rate, self.beat);
+            // Held back to line up with the most-delayed track (its sends too: they're taken after).
+            let delay = if self.pdc { self.comp.saturating_sub(layer.latency()) } else { 0 };
+            layer.comp.lock().unwrap().process(&mut bufs[li], delay);
         }
         let mut peaks = vec![0.0f32; self.layers.len()];
         let mut rbufs = vec![vec![[0.0f32; 2]; n]; self.returns.len()];
@@ -264,9 +327,13 @@ impl Song {
                 }
             }
         }
+        // The tracks' mix waits for the most-delayed return track.
+        self.bus.lock().unwrap().process(out, if self.pdc { self.ret_comp } else { 0 });
         // The return tracks: their effects, then into the mix.
         for (ret, rb) in self.returns.iter().zip(rbufs.iter_mut()) {
             run_devices(&self.returns, None, ret, rb, &[], self.rate, self.beat);
+            let delay = if self.pdc { self.ret_comp.saturating_sub(ret.latency()) } else { 0 };
+            ret.comp.lock().unwrap().process(rb, delay);
             let (pl, pr) = ret.pan;
             let mut peak = 0.0f32;
             for (frame, f) in out.iter_mut().zip(rb.iter()) {
@@ -280,11 +347,13 @@ impl Song {
                 ret.peak.store(peak.to_bits(), std::sync::atomic::Ordering::Relaxed);
             }
         }
+        // The metronome is held back with the music, so it stays in time with it.
+        let late = self.latency() as f64 * step;
         for (k, frame) in out.iter_mut().enumerate() {
-            let t = from + step * k as f64;
+            let t = from + step * k as f64 - late;
             frame[0] *= self.master;
             frame[1] *= self.master;
-            if let Some((beat, bpb)) = self.click {
+            if let Some((beat, bpb)) = self.click.filter(|_| t >= 0.0) {
                 let c = click(t, beat, bpb, self.rate);
                 frame[0] += c;
                 frame[1] += c;
@@ -297,6 +366,12 @@ impl Song {
                 layer.peak.store(p.to_bits(), std::sync::atomic::Ordering::Relaxed);
             }
         }
+    }
+
+    /// How many frames late the mix is heard, with delay compensation on (else 0: tracks with
+    /// latency are simply heard late).
+    pub fn latency(&self) -> usize {
+        if self.pdc { self.comp + self.ret_comp } else { 0 }
     }
 
     /// Each heard track's loudest level since the last look, as (track, level), resetting them.
@@ -312,7 +387,7 @@ mod tests {
     #[test]
     fn metronome_clicks_on_beats_higher_on_the_bar() {
         // A beat every 22050 frames (120 BPM at 44.1 kHz), 4 to a bar.
-        let song = Song { layers: Vec::new(), end: 200_000, rate: 44100, master: 1.0, click: Some((22050.0, 4)), returns: Vec::new(), beat: 22050.0 };
+        let song = Song { layers: Vec::new(), end: 200_000, rate: 44100, master: 1.0, click: Some((22050.0, 4)), returns: Vec::new(), beat: 22050.0, pdc: true, comp: 0, ret_comp: 0, bus: Default::default() };
         let mut out = vec![[0.0; 2]; 400];
         song.render(22050.0, 1.0, &mut out);
         assert!(out.iter().any(|f| f[0].abs() > 0.05), "a click on beat 2");
@@ -325,7 +400,7 @@ mod tests {
         // A ramp 0, 1, 2… read at speed 2: song frame t hears source frame 2t.
         let audio = Arc::new(Audio { rate: 1000, channels: vec![(0..100).map(|i| i as f32).collect()] });
         let clip = ClipSrc { audio, speed: 2.0, start: 10, len: 40, trim: 0, looping: None, frames: 50, fades: (0, 0), gain: 1.0 };
-        let song = Song { layers: vec![LayerSrc::new(0, 1.0, (1.0, 1.0), vec![clip])], end: 50, rate: 1000, master: 1.0, click: None, returns: Vec::new(), beat: 1000.0 };
+        let song = Song { layers: vec![LayerSrc::new(0, 1.0, (1.0, 1.0), vec![clip])], end: 50, rate: 1000, master: 1.0, click: None, returns: Vec::new(), beat: 1000.0, pdc: true, comp: 0, ret_comp: 0, bus: Default::default() };
         let mut out = vec![[0.0; 2]; 4];
         song.render(20.0, 1.0, &mut out);
         assert_eq!(out.iter().map(|f| f[0]).collect::<Vec<_>>(), vec![20.0, 22.0, 24.0, 26.0]);
@@ -341,9 +416,79 @@ mod tests {
         let mut layer = LayerSrc::new(0, 1.0, (1.0, 1.0), vec![clip]);
         layer.sends = vec![1.0];
         let ret = LayerSrc::new(RETURN, 1.0, (1.0, 1.0), Vec::new());
-        let song = Song { layers: vec![layer], end: 100, rate: 1000, master: 1.0, click: None, returns: vec![ret], beat: 500.0 };
+        let song = Song { layers: vec![layer], end: 100, rate: 1000, master: 1.0, click: None, returns: vec![ret], beat: 500.0, pdc: true, comp: 0, ret_comp: 0, bus: Default::default() };
         let mut out = vec![[0.0; 2]; 4];
         song.render(10.0, 1.0, &mut out);
         assert_eq!(out[0], [0.5, 0.5]);
+    }
+
+    /// A song of an impulse at frame 100 on two tracks: the first hard left through a Tame that
+    /// changes nothing but delays it, the second hard right and plain. With `via_return` the
+    /// first is plain and the second also sends to a return track with the Tame on it.
+    fn impulse_song(pdc: bool, via_return: bool) -> Song {
+        let audio = Arc::new(Audio { rate: 44100, channels: vec![(0..1000).map(|i| if i == 100 { 1.0 } else { 0.0 }).collect()] });
+        let clip = || ClipSrc { audio: audio.clone(), speed: 1.0, start: 0, len: 1000, trim: 0, looping: None, frames: 1000, fades: (0, 0), gain: 1.0 };
+        let tame = Device::Tame(crate::tame::Settings { depth: 0.0, ..Default::default() });
+        let mut a = LayerSrc::new(0, 1.0, (1.0, 0.0), vec![clip()]);
+        let mut b = LayerSrc::new(1, 1.0, (0.0, 1.0), vec![clip()]);
+        let mut returns = Vec::new();
+        if via_return {
+            b.sends = vec![1.0];
+            let mut r = LayerSrc::new(RETURN, 1.0, (1.0, 1.0), Vec::new());
+            r.devices = vec![(tame, None)];
+            returns.push(r);
+        } else {
+            a.devices = vec![(tame, None)];
+        }
+        let (comp, ret_comp) = (a.latency().max(b.latency()), returns.iter().map(|r| r.latency()).max().unwrap_or(0));
+        Song { layers: vec![a, b], end: 20000, rate: 44100, master: 1.0, click: None, returns, beat: 22050.0, pdc, comp, ret_comp, bus: Default::default() }
+    }
+
+    /// `song`'s first 8192 frames, played in blocks.
+    fn play(song: &Song) -> Vec<[f32; 2]> {
+        let mut out = vec![[0.0f32; 2]; 8192];
+        for (b, chunk) in out.chunks_mut(512).enumerate() {
+            song.render((b * 512) as f64, 1.0, chunk);
+        }
+        out
+    }
+
+    /// Where the loudest frame is on each side.
+    fn peaks(out: &[[f32; 2]]) -> [usize; 2] {
+        let at = |c: usize| (0..out.len()).max_by(|&i, &j| out[i][c].abs().total_cmp(&out[j][c].abs())).unwrap();
+        [at(0), at(1)]
+    }
+
+    #[test]
+    fn delay_compensation_lines_tracks_up() {
+        let late = crate::tame::LATENCY;
+        assert_eq!(peaks(&play(&impulse_song(true, false))), [100 + late, 100 + late]);
+        // Off, as before: the Tame track is simply late.
+        assert_eq!(peaks(&play(&impulse_song(false, false))), [100 + late, 100]);
+        assert_eq!(impulse_song(true, false).latency(), late);
+        assert_eq!(impulse_song(false, false).latency(), 0);
+    }
+
+    #[test]
+    fn delay_compensation_waits_for_return_tracks() {
+        let late = crate::tame::LATENCY;
+        // On: the plain track, the second track and its send through the delayed return all
+        // land together (the right side's two paths adding up).
+        let on = play(&impulse_song(true, true));
+        assert!((on[100 + late][0] - 1.0).abs() < 1e-3 && (on[100 + late][1] - 2.0).abs() < 1e-3, "{:?}", on[100 + late]);
+        assert!(on[100][0].abs() < 1e-3 && on[100][1].abs() < 1e-3);
+        // Off: the return's echo comes late.
+        let off = play(&impulse_song(false, true));
+        assert!((off[100][1] - 1.0).abs() < 1e-3 && (off[100 + late][1] - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn changing_the_delay_does_not_click() {
+        // A steady level stays steady while the delay line moves to a new delay.
+        let mut c = Comp::default();
+        let mut buf = vec![[0.5f32; 2]; 10000];
+        c.process(&mut buf[..5000], 0);
+        c.process(&mut buf[5000..], 2048);
+        assert!(buf.iter().all(|f| (f[0] - 0.5).abs() < 1e-6));
     }
 }

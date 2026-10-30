@@ -607,7 +607,7 @@ impl App {
         let Some(clip) = self.clip((t, c)).cloned() else { return };
         let Some(inner) = clip.group.clone() else { return };
         // Playing on into the group: the same moment, now counted from the group's start.
-        let playing = self.player.is_playing().then(|| self.player.position());
+        let playing = self.player.is_playing().then(|| self.player.heard_position());
         // A Session slot: where its loop is now, to carry on from there inside. One waiting for
         // its launch is placed to reach its start on time; one not launched at all keeps to the
         // song's bars.
@@ -664,7 +664,7 @@ impl App {
     /// Close the open group, folding its arrangement back into its clip.
     pub(super) fn leave_group(&mut self) {
         let Some(f) = self.nest.pop() else { return };
-        let playing = self.player.is_playing().then(|| self.player.position());
+        let playing = self.player.is_playing().then(|| self.player.heard_position());
         let inner = std::mem::replace(&mut self.tracks, f.tracks);
         if let Some(mut c) = self.clip((f.track, f.clip)).cloned() {
             if f.clip >= SLOT {

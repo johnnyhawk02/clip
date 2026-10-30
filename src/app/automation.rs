@@ -241,8 +241,9 @@ impl App {
                     "sleep" => std::thread::sleep(std::time::Duration::from_millis(arg.parse().unwrap_or(0))),
                     // pos: print where the transport is, and what it plays.
                     "pos" => {
+                        let heard = self.player.heard_position();
                         let s = self.player.shared.lock().unwrap();
-                        eprintln!("pos {arg} playing {} at {:.0} range {}..{} looping {} nest {} brace {:?} session {:?}", s.playing, s.pos, s.start, s.end, s.looping, self.nest.len(), self.arr_loop, self.session_play.iter().map(|p| p.segments.clone()).collect::<Vec<_>>());
+                        eprintln!("pos {arg} heard {heard} playing {} at {:.0} range {}..{} looping {} nest {} brace {:?} session {:?}", s.playing, s.pos, s.start, s.end, s.looping, self.nest.len(), self.arr_loop, self.session_play.iter().map(|p| p.segments.clone()).collect::<Vec<_>>());
                     }
                     "launch" => {
                         // launch:t|s launches the clip in track t's slot s.
@@ -291,7 +292,7 @@ impl App {
                     "playhead" => self.arr_cursor = (arg.parse::<f64>().unwrap_or(0.0) * rate) as usize,
                     "liveexport" => {
                         // What the live engine plays, rendered start to end (to compare with export).
-                        let song = tracks::song(&self.tracks, &self.returns, self.rate(), self.arrangement_frames(), self.master_gain, None, self.beat_frames(), &self.session_play);
+                        let song = tracks::song(&self.tracks, &self.returns, self.rate(), self.arrangement_frames(), self.master_gain, None, self.beat_frames(), &self.session_play, self.delay_comp);
                         let mut out = vec![[0.0f32; 2]; song.end];
                         song.render(0.0, 1.0, &mut out);
                         let a = Audio { rate: song.rate, channels: vec![out.iter().map(|f| f[0]).collect(), out.iter().map(|f| f[1]).collect()] };

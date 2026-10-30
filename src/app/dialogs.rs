@@ -526,7 +526,7 @@ impl App {
         let mut open = self.show_spectrum;
         let src = self.play_audio.clone().or_else(|| self.audio.clone());
         let playing = self.player.is_playing();
-        let pos = if playing { self.player.position() } else { self.cursor };
+        let pos = if playing { self.player.heard_position() } else { self.cursor };
         let mut three_d = self.spectrum_3d;
         let sel = self.sel;
         let cache = &mut self.spectrum_cache;

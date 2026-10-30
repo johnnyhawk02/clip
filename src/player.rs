@@ -47,6 +47,10 @@ pub struct Shared {
     pub looping: bool,
     /// Headphone crossfeed on what's heard.
     pub crossfeed: bool,
+    /// The loop has come round since playing started (for `heard_position`).
+    pub wrapped: bool,
+    /// Song frames per output frame, as last played.
+    pub step: f64,
 }
 
 pub struct Player {
@@ -67,6 +71,8 @@ impl Player {
             playing: false,
             looping: false,
             crossfeed: false,
+            wrapped: false,
+            step: 1.0,
         }));
         match build_stream(shared.clone()) {
             Ok(stream) => {
@@ -96,8 +102,13 @@ impl Player {
                         let state = std::mem::take(&mut *o.device_state.lock().unwrap());
                         *l.device_state.lock().unwrap() = state;
                     }
+                    // Delay compensation carries on whatever the chain (it crossfades to a new delay).
+                    std::mem::swap(&mut *o.comp.lock().unwrap(), &mut *l.comp.lock().unwrap());
                 }
             }
+        }
+        if let (Source::Song(old), Source::Song(new)) = (&s.source, &source) {
+            std::mem::swap(&mut *old.bus.lock().unwrap(), &mut *new.bus.lock().unwrap());
         }
         s.source = source;
         s.end = s.end.min(n);
@@ -129,6 +140,7 @@ impl Player {
         s.pos = start as f64;
         s.looping = looping;
         s.playing = true;
+        s.wrapped = false;
     }
 
     pub fn stop(&self) {
@@ -163,6 +175,24 @@ impl Player {
 
     pub fn position(&self) -> usize {
         self.shared.lock().unwrap().pos as usize
+    }
+
+    /// Where the transport is as heard: behind `position` by the song's delay compensation (as
+    /// Live's playhead), round the loop's end once it has come round.
+    pub fn heard_position(&self) -> usize {
+        let s = self.shared.lock().unwrap();
+        let late = match &s.source {
+            Source::Song(song) => song.latency() as f64 * s.step,
+            Source::Buffer(_) => 0.0,
+        };
+        let at = s.pos - late;
+        if at >= s.start as f64 {
+            at as usize
+        } else if s.wrapped && s.end > s.start {
+            (s.end as f64 - (s.start as f64 - at)).max(s.start as f64) as usize
+        } else {
+            s.start
+        }
     }
 
     /// Play the song this much faster (a tempo being dragged in; see `Shared::speed`).
@@ -252,6 +282,7 @@ where
                     return;
                 };
                 let step = s.source.rate() as f64 / out_rate;
+                s.step = step * s.speed;
                 let crossfeed = s.crossfeed && out_ch >= 2;
                 // The song is mixed for the whole block up front.
                 let frames = data.len() / out_ch.max(1);
@@ -270,6 +301,7 @@ where
                     if s.pos >= s.end as f64 {
                         if s.looping && s.end > s.start {
                             s.pos = s.start as f64;
+                            s.wrapped = true;
                             // Mix from the top again for the rest of this block.
                             if let Source::Song(song) = &s.source {
                                 song.render(s.pos, step * s.speed, &mut mix[k..frames]);

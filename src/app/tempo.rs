@@ -111,7 +111,7 @@ impl App {
             for job in jobs {
                 let mut inner = (*job.inner).clone();
                 render_inner(&mut inner, rate, beat, repitch);
-                let mut audio = mix_tracks(&inner, &[], rate, beat);
+                let mut audio = mix_tracks(&inner, &[], rate, beat, true);
                 if let Some((_, e)) = job.brace.filter(|&(_, e)| e > audio.frames()) {
                     audio.channels.iter_mut().for_each(|ch| ch.resize(e, 0.0));
                 }
@@ -247,7 +247,7 @@ fn render_inner(tracks: &mut [Track], rate: u32, beat: f64, repitch: bool) {
             if c.warp.take().is_some() {
                 let mut inner = (*g).clone();
                 render_inner(&mut inner, rate, beat, repitch);
-                let mut audio = mix_tracks(&inner, &[], rate, beat);
+                let mut audio = mix_tracks(&inner, &[], rate, beat, true);
                 if let Some((_, e)) = c.loop_points.filter(|&(_, e)| e > audio.frames()) {
                     audio.channels.iter_mut().for_each(|ch| ch.resize(e, 0.0));
                 }

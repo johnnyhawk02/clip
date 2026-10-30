@@ -65,6 +65,8 @@ pub struct ViewState {
     pub sel_slot: Option<(usize, usize)>,
     pub launch_q: f64,
     pub metronome: bool,
+    /// Delay compensation off (it's on unless a project turned it off).
+    pub no_delay_comp: bool,
     pub arrangement_record: bool,
     pub follow: bool,
     pub fit_height: bool,

@@ -865,6 +865,7 @@ impl App {
             sel_slot: self.sel_slot.filter(|_| top.is_none()),
             launch_q: self.launch_q,
             metronome: self.metronome,
+            no_delay_comp: !self.delay_comp,
             arrangement_record: self.session_rec,
             follow: self.follow,
             fit_height: self.fit_height,
@@ -895,6 +896,7 @@ impl App {
             self.launch_q = v.launch_q;
         }
         (self.metronome, self.session_rec, self.follow, self.fit_height) = (v.metronome, v.arrangement_record, v.follow, v.fit_height);
+        self.delay_comp = !v.no_delay_comp;
         self.show_pool = v.show_pool;
         self.show_devices = v.show_devices && self.dev_track(v.device_target).is_some();
         if self.show_devices {
