@@ -347,7 +347,7 @@ pub struct App {
     /// A track effect being printed into the sound (its settings), and the last settings of each.
     device_fx: Option<devices::Device>,
     device_fx_last: Vec<devices::Device>,
-    /// Printing a whole looping clip: the tail wraps round to its start.
+    /// Printing a whole clip: the tail wraps round to its start (for loops), instead of adding on.
     device_fx_wrap: bool,
 
     tool: Tool,
@@ -618,7 +618,7 @@ impl App {
             dialog: None,
             device_fx: None,
             device_fx_last: Vec::new(),
-            device_fx_wrap: true,
+            device_fx_wrap: false,
             tool: Tool::Select,
             pencil: None,
             zoom_band: None,

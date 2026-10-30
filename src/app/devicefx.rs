@@ -7,6 +7,9 @@ use crate::devices::{Device, State};
 
 /// Seconds of sound run through before a wrapped clip, so its tail has come round in full.
 const WRAP_LEAD_SECS: f64 = 10.0;
+/// The longest tail let ring on past the end, and the level it rings down to (-80 dB).
+const TAIL_MAX_SECS: f64 = 30.0;
+const TAIL_FLOOR: f32 = 1e-4;
 
 impl App {
     /// Open the dialog for device `name` (from `devices::ALL`), with the settings it last had.
@@ -37,7 +40,7 @@ impl App {
         let (mut apply, mut cancel) = (false, false);
         let resp = dialog_modal("device-fx").show(ctx, |ui| {
             ui.set_width(DIALOG_W);
-            dialog_header(ui, &format!("{} Device", d.name()), &format!("The track effect, printed into {scope}."));
+            dialog_header(ui, &format!("{} Device", d.name()), &format!("The track effect, printed into {scope}. Its tail rings on past the end."));
             match &mut d {
                 Device::Reverb(s) => _ = reverb_panel(ui, s),
                 Device::Delay(s) => _ = delay_panel(ui, s),
@@ -46,7 +49,7 @@ impl App {
             }
             if whole {
                 ui.add_space(8.0);
-                ui.checkbox(&mut wrap, "Wrap the tail round to the start (for loops)");
+                ui.checkbox(&mut wrap, "Wrap the tail round to the start instead (a loop keeps its length)");
             }
             (apply, cancel) = dialog_buttons(ui, "Apply", true, |_| {});
         });
@@ -64,30 +67,60 @@ impl App {
         }
     }
 
-    /// Run device `d` over the selection (or the whole sound). With `wrap`, the sound is played
-    /// round a few times first, so what rings on past its end comes back in at its start.
+    /// Run device `d` over the selection (or the whole sound). Its tail rings on past the end:
+    /// mixed over what follows, and lengthening the sound if it runs past its end. With `wrap`,
+    /// the sound is played round a few times first instead, so the tail comes back in at its
+    /// start and a loop keeps its length.
     pub(super) fn apply_device_fx(&mut self, d: Device, wrap: bool) {
-        let beat = self.beat_frames();
         let label = match d {
             Device::Reverb(_) => "Reverb Device",
             Device::Delay(_) => "Delay Device",
             Device::Spring(_) => "Spring Device",
             Device::Spacer(_) => return,
         };
-        self.process(label, |a| {
-            let n = a.frames();
-            let nch = a.num_channels().max(1);
-            let at = |c: usize, i: usize| a.channels.get(c.min(nch - 1)).and_then(|v| v.get(i)).copied().unwrap_or(0.0);
-            let lead = if wrap && n > 0 { ((WRAP_LEAD_SECS * a.rate as f64) / n as f64).ceil().clamp(1.0, 64.0) as usize } else { 0 };
-            let mut frames: Vec<[f32; 2]> = (0..n * (lead + 1)).map(|k| [at(0, k % n.max(1)), at(1, k % n.max(1))]).collect();
-            State::new(&d, a.rate).process(&d, &mut frames, None, beat);
-            let out = &frames[n * lead..];
-            let channels = if nch == 1 {
-                vec![out.iter().map(|f| (f[0] + f[1]) * 0.5).collect()]
+        let Some(a) = self.audio.clone() else { return };
+        let (s, e) = self.range_or_all();
+        if e <= s {
+            return;
+        }
+        let part = a.slice(s, e);
+        let (n, nch, rate) = (part.frames(), part.num_channels().max(1), a.rate);
+        let at = |c: usize, i: usize| part.channels.get(c.min(nch - 1)).and_then(|v| v.get(i)).copied().unwrap_or(0.0);
+        let mut st = State::new(&d, rate);
+        let beat = self.beat_frames();
+        let lead = if wrap { ((WRAP_LEAD_SECS * rate as f64) / n as f64).ceil().clamp(1.0, 64.0) as usize } else { 0 };
+        let mut frames: Vec<[f32; 2]> = (0..n * (lead + 1)).map(|k| [at(0, k % n), at(1, k % n)]).collect();
+        st.process(&d, &mut frames, None, beat);
+        let mut out = frames.split_off(n * lead);
+        if !wrap {
+            // Run on through silence until the tail has died away.
+            let block = rate as usize / 4;
+            for _ in 0..(TAIL_MAX_SECS * 4.0) as usize {
+                let mut tail = vec![[0.0f32; 2]; block];
+                st.process(&d, &mut tail, None, beat);
+                let loud = tail.iter().any(|f| f[0].abs().max(f[1].abs()) > TAIL_FLOOR);
+                out.extend(tail);
+                if !loud {
+                    break;
+                }
+            }
+            // Trim the silence at the very end.
+            let last = out.iter().rposition(|f| f[0].abs().max(f[1].abs()) > TAIL_FLOOR).map_or(n, |i| (i + 1).max(n));
+            out.truncate(last);
+        }
+        let to_audio = |fr: &[[f32; 2]]| Audio {
+            rate,
+            channels: if nch == 1 {
+                vec![fr.iter().map(|f| (f[0] + f[1]) * 0.5).collect()]
             } else {
-                (0..nch).map(|c| if c < 2 { out.iter().map(|f| f[c]).collect() } else { a.channels[c].clone() }).collect()
-            };
-            Audio { rate: a.rate, channels }
-        });
+                (0..nch).map(|c| if c < 2 { fr.iter().map(|f| f[c]).collect() } else { vec![0.0; fr.len()] }).collect()
+            },
+        };
+        let mut new = a.insert(s, e, &to_audio(&out[..n]));
+        if out.len() > n {
+            new = effects::mix_into(&new, e, &to_audio(&out[n..]), 1.0);
+        }
+        let sel = self.sel.map(|_| (s, e + out.len() - n));
+        self.apply_edit(label, new, sel, &[]);
     }
 }

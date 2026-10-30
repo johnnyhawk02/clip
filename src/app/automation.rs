@@ -232,7 +232,7 @@ impl App {
                         self.open_device_fx(arg);
                         if let Some(d) = self.device_fx.take() {
                             let before = self.audio.as_ref().map_or(0.0, |a| a.channels[0].iter().map(|v| v * v).sum::<f32>());
-                            self.apply_device_fx(d, self.sel.is_none());
+                            self.apply_device_fx(d, self.device_fx_wrap && self.sel.is_none());
                             let after = self.audio.as_ref().map_or(0.0, |a| a.channels[0].iter().map(|v| v * v).sum::<f32>());
                             eprintln!("devicefx {arg}: energy {before:.1} -> {after:.1}, frames {}", self.frames());
                         }
