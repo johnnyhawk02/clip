@@ -235,6 +235,7 @@ mod tests {
             locators: Vec::new(),
             scenes: Vec::new(),
             returns: None,
+            view: Some(ViewState { session: true, window: Some([10.0, 20.0, 1100.0, 560.0]), ..Default::default() }),
             rate: 1000,
             tracks: vec![TrackData {
                 name: "T".into(),
@@ -275,6 +276,9 @@ mod tests {
         assert_eq!(audio[0].channels, a.channels);
         assert_eq!(q.tracks[0].clips[0].cues[0].1, "x");
         assert_eq!(q.tracks[0].pan, -0.5);
+        let v = q.view.unwrap();
+        assert!(v.session);
+        assert_eq!(v.window, Some([10.0, 20.0, 1100.0, 560.0]));
         std::fs::remove_file(path).ok();
     }
 }
