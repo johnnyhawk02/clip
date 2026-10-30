@@ -6,6 +6,7 @@ use crate::fx;
 use crate::spacer;
 use crate::tape;
 use crate::phaser;
+use crate::pultec;
 
 /// One device in a track's chain, with its settings.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -17,6 +18,7 @@ pub enum Device {
     Spring(fx::SpringSettings),
     Tape(tape::Settings),
     Phaser(phaser::Settings),
+    Pultec(pultec::Settings),
 }
 
 /// The effects there are to add: name and a line on what it does.
@@ -26,6 +28,7 @@ pub const ALL: &[(&str, &str)] = &[
     ("Delay", "Echoes in time with the song"),
     ("Tape", "A tape echo: each repeat recorded onto modelled tape, warmer, darker and wobblier as it goes round (after Chowdhury's tape machine model)"),
     ("Phaser", "Sweeping notches from four JFET all-pass stages, as in the 1974 MXR Phase 90 (after Giampiccolo et al.)"),
+    ("Pultec", "The Pultec EQP-1A's passive EQ: broad, musical boosts and cuts; boost and cut the lows together for the low-end trick (after Barrera's model)"),
     ("Spacer", "Ducks this track only at the frequencies another track is playing, so they sit together"),
 ];
 
@@ -39,6 +42,7 @@ impl Device {
             "Spring" => Some(Device::Spring(fx::SpringSettings::default())),
             "Tape" => Some(Device::Tape(tape::Settings::default())),
             "Phaser" => Some(Device::Phaser(phaser::Settings::default())),
+            "Pultec" => Some(Device::Pultec(pultec::Settings::default())),
             _ => None,
         }
     }
@@ -51,6 +55,7 @@ impl Device {
             Device::Spring(_) => "Spring",
             Device::Tape(_) => "Tape",
             Device::Phaser(_) => "Phaser",
+            Device::Pultec(_) => "Pultec",
         }
     }
 
@@ -62,6 +67,7 @@ impl Device {
             Device::Spring(s) => s.on,
             Device::Tape(s) => s.on,
             Device::Phaser(s) => s.on,
+            Device::Pultec(s) => s.on,
         }
     }
 
@@ -73,6 +79,7 @@ impl Device {
             Device::Spring(s) => s.on = on,
             Device::Tape(s) => s.on = on,
             Device::Phaser(s) => s.on = on,
+            Device::Pultec(s) => s.on = on,
         }
     }
 
@@ -80,7 +87,7 @@ impl Device {
     pub fn source(&self) -> Option<usize> {
         match self {
             Device::Spacer(s) => Some(s.source),
-            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) => None,
+            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Pultec(_) => None,
         }
     }
 
@@ -88,7 +95,7 @@ impl Device {
     pub fn remap(mut self, f: &impl Fn(usize) -> Option<usize>) -> Option<Device> {
         match &mut self {
             Device::Spacer(s) => s.source = f(s.source)?,
-            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) => {}
+            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Pultec(_) => {}
         }
         Some(self)
     }
@@ -102,6 +109,7 @@ pub enum State {
     Spring(fx::Spring),
     Tape(Box<tape::Tape>),
     Phaser(phaser::Phaser),
+    Pultec(Box<pultec::Pultec>),
 }
 
 impl State {
@@ -113,6 +121,7 @@ impl State {
             Device::Spring(_) => State::Spring(fx::Spring::new(rate)),
             Device::Tape(_) => State::Tape(Box::new(tape::Tape::new(rate))),
             Device::Phaser(_) => State::Phaser(phaser::Phaser::new(rate)),
+            Device::Pultec(_) => State::Pultec(Box::new(pultec::Pultec::new(rate))),
         }
     }
 
@@ -130,6 +139,7 @@ impl State {
             (State::Spring(st), Device::Spring(s)) => st.process(s, main),
             (State::Tape(st), Device::Tape(s)) => st.process(s, main, beat),
             (State::Phaser(st), Device::Phaser(s)) => st.process(s, main),
+            (State::Pultec(st), Device::Pultec(s)) => st.process(s, main),
             _ => {}
         }
     }

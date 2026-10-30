@@ -7,6 +7,7 @@ use crate::devices::{self, Device};
 use crate::fx;
 use crate::tape;
 use crate::phaser;
+use crate::pultec;
 
 /// Width of one device panel.
 const DEV_W: f32 = 560.0;
@@ -114,6 +115,7 @@ impl App {
                             Device::Spring(s) => spring_panel(&mut inner, s),
                             Device::Tape(s) => tape_panel(&mut inner, s),
                             Device::Phaser(s) => phaser_panel(&mut inner, s),
+                            Device::Pultec(s) => pultec_panel(&mut inner, s),
                         };
                     }
                     // + Add Effect, as Live's "Drop Audio Effects Here".
@@ -401,6 +403,53 @@ pub(super) fn phaser_panel(ui: &mut egui::Ui, s: &mut phaser::Settings) -> bool 
         ui.label("Dry / Wet");
         active |= pct(ui, &mut s.mix);
         ui.end_row();
+    });
+    active
+}
+
+/// Pultec's front panel: the low section (frequency, boost, attenuation), then the high
+/// boost (frequency, boost, bandwidth) and high attenuation (selector, amount). Knobs go 0 to 10.
+pub(super) fn pultec_panel(ui: &mut egui::Ui, s: &mut pultec::Settings) -> bool {
+    let mut active = false;
+    ui.spacing_mut().slider_width = 100.0;
+    let knob = |ui: &mut egui::Ui, v: &mut f32| busy(&ui.add(egui::Slider::new(v, 0.0..=10.0).fixed_decimals(1)));
+    let pick = |ui: &mut egui::Ui, id: &str, v: &mut f32, options: &[f32], unit: &str| {
+        egui::ComboBox::from_id_salt(id).width(80.0).selected_text(format!("{} {unit}", *v)).show_ui(ui, |ui| {
+            for &o in options {
+                ui.selectable_value(v, o, format!("{o} {unit}"));
+            }
+        });
+    };
+    ui.horizontal_top(|ui| {
+        egui::Grid::new("pultec_low").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+            ui.label("Low");
+            pick(ui, "pultec_lf", &mut s.low_freq, &pultec::LOW_FREQS, "Hz");
+            ui.end_row();
+            ui.label("Boost");
+            active |= knob(ui, &mut s.low_boost);
+            ui.end_row();
+            ui.label("Atten");
+            active |= knob(ui, &mut s.low_atten);
+            ui.end_row();
+        });
+        ui.add_space(16.0);
+        egui::Grid::new("pultec_high").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+            ui.label("High");
+            pick(ui, "pultec_hf", &mut s.high_freq, &pultec::HIGH_FREQS, "kHz");
+            ui.end_row();
+            ui.label("Boost");
+            active |= knob(ui, &mut s.high_boost);
+            ui.end_row();
+            ui.label("Bandwidth");
+            active |= knob(ui, &mut s.bandwidth);
+            ui.end_row();
+            ui.label("Atten Sel");
+            pick(ui, "pultec_as", &mut s.atten_sel, &pultec::ATTEN_SELS, "kHz");
+            ui.end_row();
+            ui.label("Atten");
+            active |= knob(ui, &mut s.high_atten);
+            ui.end_row();
+        });
     });
     active
 }
