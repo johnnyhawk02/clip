@@ -138,12 +138,12 @@ impl App {
                 for (b, chunk) in frames.chunks_mut(256).enumerate() {
                     let at = (b * 256) % n;
                     let step = Device::Riser(crate::riser::Settings { amount: r.amount * at as f32 / n as f32, ..r });
-                    st.process(&step, chunk, None, beat);
+                    st.process(&step, chunk, None, beat, 0.0);
                 }
             }
             // Printed with look-ahead: cuts smoothed both ways in time, lined up with the sound.
             Device::Tame(t) => frames = crate::tame::print(&t, rate, &frames),
-            _ => st.process(&d, &mut frames, None, beat),
+            _ => st.process(&d, &mut frames, None, beat, 0.0),
         }
         let mut out = frames.split_off(n * lead + late);
         // (Opto has no tail: just the half-sample its colour stage lags by. Nor has Auto Filter, but
@@ -153,7 +153,7 @@ impl App {
             let block = rate as usize / 4;
             for _ in 0..(TAIL_MAX_SECS * 4.0) as usize {
                 let mut tail = vec![[0.0f32; 2]; block];
-                st.process(&d, &mut tail, None, beat);
+                st.process(&d, &mut tail, None, beat, 0.0);
                 let loud = tail.iter().any(|f| f[0].abs().max(f[1].abs()) > TAIL_FLOOR);
                 out.extend(tail);
                 if !loud {

@@ -407,7 +407,7 @@ pub(super) fn opto_panel(ui: &mut egui::Ui, s: &mut opto::Settings, gr: Option<f
 }
 
 /// Auto Filter's panel width (three columns of controls and its curve).
-pub(super) const AUTOFILTER_W: f32 = 1010.0;
+pub(super) const AUTOFILTER_W: f32 = 1300.0;
 
 /// Auto Filter's controls, as Live's: the filter, its envelope follower, its LFO, and its curve
 /// (drag it: across for Frequency, up and down for Resonance), with the cutoff where the
@@ -449,11 +449,8 @@ pub(super) fn autofilter_panel(ui: &mut egui::Ui, s: &mut autofilter::Settings, 
         });
         ui.add_space(14.0);
         egui::Grid::new("afgrid2").num_columns(2).spacing(Vec2::new(10.0, 1.0)).show(ui, |ui| {
-            ui.label("Env Amount").on_hover_text("How far the sound's own level moves the cutoff, up or down (±5 octaves)");
-            let mut p = s.env_amount * 100.0;
-            let w = ui.add(egui::Slider::new(&mut p, -100.0..=100.0).suffix(" %").fixed_decimals(0));
-            s.env_amount = p / 100.0;
-            active |= busy(&w);
+            ui.label("Follower").on_hover_text("How far the sound's own level moves the cutoff, up or down (±5 octaves)");
+            active |= signed_pct(ui, &mut s.env_amount);
             ui.end_row();
             ui.label("Attack");
             let w = ui.add(egui::Slider::new(&mut s.env_attack, 0.1..=1000.0).logarithmic(true).suffix(" ms").fixed_decimals(1));
@@ -473,29 +470,101 @@ pub(super) fn autofilter_panel(ui: &mut egui::Ui, s: &mut autofilter::Settings, 
         });
         ui.add_space(14.0);
         egui::Grid::new("afgrid3").num_columns(2).spacing(Vec2::new(10.0, 1.0)).show(ui, |ui| {
-            ui.label("LFO Amount").on_hover_text("How far the LFO swings the cutoff each way (up to 4 octaves)");
-            active |= pct(ui, &mut s.lfo_amount);
+            ui.label("Envelope").on_hover_text("An ADSR on the cutoff, up or down (±5 octaves)");
+            active |= signed_pct(ui, &mut s.gen_amount);
             ui.end_row();
-            ui.label("Rate");
-            let w = ui.add(egui::Slider::new(&mut s.lfo_rate, 0.01..=40.0).logarithmic(true).suffix(" Hz").fixed_decimals(2));
-            active |= busy(&w);
-            ui.end_row();
-            ui.label("Shape");
-            let shape = tape::LFO_SHAPES.get(s.lfo_shape as usize).copied().unwrap_or("Sine");
-            egui::ComboBox::from_id_salt("af_lfo").width(110.0).selected_text(shape).show_ui(ui, |ui| {
-                for (i, n) in tape::LFO_SHAPES.iter().enumerate() {
-                    ui.selectable_value(&mut s.lfo_shape, i as u8, *n);
+            ui.label("Trigger");
+            ui.horizontal(|ui| {
+                let name = autofilter::TRIGGERS.get(s.gen_trigger as usize).copied().unwrap_or("Off");
+                egui::ComboBox::from_id_salt("af_trig").width(64.0).selected_text(name).show_ui(ui, |ui| {
+                    ui.selectable_value(&mut s.gen_trigger, 0, "Off");
+                    ui.selectable_value(&mut s.gen_trigger, 1, "Sync").on_hover_text("On a grid of the song's beats (Drift moves it too)");
+                    ui.selectable_value(&mut s.gen_trigger, 2, "Input").on_hover_text("On each hit in the sound, held while it stays loud");
+                });
+                if s.gen_trigger == 1 {
+                    sync_rate(ui, "af_genrate", &mut s.gen_beats);
                 }
             });
             ui.end_row();
-            ui.label("Slew").on_hover_text("How slowly the LFO follows its shape");
-            active |= pct(ui, &mut s.lfo_slew);
+            ui.label("A / D");
+            ui.horizontal(|ui| {
+                let a = ui.add(egui::DragValue::new(&mut s.gen_attack).range(0.1..=5000.0).speed(1.0).suffix(" ms").fixed_decimals(1)).on_hover_text("Attack");
+                let d = ui.add(egui::DragValue::new(&mut s.gen_decay).range(1.0..=10000.0).speed(4.0).suffix(" ms").fixed_decimals(0)).on_hover_text("Decay");
+                active |= busy(&a) || busy(&d);
+            });
+            ui.end_row();
+            ui.label("S / R");
+            ui.horizontal(|ui| {
+                let mut p = s.gen_sustain * 100.0;
+                let a = ui.add(egui::DragValue::new(&mut p).range(0.0..=100.0).speed(0.5).suffix(" %").fixed_decimals(0)).on_hover_text("Sustain, while the gate is held");
+                s.gen_sustain = p / 100.0;
+                let r = ui.add(egui::DragValue::new(&mut s.gen_release).range(1.0..=10000.0).speed(4.0).suffix(" ms").fixed_decimals(0)).on_hover_text("Release");
+                active |= busy(&a) || busy(&r);
+            });
+            ui.end_row();
+        });
+        ui.add_space(14.0);
+        egui::Grid::new("afgrid4").num_columns(2).spacing(Vec2::new(10.0, 1.0)).show(ui, |ui| {
+            ui.label("LFO").on_hover_text("How far the LFO swings the cutoff each way (up to 4 octaves)");
+            active |= pct(ui, &mut s.lfo_amount);
+            ui.end_row();
+            ui.label("Rate");
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut s.lfo_sync, false, "Hz");
+                ui.selectable_value(&mut s.lfo_sync, true, "Sync").on_hover_text("In time with the song");
+                if s.lfo_sync {
+                    sync_rate(ui, "af_lforate", &mut s.lfo_beats);
+                } else {
+                    ui.spacing_mut().slider_width = 70.0;
+                    let w = ui.add(egui::Slider::new(&mut s.lfo_rate, 0.01..=40.0).logarithmic(true).suffix(" Hz").fixed_decimals(2));
+                    active |= busy(&w);
+                }
+            });
+            ui.end_row();
+            ui.label("Shape");
+            ui.horizontal(|ui| {
+                let shape = tape::LFO_SHAPES.get(s.lfo_shape as usize).copied().unwrap_or("Sine");
+                egui::ComboBox::from_id_salt("af_lfo").width(100.0).selected_text(shape).show_ui(ui, |ui| {
+                    for (i, n) in tape::LFO_SHAPES.iter().enumerate() {
+                        ui.selectable_value(&mut s.lfo_shape, i as u8, *n);
+                    }
+                });
+                let mut p = s.lfo_slew * 100.0;
+                let w = ui.add(egui::DragValue::new(&mut p).range(0.0..=100.0).speed(0.5).prefix("Slew ").suffix(" %").fixed_decimals(0)).on_hover_text("How slowly the LFO follows its shape");
+                s.lfo_slew = p / 100.0;
+                active |= busy(&w);
+            });
+            ui.end_row();
+            ui.label("Drift").on_hover_text("Lets the LFO wander out of time and back in: locked for two bars, drifting out, drifting back (in Hz: four seconds each)");
+            active |= pct(ui, &mut s.lfo_drift);
+            ui.end_row();
+            ui.label("Phase").on_hover_text("The right side's LFO ahead of the left's, for movement across the stereo field");
+            let w = ui.add(egui::Slider::new(&mut s.lfo_phase, 0.0..=360.0).suffix("°").fixed_decimals(0));
+            active |= busy(&w);
             ui.end_row();
         });
         ui.add_space(14.0);
         active |= autofilter_curve(ui, s, cutoff);
     });
     active
+}
+
+/// A −100..100 % slider for a −1..1 setting.
+fn signed_pct(ui: &mut egui::Ui, v: &mut f32) -> bool {
+    let mut p = *v * 100.0;
+    let w = ui.add(egui::Slider::new(&mut p, -100.0..=100.0).suffix(" %").fixed_decimals(0));
+    *v = p / 100.0;
+    busy(&w)
+}
+
+/// A synced length (beats), from Auto Filter's list.
+fn sync_rate(ui: &mut egui::Ui, id: &str, beats: &mut f32) {
+    let name = autofilter::SYNC_RATES.iter().find(|r| (r.1 - *beats).abs() < 1e-4).map_or("1/4", |r| r.0);
+    egui::ComboBox::from_id_salt(id).width(64.0).selected_text(name).show_ui(ui, |ui| {
+        for (n, b) in autofilter::SYNC_RATES {
+            ui.selectable_value(beats, b, n);
+        }
+    });
 }
 
 /// Auto Filter's response, 20 Hz to 20 kHz across, +24 to −36 dB down; drag it to tune.

@@ -253,7 +253,7 @@ pub struct Song {
 }
 
 /// Run `layer`'s effects on `buf`; `dry` holds every layer's sound (for sidechains).
-fn run_devices(layers: &[LayerSrc], li: Option<usize>, layer: &LayerSrc, buf: &mut [[f32; 2]], dry: &[Vec<[f32; 2]>], rate: u32, beat: f64) {
+fn run_devices(layers: &[LayerSrc], li: Option<usize>, layer: &LayerSrc, buf: &mut [[f32; 2]], dry: &[Vec<[f32; 2]>], rate: u32, beat: f64, pos: f64) {
     if layer.devices.is_empty() {
         return;
     }
@@ -267,7 +267,7 @@ fn run_devices(layers: &[LayerSrc], li: Option<usize>, layer: &LayerSrc, buf: &m
             let g = layers[s].gain;
             dry[s].iter().map(|f| [f[0] * g, f[1] * g]).collect()
         });
-        st.get_or_insert_with(|| devices::State::new(d, rate)).process(d, buf, side.as_deref(), beat);
+        st.get_or_insert_with(|| devices::State::new(d, rate)).process(d, buf, side.as_deref(), beat, pos);
     }
 }
 
@@ -303,7 +303,7 @@ impl Song {
         // sidechain) hears that track after its volume, before its own effects.
         let dry: Vec<Vec<[f32; 2]>> = if self.layers.iter().any(|l| l.devices.iter().any(|d| d.1.is_some())) { bufs.clone() } else { Vec::new() };
         for (li, layer) in self.layers.iter().enumerate() {
-            run_devices(&self.layers, Some(li), layer, &mut bufs[li], &dry, self.rate, self.beat);
+            run_devices(&self.layers, Some(li), layer, &mut bufs[li], &dry, self.rate, self.beat, from);
             // Held back to line up with the most-delayed track (its sends too: they're taken after).
             let delay = if self.pdc { self.comp.saturating_sub(layer.latency()) } else { 0 };
             layer.comp.lock().unwrap().process(&mut bufs[li], delay);
@@ -331,7 +331,7 @@ impl Song {
         self.bus.lock().unwrap().process(out, if self.pdc { self.ret_comp } else { 0 });
         // The return tracks: their effects, then into the mix.
         for (ret, rb) in self.returns.iter().zip(rbufs.iter_mut()) {
-            run_devices(&self.returns, None, ret, rb, &[], self.rate, self.beat);
+            run_devices(&self.returns, None, ret, rb, &[], self.rate, self.beat, from);
             let delay = if self.pdc { self.ret_comp.saturating_sub(ret.latency()) } else { 0 };
             ret.comp.lock().unwrap().process(rb, delay);
             let (pl, pr) = ret.pan;

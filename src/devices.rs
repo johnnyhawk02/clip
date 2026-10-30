@@ -182,8 +182,9 @@ impl State {
     }
 
     /// Run device `d` on `main` (stereo frames, in place), with `side` the sound of the track it
-    /// listens to (if any); `beat` is a beat's length in frames (for tempo-synced effects).
-    pub fn process(&mut self, d: &Device, main: &mut [[f32; 2]], side: Option<&[[f32; 2]]>, beat: f64) {
+    /// listens to (if any); `beat` is a beat's length in frames (for tempo-synced effects) and
+    /// `pos` the song frame `main` starts at (0 = bar 1, for effects locked to the song).
+    pub fn process(&mut self, d: &Device, main: &mut [[f32; 2]], side: Option<&[[f32; 2]]>, beat: f64, pos: f64) {
         match (self, d) {
             (State::Spacer(st), Device::Spacer(s)) => {
                 if let Some(side) = side {
@@ -200,7 +201,7 @@ impl State {
             (State::Riser(st), Device::Riser(s)) => st.process(s, main, beat),
             (State::Tame(st), Device::Tame(s)) => st.process(s, main),
             (State::Opto(st), Device::Opto(s)) => st.process(s, main),
-            (State::AutoFilter(st), Device::AutoFilter(s)) => st.process(s, main),
+            (State::AutoFilter(st), Device::AutoFilter(s)) => st.process(s, main, beat, pos),
             _ => {}
         }
     }

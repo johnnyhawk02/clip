@@ -1636,7 +1636,7 @@ fn mix_tracks(tracks: &[Track], returns: &[Track], rate: u32, beat: f64, pdc: bo
             if let Some(s) = side.as_mut() {
                 s.resize(n + late, [0.0; 2]);
             }
-            devices::State::new(d, rate).process(d, main, side.as_deref(), beat);
+            devices::State::new(d, rate).process(d, main, side.as_deref(), beat, 0.0);
         }
         main.drain(..late);
     };

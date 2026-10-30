@@ -45,7 +45,7 @@ pub struct Settings {
 }
 
 /// The LFO's shapes, by `lfo_shape`.
-pub const LFO_SHAPES: [&str; 7] = ["Sine", "Triangle", "Square", "Saw", "Random", "Smooth Random", "Drunk"];
+pub const LFO_SHAPES: [&str; 8] = ["Sine", "Triangle", "Square", "Saw", "Random", "Smooth Random", "Drunk", "Saw Down"];
 
 fn default_lfo_rate() -> f32 {
     0.5
@@ -258,7 +258,9 @@ impl Wobble {
 /// The delay-time LFO's running state. Auto Filter's cutoff LFO is one too.
 #[derive(Default)]
 pub(crate) struct Lfo {
+    /// Cycles run, and the cycle it's in.
     phase: f64,
+    cycle: i64,
     /// Random shapes: the value held, the one before (to glide from) and the drunk walk's.
     held: f32,
     from: f32,
@@ -272,15 +274,22 @@ impl Lfo {
     /// after a slew of `slew` (0..1, up to about 2 s to follow).
     pub(crate) fn next(&mut self, shape: u8, rate: f64, slew: f32, sr: f32, rand: &mut impl FnMut() -> f32) -> f32 {
         self.phase += rate / sr as f64;
-        if self.phase >= 1.0 {
-            self.phase -= self.phase.floor();
+        self.at(self.phase, shape, rate, slew, sr, rand)
+    }
+
+    /// The shape's value at `phase` (in cycles, from anywhere: Auto Filter's synced LFO gives it the
+    /// song's), for a cycle `rate` Hz long, after the slew. Each new cycle draws new random values.
+    pub(crate) fn at(&mut self, phase: f64, shape: u8, rate: f64, slew: f32, sr: f32, rand: &mut impl FnMut() -> f32) -> f32 {
+        let cycle = phase.floor() as i64;
+        if cycle != self.cycle {
+            self.cycle = cycle;
             // A new cycle: new random values.
             self.from = self.held;
             self.held = rand();
             let step = rand() * 0.4;
             self.walk = if (self.walk + step).abs() > 1.0 { self.walk - step } else { self.walk + step };
         }
-        let p = self.phase as f32;
+        let p = (phase - phase.floor()) as f32;
         let tau = std::f32::consts::TAU;
         let v = match shape {
             1 => 1.0 - 4.0 * (p - 0.5).abs(),
@@ -290,6 +299,7 @@ impl Lfo {
             5 => self.from + (self.held - self.from) * (0.5 - 0.5 * (std::f32::consts::PI * p).cos()),
             // Drunk: a random walk, gliding to each new step.
             6 => self.walk,
+            7 => 1.0 - 2.0 * p,
             _ => (tau * p).sin(),
         };
         // (Never quite instant: a jump in delay time is a click.)
