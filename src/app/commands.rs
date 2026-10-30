@@ -630,7 +630,16 @@ impl App {
                 if self.view != View::Arrangement {
                     self.back_to_arrangement();
                 }
-                self.show_session = !self.show_session;
+                if self.nest.is_empty() {
+                    self.show_session = !self.show_session;
+                } else {
+                    // Inside an open group: close it (and any around it) and go to the Session
+                    // view, where the song's own tracks are.
+                    while !self.nest.is_empty() {
+                        self.leave_group();
+                    }
+                    self.show_session = true;
+                }
             }
         }
         if ctx.input_mut(|i| i.consume_key(none, Key::Escape)) {

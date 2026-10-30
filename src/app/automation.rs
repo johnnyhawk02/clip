@@ -211,6 +211,16 @@ impl App {
                         self.status = format!("saveproj {arg}: {r:?}");
                     }
                     "openproj" => self.open_project(PathBuf::from(arg)),
+                    "groupslots" => {
+                        // groupslots:t|s1|s2… groups those slots of track t (as ⇧-click, ⌘G).
+                        let v: Vec<usize> = arg.split('|').filter_map(|x| x.parse().ok()).collect();
+                        if let Some((&t, rest)) = v.split_first() {
+                            self.sel_slots = rest.iter().map(|&s| (t, s)).collect();
+                            self.sel_slot = rest.first().map(|&s| (t, s));
+                            self.group_slots();
+                        }
+                    }
+                    "leavegroup" => self.leave_group(),
                     "launch" => {
                         // launch:t|s launches the clip in track t's slot s.
                         let v: Vec<usize> = arg.split('|').filter_map(|x| x.parse().ok()).collect();
@@ -218,6 +228,14 @@ impl App {
                             self.launch_slot(t, s);
                         }
                         eprintln!("session {:?}", self.session_play.iter().map(|p| (p.owned, p.segments.clone())).collect::<Vec<_>>());
+                        for (ti, tr) in self.tracks.iter().enumerate() {
+                            for (si, c) in tr.slots.iter().enumerate() {
+                                if let Some(c) = c {
+                                    let peak = c.audio.channels.iter().flatten().fold(0.0f32, |m, v| m.max(v.abs()));
+                                    eprintln!("slot t{ti} s{si} {:?} len {} frames {} trim {} looping {} warp {} peak {peak:.3} active {} gain {}", c.name, c.len, c.audio.frames(), c.trim, c.looping, c.warp.is_some(), c.active, c.gain);
+                                }
+                            }
+                        }
                     }
                     "device" => {
                         // device:t|Name adds an effect to track t.
