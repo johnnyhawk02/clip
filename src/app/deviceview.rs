@@ -5,6 +5,7 @@
 use super::*;
 use crate::devices::{self, Device};
 use crate::fx;
+use crate::tape;
 
 /// Width of one device panel.
 const DEV_W: f32 = 560.0;
@@ -110,6 +111,7 @@ impl App {
                             Device::Reverb(s) => reverb_panel(&mut inner, s),
                             Device::Delay(s) => delay_panel(&mut inner, s),
                             Device::Spring(s) => spring_panel(&mut inner, s),
+                            Device::Tape(s) => tape_panel(&mut inner, s),
                         };
                     }
                     // + Add Effect, as Live's "Drop Audio Effects Here".
@@ -326,6 +328,61 @@ pub(super) fn spring_panel(ui: &mut egui::Ui, s: &mut fx::SpringSettings) -> boo
         ui.label("Dry / Wet");
         active |= pct(ui, &mut s.mix);
         ui.end_row();
+    });
+    active
+}
+
+/// Tape's controls in two columns: the echo (time, feedback, wow, mix), then the tape machine.
+pub(super) fn tape_panel(ui: &mut egui::Ui, s: &mut tape::Settings) -> bool {
+    const TIMES: [(&str, f32); 8] = [("1/16", 0.25), ("1/8", 0.5), ("3/16", 0.75), ("1/4", 1.0), ("3/8", 1.5), ("1/2", 2.0), ("3/4", 3.0), ("1 bar", 4.0)];
+    const SPEEDS: [(&str, f32); 4] = [("3¾ ips", 3.75), ("7½ ips", 7.5), ("15 ips", 15.0), ("30 ips", 30.0)];
+    let mut active = false;
+    ui.spacing_mut().slider_width = 100.0;
+    ui.horizontal_top(|ui| {
+        egui::Grid::new("tapegrid").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+            ui.label("Time");
+            let current = TIMES.iter().find(|t| (t.1 - s.beats).abs() < 1e-3).map_or("custom", |t| t.0);
+            egui::ComboBox::from_id_salt("tape_time").width(90.0).selected_text(current).show_ui(ui, |ui| {
+                for (n, b) in TIMES {
+                    ui.selectable_value(&mut s.beats, b, n);
+                }
+            });
+            ui.end_row();
+            ui.label("Feedback");
+            let mut p = s.feedback * 100.0;
+            let w = ui.add(egui::Slider::new(&mut p, 0.0..=105.0).suffix(" %").fixed_decimals(0)).on_hover_text("Past 100% the echoes run away into the tape's saturation");
+            s.feedback = p / 100.0;
+            active |= busy(&w);
+            ui.end_row();
+            ui.label("Wow");
+            active |= pct(ui, &mut s.wow);
+            ui.end_row();
+            ui.label("Dry / Wet");
+            active |= pct(ui, &mut s.mix);
+            ui.end_row();
+        });
+        ui.add_space(16.0);
+        egui::Grid::new("tapegrid2").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+            ui.label("Speed");
+            let current = SPEEDS.iter().find(|t| (t.1 - s.speed).abs() < 1e-3).map_or("custom", |t| t.0);
+            egui::ComboBox::from_id_salt("tape_speed").width(90.0).selected_text(current).show_ui(ui, |ui| {
+                for (n, v) in SPEEDS {
+                    ui.selectable_value(&mut s.speed, v, n);
+                }
+            }).response.on_hover_text("Slower tape loses more top");
+            ui.end_row();
+            ui.label("Drive");
+            active |= pct(ui, &mut s.drive);
+            ui.end_row();
+            ui.label("Bias");
+            let w = { let mut p = s.bias * 100.0; let w = ui.add(egui::Slider::new(&mut p, 0.0..=100.0).suffix(" %").fixed_decimals(0)).on_hover_text("Low leaves the tape's deadzone: quiet sounds crunch"); s.bias = p / 100.0; w };
+            active |= busy(&w);
+            ui.end_row();
+            ui.label("Spacing");
+            let w = ui.add(egui::Slider::new(&mut s.spacing, 0.0..=30.0).suffix(" µm").fixed_decimals(0)).on_hover_text("Play head to tape: further is darker");
+            active |= busy(&w);
+            ui.end_row();
+        });
     });
     active
 }

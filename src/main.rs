@@ -13,6 +13,7 @@ mod menu;
 mod player;
 mod project;
 mod spacer;
+mod tape;
 mod recorder;
 
 fn main() -> eframe::Result {

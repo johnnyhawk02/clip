@@ -1,7 +1,7 @@
 //! Track effects used offline, as the sound-editor effects are: a track device's settings in a
 //! dialog, printed into the selection (or the whole clip) when you press Apply.
 
-use super::deviceview::{delay_panel, reverb_panel, spring_panel};
+use super::deviceview::{delay_panel, reverb_panel, spring_panel, tape_panel};
 use super::*;
 use crate::devices::{Device, State};
 
@@ -21,6 +21,7 @@ impl App {
             match &mut d {
                 Device::Reverb(s) => s.mix = 0.3,
                 Device::Spring(s) => s.mix = 0.3,
+                Device::Tape(s) => s.mix = 0.35,
                 Device::Delay(s) => s.mix = 0.35,
                 Device::Spacer(_) => {}
             }
@@ -45,6 +46,7 @@ impl App {
                 Device::Reverb(s) => _ = reverb_panel(ui, s),
                 Device::Delay(s) => _ = delay_panel(ui, s),
                 Device::Spring(s) => _ = spring_panel(ui, s),
+                Device::Tape(s) => _ = tape_panel(ui, s),
                 Device::Spacer(_) => {}
             }
             if whole {
@@ -76,6 +78,7 @@ impl App {
             Device::Reverb(_) => "Reverb Device",
             Device::Delay(_) => "Delay Device",
             Device::Spring(_) => "Spring Device",
+            Device::Tape(_) => "Tape Device",
             Device::Spacer(_) => return,
         };
         let Some(a) = self.audio.clone() else { return };

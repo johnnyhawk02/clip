@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fx;
 use crate::spacer;
+use crate::tape;
 
 /// One device in a track's chain, with its settings.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -13,6 +14,7 @@ pub enum Device {
     Reverb(fx::ReverbSettings),
     Delay(fx::DelaySettings),
     Spring(fx::SpringSettings),
+    Tape(tape::Settings),
 }
 
 /// The effects there are to add: name and a line on what it does.
@@ -20,6 +22,7 @@ pub const ALL: &[(&str, &str)] = &[
     ("Reverb", "A room or hall around the sound"),
     ("Spring", "A spring reverb tank: chirping, boingy echoes (after Parker's and Välimäki's models)"),
     ("Delay", "Echoes in time with the song"),
+    ("Tape", "A tape echo: each repeat recorded onto modelled tape, warmer, darker and wobblier as it goes round (after Chowdhury's tape machine model)"),
     ("Spacer", "Ducks this track only at the frequencies another track is playing, so they sit together"),
 ];
 
@@ -31,6 +34,7 @@ impl Device {
             "Reverb" => Some(Device::Reverb(fx::ReverbSettings::default())),
             "Delay" => Some(Device::Delay(fx::DelaySettings::default())),
             "Spring" => Some(Device::Spring(fx::SpringSettings::default())),
+            "Tape" => Some(Device::Tape(tape::Settings::default())),
             _ => None,
         }
     }
@@ -41,6 +45,7 @@ impl Device {
             Device::Reverb(_) => "Reverb",
             Device::Delay(_) => "Delay",
             Device::Spring(_) => "Spring",
+            Device::Tape(_) => "Tape",
         }
     }
 
@@ -50,6 +55,7 @@ impl Device {
             Device::Reverb(s) => s.on,
             Device::Delay(s) => s.on,
             Device::Spring(s) => s.on,
+            Device::Tape(s) => s.on,
         }
     }
 
@@ -59,6 +65,7 @@ impl Device {
             Device::Reverb(s) => s.on = on,
             Device::Delay(s) => s.on = on,
             Device::Spring(s) => s.on = on,
+            Device::Tape(s) => s.on = on,
         }
     }
 
@@ -66,7 +73,7 @@ impl Device {
     pub fn source(&self) -> Option<usize> {
         match self {
             Device::Spacer(s) => Some(s.source),
-            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) => None,
+            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) => None,
         }
     }
 
@@ -74,7 +81,7 @@ impl Device {
     pub fn remap(mut self, f: &impl Fn(usize) -> Option<usize>) -> Option<Device> {
         match &mut self {
             Device::Spacer(s) => s.source = f(s.source)?,
-            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) => {}
+            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) => {}
         }
         Some(self)
     }
@@ -86,6 +93,7 @@ pub enum State {
     Reverb(fx::Reverb),
     Delay(fx::Delay),
     Spring(fx::Spring),
+    Tape(Box<tape::Tape>),
 }
 
 impl State {
@@ -95,6 +103,7 @@ impl State {
             Device::Reverb(_) => State::Reverb(fx::Reverb::new(rate)),
             Device::Delay(_) => State::Delay(fx::Delay::new(rate)),
             Device::Spring(_) => State::Spring(fx::Spring::new(rate)),
+            Device::Tape(_) => State::Tape(Box::new(tape::Tape::new(rate))),
         }
     }
 
@@ -110,6 +119,7 @@ impl State {
             (State::Reverb(st), Device::Reverb(s)) => st.process(s, main),
             (State::Delay(st), Device::Delay(s)) => st.process(s, main, beat),
             (State::Spring(st), Device::Spring(s)) => st.process(s, main),
+            (State::Tape(st), Device::Tape(s)) => st.process(s, main, beat),
             _ => {}
         }
     }
