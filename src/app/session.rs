@@ -165,22 +165,34 @@ impl App {
         ui.painter().rect_filled(full, 0.0, gray(236));
         let n_tracks = self.tracks.len();
         let n_scenes = self.scenes.len();
-        let width = n_tracks as f32 * COL_W + SCENE_W + 16.0;
         let mut changed = false;
         let mut released = false;
-        egui::ScrollArea::horizontal().id_salt("session_h").auto_shrink([false, false]).show(ui, |ui| {
-            let (area, _) = ui.allocate_exact_size(Vec2::new(width.max(full.width()), full.height()), Sense::hover());
-            let x0 = area.left() + 6.0;
+        {
+            let area = ui.allocate_rect(full, Sense::hover()).rect;
+            // Main stays pinned to the right, as in Live; the track columns scroll sideways under
+            // it (trackpad, Shift-wheel or the bar above the mixer).
+            let main_x = area.right() - SCENE_W - 8.0;
+            let tracks_clip = Rect::from_min_max(area.min, Pos2::new(main_x - 4.0, area.bottom()));
+            let content_w = n_tracks as f32 * COL_W + 6.0;
+            let max_scroll = (content_w - tracks_clip.width()).max(0.0);
+            if ui.rect_contains_pointer(tracks_clip) {
+                let d = ui.input(|i| i.smooth_scroll_delta);
+                // A plain wheel scrolls the slots up and down; sideways (or Shift) scrolls columns.
+                self.session_scroll -= d.x;
+            }
+            self.session_scroll = self.session_scroll.clamp(0.0, max_scroll);
+            let x0 = area.left() + 6.0 - self.session_scroll;
             let col_x = |t: usize| x0 + t as f32 * COL_W;
-            let main_x = col_x(n_tracks) + 4.0;
+            let full_clip = ui.clip_rect();
+            let track_clip = full_clip.intersect(tracks_clip);
             let top = area.top() + 4.0;
             // With little room (the detail view open below), the mixer keeps only its buttons.
             let compact = area.height() < MIX_H + HEAD_H + 6.0 * ROW_H;
             let mix_top = area.bottom() - if compact { 30.0 } else { MIX_H };
             let stop_top = mix_top - ROW_H - 2.0;
-            let p = ui.painter().clone();
-
             // Title bars: each track's name on its colour (click to select the track).
+            ui.set_clip_rect(track_clip);
+            let p = ui.painter().clone();
             for t in 0..n_tracks {
                 let head = Rect::from_min_size(Pos2::new(col_x(t), top), Vec2::new(COL_W - 1.0, HEAD_H));
                 p.rect_filled(head, 0.0, live_color(self.tracks[t].color));
@@ -195,6 +207,8 @@ impl App {
                     self.set_active(t);
                 }
             }
+            ui.set_clip_rect(full_clip);
+            let p = ui.painter().clone();
             let main_head = Rect::from_min_size(Pos2::new(main_x, top), Vec2::new(SCENE_W, HEAD_H));
             p.rect_filled(main_head, 0.0, gray(200));
             p.text(main_head.left_center() + Vec2::new(6.0, 0.0), Align2::LEFT_CENTER, "Main", FontId::proportional(11.5), ink());
@@ -205,6 +219,8 @@ impl App {
                 egui::ScrollArea::vertical().id_salt("session_v").auto_shrink([false, false]).show(ui, |ui| {
                     let (g, _) = ui.allocate_exact_size(Vec2::new(grid.width(), (n_scenes + 1) as f32 * ROW_H + 4.0), Sense::hover());
                     let row_y = |s: usize| g.top() + s as f32 * ROW_H;
+                    let view = ui.clip_rect();
+                    ui.set_clip_rect(view.intersect(tracks_clip));
                     for t in 0..n_tracks {
                         let color = live_color(self.tracks[t].color);
                         for s in 0..n_scenes {
@@ -212,6 +228,7 @@ impl App {
                             self.draw_slot(ui, r, t, s, color);
                         }
                     }
+                    ui.set_clip_rect(view);
                     // Scene launch buttons: green while any of the scene's clips plays.
                     for s in 0..n_scenes {
                         let r = Rect::from_min_size(Pos2::new(main_x, row_y(s)), Vec2::new(SCENE_W, ROW_H - 1.0));
@@ -240,6 +257,7 @@ impl App {
             });
 
             // Clip stop buttons, and Stop All Clips under the scenes.
+            ui.set_clip_rect(track_clip);
             let p = ui.painter().clone();
             for t in 0..n_tracks {
                 let stop = Rect::from_min_size(Pos2::new(col_x(t), stop_top), Vec2::new(COL_W - 1.0, ROW_H - 1.0));
@@ -251,6 +269,8 @@ impl App {
                     self.stop_track(t);
                 }
             }
+            ui.set_clip_rect(full_clip);
+            let p = ui.painter().clone();
             let stop_all = Rect::from_min_size(Pos2::new(main_x, stop_top), Vec2::new(SCENE_W, ROW_H - 1.0));
             let r = ui.interact(stop_all, ui.scope_id().with("stopall"), Sense::click());
             p.rect_filled(stop_all, 0.0, if r.hovered() { gray(205) } else { gray(218) });
@@ -263,6 +283,7 @@ impl App {
             // The mixer: pan knob, meter and fader with its dB, then the activator and Solo.
             p.rect_filled(Rect::from_min_max(Pos2::new(area.left(), mix_top), area.max), 0.0, panel());
             p.line_segment([Pos2::new(area.left(), mix_top), Pos2::new(area.right(), mix_top)], Stroke::new(1.0, rule()));
+            ui.set_clip_rect(track_clip);
             for t in 0..n_tracks {
                 let c = Rect::from_min_max(Pos2::new(col_x(t), mix_top + 6.0), Pos2::new(col_x(t) + COL_W - 1.0, area.bottom() - 6.0));
                 if t > 0 {
@@ -271,40 +292,51 @@ impl App {
                 let level = self.track_meter.get(t).copied().unwrap_or(0.0);
                 let tr = &mut self.tracks[t];
                 if !compact {
-                    changed |= pan_knob(ui, Pos2::new(c.center().x, c.top() + 16.0), ui.scope_id().with(("span", t)), &mut tr.pan);
-                    let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + 38.0), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
-                    let (ch, rel) = fader(ui, fr, ui.scope_id().with(("sfader", t)), &mut tr.gain, &[level]);
-                    changed |= ch;
-                    released |= rel;
-                    ui.painter().text(Pos2::new(c.center().x, fr.bottom() + 6.0), Align2::CENTER_TOP, db_text(tr.gain), FontId::proportional(10.5), muted());
-                }
-                // Track activator (its number, lit while on) and Solo.
-                let bw = 30.0;
-                let act = Rect::from_min_size(Pos2::new(c.center().x - bw - 2.0, c.bottom() - 18.0), Vec2::new(bw, 18.0));
-                let solo = Rect::from_min_size(Pos2::new(c.center().x + 2.0, c.bottom() - 18.0), Vec2::new(bw, 18.0));
-                let ar = ui.interact(act, ui.scope_id().with(("sact", t)), Sense::click());
-                let sr = ui.interact(solo, ui.scope_id().with(("ssolo", t)), Sense::click());
-                let p = ui.painter();
-                let on = !tr.mute;
-                p.rect(act, 2.0, if on { ACTIVATOR } else { gray(225) }, Stroke::new(1.0, gray(170)), egui::StrokeKind::Inside);
-                p.text(act.center(), Align2::CENTER_CENTER, (t + 1).to_string(), FontId::proportional(11.0), if on { DARK_TEXT } else { muted() });
-                p.rect(solo, 2.0, if tr.solo { SOLO } else { gray(225) }, Stroke::new(1.0, gray(170)), egui::StrokeKind::Inside);
-                p.text(solo.center(), Align2::CENTER_CENTER, "S", FontId::proportional(11.0), if tr.solo { DARK_TEXT } else { muted() });
-                if ar.on_hover_text("Track activator: on or muted").clicked() {
-                    tr.mute = !tr.mute;
-                    changed = true;
-                    released = true;
-                }
-                if sr.on_hover_text("Solo").clicked() {
-                    tr.solo = !tr.solo;
-                    changed = true;
-                    released = true;
+                        changed |= pan_knob(ui, Pos2::new(c.center().x, c.top() + 16.0), ui.scope_id().with(("span", t)), &mut tr.pan);
+                        let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + 38.0), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
+                        let (ch, rel) = fader(ui, fr, ui.scope_id().with(("sfader", t)), &mut tr.gain, &[level]);
+                        changed |= ch;
+                        released |= rel;
+                        ui.painter().text(Pos2::new(c.center().x, fr.bottom() + 6.0), Align2::CENTER_TOP, db_text(tr.gain), FontId::proportional(10.5), muted());
+                    }
+                    // Track activator (its number, lit while on) and Solo.
+                    let bw = 30.0;
+                    let act = Rect::from_min_size(Pos2::new(c.center().x - bw - 2.0, c.bottom() - 18.0), Vec2::new(bw, 18.0));
+                    let solo = Rect::from_min_size(Pos2::new(c.center().x + 2.0, c.bottom() - 18.0), Vec2::new(bw, 18.0));
+                    let ar = ui.interact(act, ui.scope_id().with(("sact", t)), Sense::click());
+                    let sr = ui.interact(solo, ui.scope_id().with(("ssolo", t)), Sense::click());
+                    let p = ui.painter();
+                    let on = !tr.mute;
+                    p.rect(act, 2.0, if on { ACTIVATOR } else { gray(225) }, Stroke::new(1.0, gray(170)), egui::StrokeKind::Inside);
+                    p.text(act.center(), Align2::CENTER_CENTER, (t + 1).to_string(), FontId::proportional(11.0), if on { DARK_TEXT } else { muted() });
+                    p.rect(solo, 2.0, if tr.solo { SOLO } else { gray(225) }, Stroke::new(1.0, gray(170)), egui::StrokeKind::Inside);
+                    p.text(solo.center(), Align2::CENTER_CENTER, "S", FontId::proportional(11.0), if tr.solo { DARK_TEXT } else { muted() });
+                    if ar.on_hover_text("Track activator: on or muted").clicked() {
+                        tr.mute = !tr.mute;
+                        changed = true;
+                        released = true;
+                    }
+                    if sr.on_hover_text("Solo").clicked() {
+                        tr.solo = !tr.solo;
+                        changed = true;
+                        released = true;
+                    }
+            }
+            ui.set_clip_rect(full_clip);
+            // A bar along the mixer's top edge to scroll the columns, when they don't all fit.
+            if max_scroll > 0.0 {
+                let bar = Rect::from_min_max(Pos2::new(tracks_clip.left() + 4.0, mix_top + 1.0), Pos2::new(tracks_clip.right() - 4.0, mix_top + 6.0));
+                let w = (bar.width() * tracks_clip.width() / content_w).max(30.0);
+                let x = bar.left() + (bar.width() - w) * self.session_scroll / max_scroll;
+                let thumb = Rect::from_min_size(Pos2::new(x, bar.top()), Vec2::new(w, bar.height()));
+                let r = ui.interact(bar, ui.scope_id().with("sscroll"), Sense::click_and_drag());
+                ui.painter().rect_filled(thumb, 2.0, if r.hovered() || r.dragged() { gray(140) } else { gray(185) });
+                if r.dragged() {
+                    self.session_scroll = (self.session_scroll + r.drag_delta().x * max_scroll / (bar.width() - w).max(1.0)).clamp(0.0, max_scroll);
                 }
             }
             // The Main track's fader, with the output meters.
-            if compact {
-                return;
-            }
+            if !compact {
             let c = Rect::from_min_max(Pos2::new(main_x, mix_top + 6.0), Pos2::new(main_x + SCENE_W, area.bottom() - 6.0));
             let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + 38.0), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
             let meters = [self.meter.first().copied().unwrap_or(0.0), self.meter.get(1).copied().unwrap_or(0.0)];
@@ -313,7 +345,8 @@ impl App {
             released |= rel;
             ui.painter().text(Pos2::new(c.center().x, fr.bottom() + 6.0), Align2::CENTER_TOP, db_text(self.master_gain), FontId::proportional(10.5), muted());
             ui.painter().text(Pos2::new(c.center().x, c.bottom() - 9.0), Align2::CENTER_CENTER, "Main", FontId::proportional(11.0), muted());
-        });
+            }
+        }
         if changed {
             self.refresh_playback();
         }

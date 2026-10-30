@@ -382,6 +382,8 @@ pub struct App {
     show_record: bool,
     /// The Spacer window (for the selected track), and whether a change in it is under way.
     show_spacer: bool,
+    /// How far the Session view's track columns are scrolled sideways (px).
+    session_scroll: f32,
     spacer_edit: bool,
     rec_meter: f32,
     curve: Option<CurveKind>,
@@ -604,6 +606,7 @@ impl App {
             recorder: None,
             show_record: false,
             show_spacer: false,
+            session_scroll: 0.0,
             spacer_edit: false,
             rec_meter: 0.0,
             curve: None,
