@@ -12,6 +12,7 @@ use crate::pultec;
 use crate::riser;
 use crate::tame;
 use crate::opto;
+use crate::autofilter;
 
 /// Width of one device panel.
 const DEV_W: f32 = 560.0;
@@ -83,6 +84,7 @@ impl App {
         let cuts: Vec<_> = (0..chain.len()).map(|i| self.player.spacer_cuts(t, i).filter(|_| playing)).collect();
         let tames: Vec<_> = (0..chain.len()).map(|i| self.player.tame_view(t, i).filter(|_| playing)).collect();
         let optos: Vec<_> = (0..chain.len()).map(|i| self.player.opto_gr(t, i).filter(|_| playing)).collect();
+        let cutoffs: Vec<_> = (0..chain.len()).map(|i| self.player.filter_cutoff(t, i).filter(|_| playing)).collect();
         let mut remove = None;
         let mut add = None;
         let mut active = false;
@@ -98,6 +100,7 @@ impl App {
                             // Riser is one knob.
                             Device::Riser(_) => 180.0,
                             Device::Opto(_) => 520.0,
+                            Device::AutoFilter(_) => AUTOFILTER_W,
                             _ => DEV_W,
                         };
                         let (panel, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
@@ -134,6 +137,7 @@ impl App {
                             Device::Riser(s) => riser_panel(&mut inner, s, false),
                             Device::Tame(s) => tame_panel(&mut inner, s, tames[i]),
                             Device::Opto(s) => opto_panel(&mut inner, s, optos[i]),
+                            Device::AutoFilter(s) => autofilter_panel(&mut inner, s, cutoffs[i]),
                         };
                     }
                     // + Add Effect, as Live's "Drop Audio Effects Here".
@@ -173,7 +177,7 @@ impl App {
         if !active {
             self.device_edit = false;
         }
-        if cuts.iter().any(|c| c.is_some()) || tames.iter().any(|c| c.is_some()) || optos.iter().any(|c| c.is_some()) {
+        if cuts.iter().any(|c| c.is_some()) || tames.iter().any(|c| c.is_some()) || optos.iter().any(|c| c.is_some()) || cutoffs.iter().any(|c| c.is_some()) {
             ui.ctx().request_repaint();
         }
     }
@@ -400,6 +404,136 @@ pub(super) fn opto_panel(ui: &mut egui::Ui, s: &mut opto::Settings, gr: Option<f
         p.text(Pos2::new(bar.center().x, side.bottom()), Align2::CENTER_BOTTOM, label, FontId::proportional(9.5), muted());
     }
     active
+}
+
+/// Auto Filter's panel width (three columns of controls and its curve).
+pub(super) const AUTOFILTER_W: f32 = 1010.0;
+
+/// Auto Filter's controls, as Live's: the filter, its envelope follower, its LFO, and its curve
+/// (drag it: across for Frequency, up and down for Resonance), with the cutoff where the
+/// modulation has it now while playing (`cutoff`).
+pub(super) fn autofilter_panel(ui: &mut egui::Ui, s: &mut autofilter::Settings, cutoff: Option<f32>) -> bool {
+    let mut active = false;
+    ui.spacing_mut().slider_width = 90.0;
+    ui.spacing_mut().interact_size.y = 18.0;
+    ui.spacing_mut().item_spacing.y = 2.0;
+    let hz = |v: f64, _: std::ops::RangeInclusive<usize>| if v >= 1000.0 { format!("{:.2} kHz", v / 1000.0) } else { format!("{v:.0} Hz") };
+    ui.horizontal_top(|ui| {
+        egui::Grid::new("afgrid").num_columns(2).spacing(Vec2::new(10.0, 1.0)).show(ui, |ui| {
+            ui.label("Circuit");
+            let name = autofilter::CIRCUITS.get(s.circuit as usize).copied().unwrap_or("MS2");
+            egui::ComboBox::from_id_salt("af_circuit").width(90.0).selected_text(name).show_ui(ui, |ui| {
+                for (i, n) in autofilter::CIRCUITS.iter().enumerate() {
+                    ui.selectable_value(&mut s.circuit, i as u8, *n).on_hover_text("After the Korg MS-20's filter: dirty, and screaming when pushed");
+                }
+            });
+            ui.end_row();
+            ui.label("Type");
+            ui.horizontal(|ui| {
+                for (i, n) in autofilter::KINDS.iter().enumerate() {
+                    ui.radio_value(&mut s.kind, i as u8, *n);
+                }
+            });
+            ui.end_row();
+            ui.label("Frequency");
+            let w = ui.add(egui::Slider::new(&mut s.freq, 20.0..=20000.0).logarithmic(true).custom_formatter(hz));
+            active |= busy(&w);
+            ui.end_row();
+            ui.label("Resonance").on_hover_text("Past 90% it oscillates on its own, and screams");
+            active |= pct(ui, &mut s.res);
+            ui.end_row();
+            ui.label("Drive").on_hover_text("Gain into the filter: pushed, the sound and the resonance fight and tear");
+            let w = ui.add(egui::Slider::new(&mut s.drive, 0.0..=24.0).suffix(" dB").fixed_decimals(1));
+            active |= busy(&w);
+            ui.end_row();
+        });
+        ui.add_space(14.0);
+        egui::Grid::new("afgrid2").num_columns(2).spacing(Vec2::new(10.0, 1.0)).show(ui, |ui| {
+            ui.label("Env Amount").on_hover_text("How far the sound's own level moves the cutoff, up or down (±5 octaves)");
+            let mut p = s.env_amount * 100.0;
+            let w = ui.add(egui::Slider::new(&mut p, -100.0..=100.0).suffix(" %").fixed_decimals(0));
+            s.env_amount = p / 100.0;
+            active |= busy(&w);
+            ui.end_row();
+            ui.label("Attack");
+            let w = ui.add(egui::Slider::new(&mut s.env_attack, 0.1..=1000.0).logarithmic(true).suffix(" ms").fixed_decimals(1));
+            active |= busy(&w);
+            ui.end_row();
+            ui.label("Release");
+            let w = ui.add(egui::Slider::new(&mut s.env_release, 1.0..=5000.0).logarithmic(true).suffix(" ms").fixed_decimals(0));
+            active |= busy(&w);
+            ui.end_row();
+            ui.label("Output");
+            let w = ui.add(egui::Slider::new(&mut s.output, -24.0..=24.0).suffix(" dB").fixed_decimals(1));
+            active |= busy(&w);
+            ui.end_row();
+            ui.label("Dry / Wet");
+            active |= pct(ui, &mut s.mix);
+            ui.end_row();
+        });
+        ui.add_space(14.0);
+        egui::Grid::new("afgrid3").num_columns(2).spacing(Vec2::new(10.0, 1.0)).show(ui, |ui| {
+            ui.label("LFO Amount").on_hover_text("How far the LFO swings the cutoff each way (up to 4 octaves)");
+            active |= pct(ui, &mut s.lfo_amount);
+            ui.end_row();
+            ui.label("Rate");
+            let w = ui.add(egui::Slider::new(&mut s.lfo_rate, 0.01..=40.0).logarithmic(true).suffix(" Hz").fixed_decimals(2));
+            active |= busy(&w);
+            ui.end_row();
+            ui.label("Shape");
+            let shape = tape::LFO_SHAPES.get(s.lfo_shape as usize).copied().unwrap_or("Sine");
+            egui::ComboBox::from_id_salt("af_lfo").width(110.0).selected_text(shape).show_ui(ui, |ui| {
+                for (i, n) in tape::LFO_SHAPES.iter().enumerate() {
+                    ui.selectable_value(&mut s.lfo_shape, i as u8, *n);
+                }
+            });
+            ui.end_row();
+            ui.label("Slew").on_hover_text("How slowly the LFO follows its shape");
+            active |= pct(ui, &mut s.lfo_slew);
+            ui.end_row();
+        });
+        ui.add_space(14.0);
+        active |= autofilter_curve(ui, s, cutoff);
+    });
+    active
+}
+
+/// Auto Filter's response, 20 Hz to 20 kHz across, +24 to −36 dB down; drag it to tune.
+fn autofilter_curve(ui: &mut egui::Ui, s: &mut autofilter::Settings, cutoff: Option<f32>) -> bool {
+    let h = ui.available_height().clamp(90.0, 140.0);
+    let (r, resp) = ui.allocate_exact_size(Vec2::new(210.0, h), Sense::drag());
+    if resp.dragged() {
+        let d = resp.drag_delta();
+        s.freq = (s.freq * (d.x / r.width() * 10.0).exp2()).clamp(20.0, 20000.0);
+        s.res = (s.res - d.y / r.height()).clamp(0.0, 1.0);
+    }
+    let resp = resp.on_hover_text("Drag across for Frequency, up and down for Resonance");
+    let p = ui.painter_at(r);
+    p.rect_filled(r, 3.0, gray(238));
+    let x_of = |f: f32| r.left() + r.width() * (f / 20.0).log2() / 1000f32.log2();
+    let y_of = |db: f32| r.top() + r.height() * ((24.0 - db) / 60.0).clamp(0.0, 1.0);
+    for f in [100.0, 1000.0, 10000.0] {
+        p.line_segment([Pos2::new(x_of(f), r.top()), Pos2::new(x_of(f), r.bottom())], Stroke::new(1.0, gray(222)));
+    }
+    p.line_segment([Pos2::new(r.left(), y_of(0.0)), Pos2::new(r.right(), y_of(0.0))], Stroke::new(1.0, gray(215)));
+    let line = |fc: f32| -> Vec<Pos2> {
+        (0..=100).map(|i| {
+            let f = 20.0 * 1000f32.powf(i as f32 / 100.0);
+            Pos2::new(x_of(f), y_of(autofilter::response(s, fc, f)))
+        }).collect()
+    };
+    match cutoff {
+        // Playing: the set cutoff faint, where the modulation has it now in ink.
+        Some(fc) => {
+            p.add(egui::Shape::line(line(s.freq), Stroke::new(1.0, gray(190))));
+            p.add(egui::Shape::line(line(fc), Stroke::new(1.5, ink())));
+        }
+        None => _ = p.add(egui::Shape::line(line(s.freq), Stroke::new(1.5, ink()))),
+    }
+    let label = cutoff.unwrap_or(s.freq);
+    let text = if label >= 1000.0 { format!("{:.2} kHz", label / 1000.0) } else { format!("{label:.0} Hz") };
+    p.text(r.right_top() + Vec2::new(-5.0, 4.0), Align2::RIGHT_TOP, text, FontId::proportional(9.5), muted());
+    resp.dragged()
 }
 
 /// Whether a control is being dragged or typed in.

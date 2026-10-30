@@ -11,6 +11,8 @@ use crate::pultec;
 use crate::riser;
 use crate::tame;
 use crate::opto;
+use crate::autofilter;
+use crate::oversample;
 
 /// One device in a track's chain, with its settings.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -27,6 +29,7 @@ pub enum Device {
     Riser(riser::Settings),
     Tame(tame::Settings),
     Opto(opto::Settings),
+    AutoFilter(autofilter::Settings),
 }
 
 /// The effects there are to add: name and a line on what it does.
@@ -41,6 +44,7 @@ pub const ALL: &[(&str, &str)] = &[
     ("Riser", "One knob for a build-up: as Amount goes up the sound thins, drives into tape, widens and washes out into echoes and reverb"),
     ("Tame", "Finds the frequencies ringing out above the rest, moment by moment, and turns down just those: harshness, boom and whistle"),
     ("Opto", "An optical leveller, as in the LA-2A: smooth, gentle levelling that lets go slowly, more slowly the harder it has worked"),
+    ("Auto Filter", "A resonant filter with drive, swept by an envelope follower and an LFO; its MS2 circuit is the Korg MS-20's dirty, screaming Sallen-Key"),
     ("Spacer", "Ducks this track only at the frequencies another track is playing, so they sit together"),
 ];
 
@@ -59,6 +63,7 @@ impl Device {
             "Riser" => Some(Device::Riser(riser::Settings::default())),
             "Tame" => Some(Device::Tame(tame::Settings::default())),
             "Opto" => Some(Device::Opto(opto::Settings::default())),
+            "Auto Filter" => Some(Device::AutoFilter(autofilter::Settings::default())),
             _ => None,
         }
     }
@@ -76,6 +81,7 @@ impl Device {
             Device::Riser(_) => "Riser",
             Device::Tame(_) => "Tame",
             Device::Opto(_) => "Opto",
+            Device::AutoFilter(_) => "Auto Filter",
         }
     }
 
@@ -92,6 +98,7 @@ impl Device {
             Device::Riser(s) => s.on,
             Device::Tame(s) => s.on,
             Device::Opto(s) => s.on,
+            Device::AutoFilter(s) => s.on,
         }
     }
 
@@ -108,6 +115,7 @@ impl Device {
             Device::Riser(s) => s.on = on,
             Device::Tame(s) => s.on = on,
             Device::Opto(s) => s.on = on,
+            Device::AutoFilter(s) => s.on = on,
         }
     }
 
@@ -115,6 +123,8 @@ impl Device {
     pub fn latency(&self) -> usize {
         match self {
             Device::Tame(s) if s.on => tame::LATENCY,
+            // (Its oversampling.)
+            Device::AutoFilter(s) if s.on => oversample::LATENCY,
             _ => 0,
         }
     }
@@ -123,7 +133,7 @@ impl Device {
     pub fn source(&self) -> Option<usize> {
         match self {
             Device::Spacer(s) => Some(s.source),
-            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Riser(_) | Device::Tame(_) | Device::Opto(_) => None,
+            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Riser(_) | Device::Tame(_) | Device::Opto(_) | Device::AutoFilter(_) => None,
         }
     }
 
@@ -131,7 +141,7 @@ impl Device {
     pub fn remap(mut self, f: &impl Fn(usize) -> Option<usize>) -> Option<Device> {
         match &mut self {
             Device::Spacer(s) => s.source = f(s.source)?,
-            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Riser(_) | Device::Tame(_) | Device::Opto(_) => {}
+            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Riser(_) | Device::Tame(_) | Device::Opto(_) | Device::AutoFilter(_) => {}
         }
         Some(self)
     }
@@ -150,6 +160,7 @@ pub enum State {
     Riser(Box<riser::Riser>),
     Tame(Box<tame::Tame>),
     Opto(Box<opto::Opto>),
+    AutoFilter(Box<autofilter::AutoFilter>),
 }
 
 impl State {
@@ -166,6 +177,7 @@ impl State {
             Device::Riser(_) => State::Riser(Box::new(riser::Riser::new(rate))),
             Device::Tame(_) => State::Tame(Box::new(tame::Tame::new(rate))),
             Device::Opto(_) => State::Opto(Box::new(opto::Opto::new(rate))),
+            Device::AutoFilter(_) => State::AutoFilter(Box::new(autofilter::AutoFilter::new(rate))),
         }
     }
 
@@ -188,6 +200,7 @@ impl State {
             (State::Riser(st), Device::Riser(s)) => st.process(s, main, beat),
             (State::Tame(st), Device::Tame(s)) => st.process(s, main),
             (State::Opto(st), Device::Opto(s)) => st.process(s, main),
+            (State::AutoFilter(st), Device::AutoFilter(s)) => st.process(s, main),
             _ => {}
         }
     }
@@ -212,6 +225,14 @@ impl State {
     pub fn opto_gr(&self) -> Option<f32> {
         match self {
             State::Opto(o) => Some(o.gr),
+            _ => None,
+        }
+    }
+
+    /// Auto Filter's cutoff right now (after its modulation), Hz.
+    pub fn filter_cutoff(&self) -> Option<f32> {
+        match self {
+            State::AutoFilter(f) => Some(f.cutoff),
             _ => None,
         }
     }

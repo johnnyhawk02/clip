@@ -255,9 +255,9 @@ impl Wobble {
     }
 }
 
-/// The delay-time LFO's running state.
+/// The delay-time LFO's running state. Auto Filter's cutoff LFO is one too.
 #[derive(Default)]
-struct Lfo {
+pub(crate) struct Lfo {
     phase: f64,
     /// Random shapes: the value held, the one before (to glide from) and the drunk walk's.
     held: f32,
@@ -270,7 +270,7 @@ struct Lfo {
 impl Lfo {
     /// Advance one sample at `rate` Hz (`sr` samples a second) and give the shape's value, -1..1,
     /// after a slew of `slew` (0..1, up to about 2 s to follow).
-    fn next(&mut self, shape: u8, rate: f64, slew: f32, sr: f32, rand: &mut impl FnMut() -> f32) -> f32 {
+    pub(crate) fn next(&mut self, shape: u8, rate: f64, slew: f32, sr: f32, rand: &mut impl FnMut() -> f32) -> f32 {
         self.phase += rate / sr as f64;
         if self.phase >= 1.0 {
             self.phase -= self.phase.floor();

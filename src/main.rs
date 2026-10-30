@@ -19,6 +19,8 @@ mod chorus;
 mod tame;
 mod dynamics;
 mod opto;
+mod oversample;
+mod autofilter;
 mod pultec;
 mod riser;
 mod recorder;

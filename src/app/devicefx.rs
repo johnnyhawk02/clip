@@ -1,7 +1,7 @@
 //! Track effects used offline, as the sound-editor effects are: a track device's settings in a
 //! dialog, printed into the selection (or the whole clip) when you press Apply.
 
-use super::deviceview::{chorus_panel, delay_panel, phaser_panel, pultec_panel, reverb_panel, riser_panel, spring_panel, tame_panel, opto_panel, tape_panel};
+use super::deviceview::{chorus_panel, delay_panel, phaser_panel, pultec_panel, reverb_panel, riser_panel, spring_panel, tame_panel, opto_panel, autofilter_panel, tape_panel};
 use super::*;
 use crate::devices::{Device, State};
 
@@ -22,7 +22,7 @@ impl App {
                 Device::Reverb(s) => s.mix = 0.3,
                 Device::Spring(s) => s.mix = 0.3,
                 Device::Tape(s) => s.mix = 0.35,
-                Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Tame(_) | Device::Opto(_) => {}
+                Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Tame(_) | Device::Opto(_) | Device::AutoFilter(_) => {}
                 // Printed, it rises across the selection: all the way, to a full wash.
                 Device::Riser(s) => s.amount = 1.0,
                 Device::Delay(s) => s.mix = 0.35,
@@ -43,13 +43,17 @@ impl App {
         let mut wrap = self.device_fx_wrap;
         let (mut apply, mut cancel) = (false, false);
         let resp = dialog_modal("device-fx").show(ctx, |ui| {
-            // (Tape's three columns need more room.)
-            ui.set_width(if matches!(d, Device::Tape(_)) { DIALOG_W + 420.0 } else { DIALOG_W });
+            // (Tape's and Auto Filter's columns need more room.)
+            ui.set_width(match d {
+                Device::Tape(_) => DIALOG_W + 420.0,
+                Device::AutoFilter(_) => super::deviceview::AUTOFILTER_W,
+                _ => DIALOG_W,
+            });
             let about = match d {
                 // No tail; printed, its cuts look ahead.
                 Device::Tame(_) => format!("The track effect, printed into {scope}, its cuts opening just ahead of each resonance."),
                 // No tail either.
-                Device::Opto(_) => format!("The track effect, printed into {scope}."),
+                Device::Opto(_) | Device::AutoFilter(_) => format!("The track effect, printed into {scope}."),
                 _ => format!("The track effect, printed into {scope}. Its tail rings on past the end."),
             };
             dialog_header(ui, &format!("{} Device", d.name()), &about);
@@ -64,12 +68,15 @@ impl App {
                 Device::Riser(s) => _ = riser_panel(ui, s, true),
                 Device::Tame(s) => _ = tame_panel(ui, s, None),
                 Device::Opto(s) => _ = opto_panel(ui, s, None),
+                Device::AutoFilter(s) => _ = autofilter_panel(ui, s, None),
                 Device::Spacer(_) => {}
             }
             if whole && !matches!(d, Device::Tame(_)) {
                 ui.add_space(8.0);
                 let text = if matches!(d, Device::Opto(_)) {
                     "Run the clip round first, so it starts already levelling (a loop stays seamless)"
+                } else if matches!(d, Device::AutoFilter(_)) {
+                    "Run the clip round first, so a loop starts mid-sweep and stays seamless"
                 } else {
                     "Wrap the tail round to the start instead (a loop keeps its length)"
                 };
@@ -107,6 +114,7 @@ impl App {
             Device::Riser(_) => "Riser Device",
             Device::Tame(_) => "Tame Device",
             Device::Opto(_) => "Opto Device",
+            Device::AutoFilter(_) => "Auto Filter Device",
             Device::Spacer(_) => return,
         };
         let Some(a) = self.audio.clone() else { return };
@@ -120,7 +128,10 @@ impl App {
         let mut st = State::new(&d, rate);
         let beat = self.beat_frames();
         let lead = if wrap { ((WRAP_LEAD_SECS * rate as f64) / n as f64).ceil().clamp(1.0, 64.0) as usize } else { 0 };
-        let mut frames: Vec<[f32; 2]> = (0..n * (lead + 1)).map(|k| [at(0, k % n), at(1, k % n)]).collect();
+        // A device that delays its output (Auto Filter's oversampling) runs that much further, and
+        // that much is cut from the front, so the print lines up. (Tame prints without delay.)
+        let late = if matches!(d, Device::Tame(_)) { 0 } else { d.latency() };
+        let mut frames: Vec<[f32; 2]> = (0..n * (lead + 1) + late).map(|k| if wrap || k < n * (lead + 1) { [at(0, k % n), at(1, k % n)] } else { [0.0; 2] }).collect();
         match d {
             // Rising: Amount climbs from none at the start of the sound to its setting at the end.
             Device::Riser(r) if r.ramp => {
@@ -134,9 +145,10 @@ impl App {
             Device::Tame(t) => frames = crate::tame::print(&t, rate, &frames),
             _ => st.process(&d, &mut frames, None, beat),
         }
-        let mut out = frames.split_off(n * lead);
-        // (Opto has no tail: just the half-sample its colour stage lags by.)
-        if !wrap && !matches!(d, Device::Opto(_)) {
+        let mut out = frames.split_off(n * lead + late);
+        // (Opto has no tail: just the half-sample its colour stage lags by. Nor has Auto Filter, but
+        // for its ringing, cut off at the end as a loop's would be.)
+        if !wrap && !matches!(d, Device::Opto(_) | Device::AutoFilter(_)) {
             // Run on through silence until the tail has died away.
             let block = rate as usize / 4;
             for _ in 0..(TAIL_MAX_SECS * 4.0) as usize {

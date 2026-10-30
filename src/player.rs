@@ -243,6 +243,14 @@ impl Player {
         }
     }
 
+    /// Device `i` of track `t`: an Auto Filter's cutoff right now (Hz), when running.
+    pub fn filter_cutoff(&self, t: usize, i: usize) -> Option<f32> {
+        match &self.shared.lock().unwrap().source {
+            Source::Song(song) => song.layers.iter().chain(&song.returns).find(|l| l.track == t)?.device_state.lock().unwrap().get(i)?.as_ref()?.filter_cutoff(),
+            Source::Buffer(_) => None,
+        }
+    }
+
     pub fn take_peaks(&self) -> [f32; 2] {
         std::mem::take(&mut self.shared.lock().unwrap().peak)
     }
