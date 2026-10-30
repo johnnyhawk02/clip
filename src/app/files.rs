@@ -338,6 +338,7 @@ impl App {
             returns: Some(tracks_data(&self.returns, &mut pool)),
             looping: self.looping,
             master_gain: self.master_gain,
+            view: Some(self.view_state()),
             rate: self.rate(),
             tracks: data,
             audio: pool.iter().map(|a| project::AudioData { rate: a.rate, channels: a.num_channels(), frames: a.frames() }).collect(),
@@ -387,6 +388,8 @@ impl App {
         fn clip_from(app: &App, c: &ClipData, audio: &[Arc<Audio>], rate: u32) -> Clip {
             let a = c.audio.and_then(|i| audio.get(i).cloned()).unwrap_or_else(|| Arc::new(Audio { rate, channels: vec![Vec::new()] }));
             let mut clip = Clip::new(c.name.clone(), a, c.start);
+            // (A group's mix reaches the end of its loop brace.)
+            clip.loop_points = c.loop_points;
             if let Some(g) = &c.group {
                 let inner = build(app, g, audio, rate);
                 app.set_group_content(&mut clip, inner);
@@ -436,6 +439,9 @@ impl App {
         self.refresh_playback();
         self.arr_fit();
         self.status = format!("Opened project {}", file_name(&path));
+        if let Some(v) = &file.view {
+            self.restore_view_state(v);
+        }
         // Warped clips saved in the other warp mode are redone in this one.
         self.stretch_in_background();
     }
@@ -839,3 +845,86 @@ impl App {
         self.show_batch = open;
     }
 }
+
+impl App {
+    /// The window and views as they are now, for the project file. Inside a group, the song's
+    /// own (top-level) settings.
+    fn view_state(&self) -> project::ViewState {
+        let top = self.nest.first();
+        project::ViewState {
+            session: top.map_or(self.show_session, |f| f.from_session),
+            window: self.window.map(|(p, s)| [p.x, p.y, s.x, s.y]),
+            fullscreen: self.window_full.0,
+            maximized: self.window_full.1,
+            view_start: top.map_or(self.arr_view_start, |f| f.view_start),
+            view_len: top.map_or(self.arr_view_len, |f| f.view_len),
+            cursor: if top.is_some() { 0 } else { self.arr_cursor },
+            active: top.map_or(self.active, |f| f.active),
+            sel_clip: self.sel_clip.filter(|_| top.is_none()),
+            sel_slot: self.sel_slot.filter(|_| top.is_none()),
+            launch_q: self.launch_q,
+            metronome: self.metronome,
+            arrangement_record: self.session_rec,
+            follow: self.follow,
+            fit_height: self.fit_height,
+            show_pool: self.show_pool,
+            show_devices: self.show_devices,
+            device_target: self.device_target,
+            show_tools: self.show_tools,
+            palette_docked: self.palette_docked,
+            show_controls: self.show_controls,
+            show_info: self.show_info,
+            show_cues: self.show_cues,
+            show_regions: self.show_regions,
+        }
+    }
+
+    /// Put the window and views back as a project saved them.
+    fn restore_view_state(&mut self, v: &project::ViewState) {
+        self.show_session = v.session;
+        if v.view_len > 0.0 {
+            (self.arr_view_start, self.arr_view_len) = (v.view_start, v.view_len);
+            self.arr_clamp();
+        }
+        self.arr_cursor = v.cursor;
+        self.set_active(v.active);
+        self.sel_clip = v.sel_clip.filter(|&p| self.clip(p).is_some());
+        self.sel_slot = v.sel_slot.filter(|&(t, s)| self.tracks.get(t).is_some_and(|tr| s < tr.slots.len()));
+        if v.launch_q > 0.0 {
+            self.launch_q = v.launch_q;
+        }
+        (self.metronome, self.session_rec, self.follow, self.fit_height) = (v.metronome, v.arrangement_record, v.follow, v.fit_height);
+        self.show_pool = v.show_pool;
+        self.show_devices = v.show_devices && self.dev_track(v.device_target).is_some();
+        if self.show_devices {
+            self.device_target = v.device_target;
+        }
+        (self.show_tools, self.palette_docked, self.show_controls, self.show_info) = (v.show_tools, v.palette_docked, v.show_controls, v.show_info);
+        (self.show_cues, self.show_regions) = (v.show_cues, v.show_regions);
+        self.restore_window = Some((v.window, v.fullscreen, v.maximized));
+    }
+
+    /// Keep track of where the window is (for saving), and move it where an opened project
+    /// left it.
+    pub(super) fn track_window(&mut self, ctx: &egui::Context) {
+        if let Some((rect, full, max)) = self.restore_window.take() {
+            if let Some([x, y, w, h]) = rect.filter(|r| r[2] > 200.0 && r[3] > 150.0) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(Pos2::new(x, y)));
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(w, h)));
+            }
+            if full {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+            } else if max {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            }
+            return;
+        }
+        let vp = ctx.input(|i| i.viewport().clone());
+        if let (Some(outer), Some(inner)) = (vp.outer_rect, vp.inner_rect) {
+            self.window = Some((outer.min, inner.size()));
+        }
+        self.window_full = (vp.fullscreen.unwrap_or(false), vp.maximized.unwrap_or(false));
+    }
+}
+

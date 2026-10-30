@@ -38,9 +38,45 @@ pub struct ProjectFile {
     /// Return tracks (none in projects from before them: they get the default two).
     #[serde(default)]
     pub returns: Option<Vec<TrackData>>,
+    /// How the window and views were when it was saved (as a Live Set keeps them).
+    #[serde(default)]
+    pub view: Option<ViewState>,
     pub rate: u32,
     pub tracks: Vec<TrackData>,
     pub audio: Vec<AudioData>,
+}
+
+/// The window and view settings a project reopens with.
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
+pub struct ViewState {
+    /// The Session view was showing (else the Arrangement view).
+    pub session: bool,
+    /// Window position and size, in points: x, y, width, height.
+    pub window: Option<[f32; 4]>,
+    pub fullscreen: bool,
+    pub maximized: bool,
+    /// The Arrangement view's visible span and insert marker, in frames.
+    pub view_start: f64,
+    pub view_len: f64,
+    pub cursor: usize,
+    pub active: usize,
+    pub sel_clip: Option<(usize, usize)>,
+    pub sel_slot: Option<(usize, usize)>,
+    pub launch_q: f64,
+    pub metronome: bool,
+    pub arrangement_record: bool,
+    pub follow: bool,
+    pub fit_height: bool,
+    pub show_pool: bool,
+    pub show_devices: bool,
+    pub device_target: usize,
+    pub show_tools: bool,
+    pub palette_docked: bool,
+    pub show_controls: bool,
+    pub show_info: bool,
+    pub show_cues: bool,
+    pub show_regions: bool,
 }
 
 fn default_tempo() -> f64 {

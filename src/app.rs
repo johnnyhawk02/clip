@@ -406,6 +406,11 @@ pub struct App {
     devices_over: (Option<(usize, usize)>, Option<(usize, usize)>),
     /// Whose effects it shows: a track, or return track `r` as `engine::RETURN + r`.
     device_target: usize,
+    /// Where the window is (outer position, inner size), and whether it is full screen or maximized.
+    window: Option<(Pos2, Vec2)>,
+    window_full: (bool, bool),
+    /// A window place from an opened project, to move to on the next frame.
+    restore_window: Option<(Option<[f32; 4]>, bool, bool)>,
     /// Return tracks (Live's A, B…), fed by each track's sends.
     returns: Vec<Track>,
     /// Each return track's level meter.
@@ -653,6 +658,9 @@ impl App {
             show_devices: false,
             devices_over: (None, None),
             device_target: 0,
+            window: None,
+            window_full: (false, false),
+            restore_window: None,
             session_scroll: 0.0,
             session_last: Vec::new(),
             returns: default_returns(),
@@ -1298,6 +1306,7 @@ impl eframe::App for App {
 
         // Drag and drop.
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
+        self.track_window(&ctx);
         // Files Finder asks us to open (double-click, Open With, the Dock icon).
         #[cfg(target_os = "macos")]
         for p in crate::menu::take_open_requests() {
