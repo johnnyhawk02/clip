@@ -87,6 +87,9 @@ struct NestFrame {
     outer_at: Option<(usize, std::time::Instant)>,
     /// The loop brace (and whether loop is on) outside, while the group shows its own.
     outer_loop: (Option<Sel>, bool),
+    /// The brace it opened with, when that was the whole group (a slot's): it grows with what's
+    /// added inside unless it was moved.
+    whole_brace: Option<Sel>,
 }
 
 /// Which view is showing: the arrangement of clips, or one clip open in the waveform editor.

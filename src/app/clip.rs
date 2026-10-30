@@ -631,6 +631,7 @@ impl App {
             from_session: self.show_session,
             outer_at: in_slot.map(|(pos, _)| (pos, std::time::Instant::now())),
             outer_loop: (self.arr_loop, self.looping),
+            whole_brace: (c >= SLOT && brace.0 == 0 && brace.1 >= frames).then_some(brace),
         });
         // As a Session clip in Live's clip view, a group from a slot shows its loop brace: what
         // the slot plays round. Opened from the song, it starts with none.
@@ -668,7 +669,12 @@ impl App {
         let inner = std::mem::replace(&mut self.tracks, f.tracks);
         if let Some(mut c) = self.clip((f.track, f.clip)).cloned() {
             if f.clip >= SLOT {
-                // The brace set inside is what the slot plays round now.
+                // The brace set inside is what the slot plays round now. Left as the whole group,
+                // it takes in clips added past its end (in whole bars), so they play too.
+                let end = inner.iter().flat_map(|t| t.clips.iter().map(|c| c.end())).max().unwrap_or(0);
+                if let Some((s, e)) = f.whole_brace.filter(|&b| self.arr_loop == Some(b) && end > b.1) {
+                    self.arr_loop = Some(self.whole_bars((s, end.max(e))));
+                }
                 c.loop_points = self.arr_loop.filter(|&(s, e)| e > s);
             }
             // Closed before its clips were stretched to a new tempo: mixing them now would
