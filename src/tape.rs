@@ -77,19 +77,22 @@ struct Hysteresis {
 }
 
 impl Hysteresis {
-    /// dM/dt for magnetisation `m`, field `h` and its rate of change `hd`.
+    /// dM/dt for magnetisation `m`, field `h` and its rate of change `hd`, with loop width `k`.
+    /// The mean field coupling α shrinks with the loop (it's the paper's ratio to k), or the
+    /// denominator below can cross zero and the solution blow up.
     fn dmdt(m: f64, h: f64, hd: f64, k: f64) -> f64 {
-        let (l, dl) = langevin((h + ALPHA * m) / A);
+        let alpha = ALPHA * k / K;
+        let (l, dl) = langevin((h + alpha * m) / A);
         let man = MS * l;
         let ds = if hd >= 0.0 { 1.0 } else { -1.0 };
         let dm = if ds * (man - m) > 0.0 { 1.0 } else { 0.0 };
-        let mut den = (1.0 - C) * ds * k - ALPHA * (man - m);
+        let mut den = (1.0 - C) * ds * k - alpha * (man - m);
         if den.abs() < 1e-9 {
             den = 1e-9f64.copysign(den);
         }
         let irr = (1.0 - C) * dm * (man - m) / den * hd;
         let rev = C * MS / A * hd * dl;
-        (irr + rev) / (1.0 - C * ALPHA * MS / A * dl)
+        (irr + rev) / (1.0 - C * alpha * MS / A * dl)
     }
 
     /// Record field `h` for one step of `t` seconds; returns the magnetisation.
@@ -194,17 +197,22 @@ impl Tape {
     /// Record `x` (one side, at the sample rate) onto the tape: oversampled hysteresis, back down.
     fn record(&mut self, c: usize, x: f32, drive: f32) -> f32 {
         // (`k` is set from the bias by `process`.)
-        let g = 0.4 + 3.6 * drive * drive;
+        // Full scale reaches 0.6 a (barely bending) with no drive, 4 a (well into saturation) at full:
+        // the Langevin curve is flat past that, which is a hard clip, not tape.
+        let g = A as f32 * (0.6 + 3.4 * drive * drive);
         let t = 1.0 / (self.rate as f64 * OVER as f64);
+        // The loop's width follows the drive, so how much a quiet sound crunches is the bias's
+        // doing alone.
+        let k = self.k * g as f64 / A;
         let mut acc = 0.0;
         for j in 1..=OVER {
             let xi = self.prev_in[c] + (x - self.prev_in[c]) * j as f32 / OVER as f32;
-            acc += self.tape[c].step((xi * g) as f64, t, self.k);
+            acc += self.tape[c].step((xi * g) as f64, t, k);
         }
         self.prev_in[c] = x;
         // Back to signal level: divide by the tape's small-signal gain (about MS / 3A, measured
         // with the bias up) and the drive, so quiet repeats come back at the level they went in.
-        (acc / OVER as f64 / (MS / (3.0 * A)) / g as f64 * 1.1) as f32
+        (acc / OVER as f64 / (MS / (3.0 * A)) / g as f64) as f32
     }
 
     /// `beat` is a beat's length in frames.
@@ -213,8 +221,8 @@ impl Tape {
             self.fir = loss_fir(self.rate, s.speed, s.spacing);
             self.fir_for = (s.speed, s.spacing);
         }
-        // Bias narrows the loop: none is the paper's ferric oxide, full is a hundredth as wide.
-        self.k = K * 10f64.powf(-2.0 * s.bias.clamp(0.0, 1.0) as f64);
+        // Bias narrows the loop: none is the paper's ferric oxide, full is a thousandth as wide.
+        self.k = K * 10f64.powf(-3.0 * s.bias.clamp(0.0, 1.0) as f64);
         let n = self.buf.len();
         // The FIR's own delay comes off the echo time.
         let base = (s.beats.max(0.0625) as f64 * beat) as f32 - (FIR_LEN / 2) as f32;
@@ -274,7 +282,7 @@ mod tests {
 
     /// Level of a sine through one pass of the tape, at peak amplitude `amp`.
     fn pass_gain(amp: f32, drive: f32) -> f32 {
-        pass_gain_k(amp, drive, K * 10f64.powf(-2.0 * default_bias() as f64))
+        pass_gain_k(amp, drive, K * 10f64.powf(-3.0 * default_bias() as f64))
     }
 
     fn pass_gain_k(amp: f32, drive: f32, k: f64) -> f32 {
@@ -295,7 +303,7 @@ mod tests {
     #[test]
     fn tape_levels() {
         for drive in [0.0, 0.5, 1.0] {
-            for amp in [0.05, 0.3, 1.0] {
+            for amp in [0.01, 0.05, 0.3, 1.0] {
                 eprintln!("drive {drive} amp {amp}: gain {:.3}", pass_gain(amp, drive));
             }
         }
@@ -333,5 +341,53 @@ mod tests {
         let peak = buf.iter().map(|f| f[0].abs()).fold(0.0, f32::max);
         eprintln!("runaway peak {peak}");
         assert!(peak.is_finite() && peak < 8.0);
+    }
+}
+
+#[cfg(test)]
+/// Clicks came from the hysteresis blowing up (and resetting) with a narrow loop: these check a
+/// loud sine comes through smooth at every bias and drive.
+mod click_probe {
+    use super::*;
+
+    /// Largest jump in the second difference relative to the signal's own (a click detector).
+    fn clickiness(y: &[f32]) -> f32 {
+        let d2: Vec<f32> = y.windows(3).map(|w| w[2] - 2.0 * w[1] + w[0]).collect();
+        let rms = (d2.iter().map(|v| v * v).sum::<f32>() / d2.len() as f32).sqrt();
+        d2.iter().fold(0.0f32, |m, v| m.max(v.abs())) / rms.max(1e-9)
+    }
+
+    #[test]
+    fn probe() {
+        let sr = 44100.0;
+        let x: Vec<f32> = (0..44100).map(|i| 0.4 * (std::f32::consts::TAU * 220.0 * i as f32 / sr).sin()).collect();
+        eprintln!("input clickiness {:.1}", clickiness(&x));
+        for bias in [0.0, 0.5, 0.9, 1.0] {
+            let mut t = Tape::new(44100);
+            t.k = K * 10f64.powf(-3.0 * bias);
+            let y: Vec<f32> = x.iter().map(|&v| t.record(0, v, 0.5)).collect();
+            eprintln!("record bias {bias}: clickiness {:.1}", clickiness(&y[1000..]));
+        }
+        for (amp, drive) in [(1.0f32, 0.5f32), (1.0, 1.0), (0.2, 1.0)] {
+            let mut t = Tape::new(44100);
+            t.k = K * 10f64.powf(-3.0 * 0.9);
+            let xx: Vec<f32> = x.iter().map(|v| v / 0.4 * amp).collect();
+            let y: Vec<f32> = xx.iter().map(|&v| t.record(0, v, drive)).collect();
+            let worst = y.windows(2).skip(1000).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+            eprintln!("record amp {amp} drive {drive}: clickiness {:.1}, max step {worst:.3}", clickiness(&y[1000..]));
+            assert!(clickiness(&y[1000..]) < 5.0 && y.iter().all(|v| v.is_finite()));
+            if amp == 1.0 && drive == 1.0 {
+                let i0 = 2000;
+                eprintln!("{:?}", y[i0..i0 + 120].iter().step_by(4).map(|v| (v * 100.0).round() / 100.0).collect::<Vec<_>>());
+            }
+        }
+        for wow in [0.0, 0.3] {
+            let mut t = Tape::new(44100);
+            let s = Settings { feedback: 0.0, wow, ..Settings::default() };
+            let mut buf: Vec<[f32; 2]> = x.iter().map(|&v| [v, v]).collect();
+            t.process(&s, &mut buf, 22050.0);
+            let y: Vec<f32> = buf.iter().map(|f| f[0]).collect();
+            eprintln!("process wow {wow}: clickiness {:.1}", clickiness(&y[20000..]));
+        }
     }
 }
