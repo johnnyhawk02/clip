@@ -17,7 +17,8 @@ pub struct Settings {
     /// 0..1: how hard the record head drives the tape.
     pub drive: f32,
     /// 0..1: record bias. Low leaves the tape's "deadzone" (quiet sounds crunch, §4.3); high
-    /// is clean until it saturates. It narrows the hysteresis loop, standing in for the bias tone.
+    /// is clean until it saturates. It makes the magnetisation more reversible (raises c),
+    /// standing in for the bias tone.
     #[serde(default = "default_bias")]
     pub bias: f32,
     /// 0..1: wow and flutter depth.
@@ -59,6 +60,13 @@ const GAP: f64 = 5e-6;
 const THICK: f64 = 10e-6;
 const FIR_LEN: usize = 33;
 
+/// The reversible fraction for `bias`: none is the paper's ferric oxide (c = 0.17), full is
+/// almost all reversible (no deadzone, little hysteresis). Narrowing the loop instead (k) makes
+/// the equation stiff, and RK4 blows up on high frequencies.
+fn c_for(bias: f32) -> f64 {
+    C + (0.9 - C) * bias.clamp(0.0, 1.0) as f64
+}
+
 /// Langevin function and its derivative, with the small-argument forms of eqs. 23-24.
 fn langevin(x: f64) -> (f64, f64) {
     if x.abs() < 1e-4 {
@@ -77,33 +85,31 @@ struct Hysteresis {
 }
 
 impl Hysteresis {
-    /// dM/dt for magnetisation `m`, field `h` and its rate of change `hd`, with loop width `k`.
-    /// The mean field coupling α shrinks with the loop (it's the paper's ratio to k), or the
-    /// denominator below can cross zero and the solution blow up.
-    fn dmdt(m: f64, h: f64, hd: f64, k: f64) -> f64 {
-        let alpha = ALPHA * k / K;
-        let (l, dl) = langevin((h + alpha * m) / A);
+    /// dM/dt for magnetisation `m`, field `h` and its rate of change `hd` (eq. 18), with `c`
+    /// the reversible fraction.
+    fn dmdt(m: f64, h: f64, hd: f64, c: f64) -> f64 {
+        let (l, dl) = langevin((h + ALPHA * m) / A);
         let man = MS * l;
         let ds = if hd >= 0.0 { 1.0 } else { -1.0 };
         let dm = if ds * (man - m) > 0.0 { 1.0 } else { 0.0 };
-        let mut den = (1.0 - C) * ds * k - alpha * (man - m);
+        let mut den = (1.0 - c) * ds * K - ALPHA * (man - m);
         if den.abs() < 1e-9 {
             den = 1e-9f64.copysign(den);
         }
-        let irr = (1.0 - C) * dm * (man - m) / den * hd;
-        let rev = C * MS / A * hd * dl;
-        (irr + rev) / (1.0 - C * alpha * MS / A * dl)
+        let irr = (1.0 - c) * dm * (man - m) / den * hd;
+        let rev = c * MS / A * hd * dl;
+        (irr + rev) / (1.0 - c * ALPHA * MS / A * dl)
     }
 
     /// Record field `h` for one step of `t` seconds; returns the magnetisation.
-    fn step(&mut self, h: f64, t: f64, k: f64) -> f64 {
+    fn step(&mut self, h: f64, t: f64, c: f64) -> f64 {
         // Trapezoidal derivative of the field (eq. 21), very slightly damped so it can't ring at Nyquist.
         let hd = 2.0 * (h - self.h) / t - 0.98 * self.hd;
         let (hm, hdm) = (0.5 * (h + self.h), 0.5 * (hd + self.hd));
-        let k1 = t * Self::dmdt(self.m, self.h, self.hd, k);
-        let k2 = t * Self::dmdt(self.m + k1 / 2.0, hm, hdm, k);
-        let k3 = t * Self::dmdt(self.m + k2 / 2.0, hm, hdm, k);
-        let k4 = t * Self::dmdt(self.m + k3, h, hd, k);
+        let k1 = t * Self::dmdt(self.m, self.h, self.hd, c);
+        let k2 = t * Self::dmdt(self.m + k1 / 2.0, hm, hdm, c);
+        let k3 = t * Self::dmdt(self.m + k2 / 2.0, hm, hdm, c);
+        let k4 = t * Self::dmdt(self.m + k3, h, hd, c);
         let m = self.m + k1 / 6.0 + k2 / 3.0 + k3 / 3.0 + k4 / 6.0;
         (self.m, self.h, self.hd) = if m.is_finite() { (m.clamp(-MS, MS), h, hd) } else { (0.0, 0.0, 0.0) };
         self.m
@@ -147,8 +153,8 @@ fn loss_fir(rate: f32, ips: f32, spacing_um: f32) -> [f32; FIR_LEN] {
 
 pub struct Tape {
     rate: f32,
-    /// The hysteresis loop width in use.
-    pub(crate) k: f64,
+    /// The tape's reversible fraction (c) in use, set by the bias.
+    pub(crate) c: f64,
     buf: Vec<[f32; 2]>,
     i: usize,
     tape: [Hysteresis; 2],
@@ -175,7 +181,7 @@ impl Tape {
         let r = rate as f32;
         Tape {
             rate: r,
-            k: K,
+            c: c_for(default_bias()),
             buf: vec![[0.0; 2]; rate as usize * 5],
             i: 0,
             tape: [Hysteresis::default(); 2],
@@ -201,18 +207,18 @@ impl Tape {
         // the Langevin curve is flat past that, which is a hard clip, not tape.
         let g = A as f32 * (0.6 + 3.4 * drive * drive);
         let t = 1.0 / (self.rate as f64 * OVER as f64);
-        // The loop's width follows the drive, so how much a quiet sound crunches is the bias's
-        // doing alone.
-        let k = self.k * g as f64 / A;
         let mut acc = 0.0;
         for j in 1..=OVER {
             let xi = self.prev_in[c] + (x - self.prev_in[c]) * j as f32 / OVER as f32;
-            acc += self.tape[c].step((xi * g) as f64, t, k);
+            acc += self.tape[c].step((xi * g) as f64, t, self.c);
         }
         self.prev_in[c] = x;
-        // Back to signal level: divide by the tape's small-signal gain (about MS / 3A, measured
-        // with the bias up) and the drive, so quiet repeats come back at the level they went in.
-        (acc / OVER as f64 / (MS / (3.0 * A)) / g as f64) as f32
+        // Back to signal level: divide by the tape's gain for a normal level (MS / 3A times
+        // about c + 0.095 (1 − c), measured: below the loop's width only the reversible part
+        // moves) and the drive. So a normal level comes back as it went in at any bias, and
+        // underbiased tape loses its quiet sounds rather than running away with its loud ones.
+        let norm = self.c + 0.095 * (1.0 - self.c);
+        (acc / OVER as f64 / (MS / (3.0 * A) * norm) / g as f64) as f32
     }
 
     /// `beat` is a beat's length in frames.
@@ -221,8 +227,7 @@ impl Tape {
             self.fir = loss_fir(self.rate, s.speed, s.spacing);
             self.fir_for = (s.speed, s.spacing);
         }
-        // Bias narrows the loop: none is the paper's ferric oxide, full is a thousandth as wide.
-        self.k = K * 10f64.powf(-3.0 * s.bias.clamp(0.0, 1.0) as f64);
+        self.c = c_for(s.bias);
         let n = self.buf.len();
         // The FIR's own delay comes off the echo time.
         let base = (s.beats.max(0.0625) as f64 * beat) as f32 - (FIR_LEN / 2) as f32;
@@ -282,12 +287,12 @@ mod tests {
 
     /// Level of a sine through one pass of the tape, at peak amplitude `amp`.
     fn pass_gain(amp: f32, drive: f32) -> f32 {
-        pass_gain_k(amp, drive, K * 10f64.powf(-3.0 * default_bias() as f64))
+        pass_gain_k(amp, drive, c_for(default_bias()))
     }
 
-    fn pass_gain_k(amp: f32, drive: f32, k: f64) -> f32 {
+    fn pass_gain_k(amp: f32, drive: f32, c: f64) -> f32 {
         let mut t = Tape::new(44100);
-        t.k = k;
+        t.c = c;
         let n = 44100;
         let x: Vec<f32> = (0..n).map(|i| amp * (std::f32::consts::TAU * 220.0 * i as f32 / 44100.0).sin()).collect();
         let mut y = 0.0f32;
@@ -364,13 +369,13 @@ mod click_probe {
         eprintln!("input clickiness {:.1}", clickiness(&x));
         for bias in [0.0, 0.5, 0.9, 1.0] {
             let mut t = Tape::new(44100);
-            t.k = K * 10f64.powf(-3.0 * bias);
+            t.c = c_for(bias as f32);
             let y: Vec<f32> = x.iter().map(|&v| t.record(0, v, 0.5)).collect();
             eprintln!("record bias {bias}: clickiness {:.1}", clickiness(&y[1000..]));
         }
         for (amp, drive) in [(1.0f32, 0.5f32), (1.0, 1.0), (0.2, 1.0)] {
             let mut t = Tape::new(44100);
-            t.k = K * 10f64.powf(-3.0 * 0.9);
+            t.c = c_for(0.9);
             let xx: Vec<f32> = x.iter().map(|v| v / 0.4 * amp).collect();
             let y: Vec<f32> = xx.iter().map(|&v| t.record(0, v, drive)).collect();
             let worst = y.windows(2).skip(1000).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
@@ -388,6 +393,34 @@ mod click_probe {
             t.process(&s, &mut buf, 22050.0);
             let y: Vec<f32> = buf.iter().map(|f| f[0]).collect();
             eprintln!("process wow {wow}: clickiness {:.1}", clickiness(&y[20000..]));
+        }
+    }
+}
+
+#[cfg(test)]
+mod bias_sweep {
+    use super::*;
+
+    /// The echo must come through at every bias, on a drum-like signal (noise bursts).
+    #[test]
+    fn echo_at_every_bias() {
+        let mut seed = 1u32;
+        let mut noise = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0
+        };
+        let x: Vec<f32> = (0..44100 * 3).map(|i| if i % 11025 < 2000 { 0.9 * noise() * (1.0 - (i % 11025) as f32 / 2000.0) } else { 0.0 }).collect();
+        for b in 0..=10 {
+            for drive in [0.0, 0.5, 1.0] {
+                let s = Settings { bias: b as f32 / 10.0, drive, ..Settings::default() };
+                let mut t = Tape::new(44100);
+                let mut buf: Vec<[f32; 2]> = x.iter().map(|&v| [v, v]).collect();
+                t.process(&s, &mut buf, 22050.0);
+                let tail = &buf[44100..];
+                let rms = (tail.iter().map(|f| f[0] * f[0]).sum::<f32>() / tail.len() as f32).sqrt();
+                eprintln!("bias {:.1} drive {drive}: echo rms {rms:.3}", s.bias);
+                assert!(rms.is_finite() && rms > 0.02, "bias {} drive {drive}: echo gone ({rms})", s.bias);
+            }
         }
     }
 }
