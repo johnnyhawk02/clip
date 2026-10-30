@@ -170,15 +170,52 @@ fn loss_fir(rate: f32, ips: f32, spacing_um: f32) -> [f32; FIR_LEN] {
     h
 }
 
-pub struct Tape {
+/// The record head and tape on their own, both sides: a signal recorded onto modelled tape
+/// and read straight back (no echo, no play-head losses). Riser uses it as its saturation.
+pub struct Saturator {
     rate: f32,
     /// The tape's reversible fraction (c) in use, set by the bias.
     pub(crate) c: f64,
-    buf: Vec<[f32; 2]>,
-    i: usize,
     tape: [Hysteresis; 2],
     /// The last input, for the oversampling's linear interpolation.
     prev_in: [f32; 2],
+}
+
+impl Saturator {
+    pub fn new(rate: u32) -> Saturator {
+        Saturator { rate: rate as f32, c: c_for(default_bias()), tape: [Hysteresis::default(); 2], prev_in: [0.0; 2] }
+    }
+
+    pub fn set_bias(&mut self, bias: f32) {
+        self.c = c_for(bias);
+    }
+
+    /// Record `x` (side `c`, at the sample rate) onto the tape: oversampled hysteresis, back down.
+    pub fn record(&mut self, c: usize, x: f32, drive: f32) -> f32 {
+        // Full scale reaches 0.6 a (barely bending) with no drive, 4 a (well into saturation) at full:
+        // the Langevin curve is flat past that, which is a hard clip, not tape.
+        let g = A as f32 * (0.6 + 3.4 * drive * drive);
+        let t = 1.0 / (self.rate as f64 * OVER as f64);
+        let mut acc = 0.0;
+        for j in 1..=OVER {
+            let xi = self.prev_in[c] + (x - self.prev_in[c]) * j as f32 / OVER as f32;
+            acc += self.tape[c].step((xi * g) as f64, t, self.c);
+        }
+        self.prev_in[c] = x;
+        // Back to signal level: divide by the tape's gain for a normal level (MS / 3A times
+        // about c + 0.095 (1 − c), measured: below the loop's width only the reversible part
+        // moves) and the drive. So a normal level comes back as it went in at any bias, and
+        // underbiased tape loses its quiet sounds rather than running away with its loud ones.
+        let norm = self.c + 0.095 * (1.0 - self.c);
+        (acc / OVER as f64 / (MS / (3.0 * A) * norm) / g as f64) as f32
+    }
+}
+
+pub struct Tape {
+    rate: f32,
+    pub(crate) sat: Saturator,
+    buf: Vec<[f32; 2]>,
+    i: usize,
     fir: [f32; FIR_LEN],
     fir_for: (f32, f32),
     hist: [[f32; FIR_LEN]; 2],
@@ -247,11 +284,9 @@ impl Tape {
         let r = rate as f32;
         Tape {
             rate: r,
-            c: c_for(default_bias()),
+            sat: Saturator::new(rate),
             buf: vec![[0.0; 2]; rate as usize * 5],
             i: 0,
-            tape: [Hysteresis::default(); 2],
-            prev_in: [0.0; 2],
             fir: loss_fir(r, s.speed, s.spacing),
             fir_for: (s.speed, s.spacing),
             hist: [[0.0; FIR_LEN]; 2],
@@ -267,25 +302,9 @@ impl Tape {
         }
     }
 
-    /// Record `x` (one side, at the sample rate) onto the tape: oversampled hysteresis, back down.
+    /// Record `x` (one side, at the sample rate) onto the tape.
     fn record(&mut self, c: usize, x: f32, drive: f32) -> f32 {
-        // (`k` is set from the bias by `process`.)
-        // Full scale reaches 0.6 a (barely bending) with no drive, 4 a (well into saturation) at full:
-        // the Langevin curve is flat past that, which is a hard clip, not tape.
-        let g = A as f32 * (0.6 + 3.4 * drive * drive);
-        let t = 1.0 / (self.rate as f64 * OVER as f64);
-        let mut acc = 0.0;
-        for j in 1..=OVER {
-            let xi = self.prev_in[c] + (x - self.prev_in[c]) * j as f32 / OVER as f32;
-            acc += self.tape[c].step((xi * g) as f64, t, self.c);
-        }
-        self.prev_in[c] = x;
-        // Back to signal level: divide by the tape's gain for a normal level (MS / 3A times
-        // about c + 0.095 (1 − c), measured: below the loop's width only the reversible part
-        // moves) and the drive. So a normal level comes back as it went in at any bias, and
-        // underbiased tape loses its quiet sounds rather than running away with its loud ones.
-        let norm = self.c + 0.095 * (1.0 - self.c);
-        (acc / OVER as f64 / (MS / (3.0 * A) * norm) / g as f64) as f32
+        self.sat.record(c, x, drive)
     }
 
     /// `beat` is a beat's length in frames.
@@ -294,7 +313,7 @@ impl Tape {
             self.fir = loss_fir(self.rate, s.speed, s.spacing);
             self.fir_for = (s.speed, s.spacing);
         }
-        self.c = c_for(s.bias);
+        self.sat.set_bias(s.bias);
         let n = self.buf.len();
         // The FIR's own delay comes off the echo time.
         let base = (s.beats.max(0.0625) as f64 * beat) as f32 - (FIR_LEN / 2) as f32;
@@ -368,7 +387,7 @@ mod tests {
 
     fn pass_gain_k(amp: f32, drive: f32, c: f64) -> f32 {
         let mut t = Tape::new(44100);
-        t.c = c;
+        t.sat.c = c;
         let n = 44100;
         let x: Vec<f32> = (0..n).map(|i| amp * (std::f32::consts::TAU * 220.0 * i as f32 / 44100.0).sin()).collect();
         let mut y = 0.0f32;
@@ -445,13 +464,13 @@ mod click_probe {
         eprintln!("input clickiness {:.1}", clickiness(&x));
         for bias in [0.0, 0.5, 0.9, 1.0] {
             let mut t = Tape::new(44100);
-            t.c = c_for(bias as f32);
+            t.sat.c = c_for(bias as f32);
             let y: Vec<f32> = x.iter().map(|&v| t.record(0, v, 0.5)).collect();
             eprintln!("record bias {bias}: clickiness {:.1}", clickiness(&y[1000..]));
         }
         for (amp, drive) in [(1.0f32, 0.5f32), (1.0, 1.0), (0.2, 1.0)] {
             let mut t = Tape::new(44100);
-            t.c = c_for(0.9);
+            t.sat.c = c_for(0.9);
             let xx: Vec<f32> = x.iter().map(|v| v / 0.4 * amp).collect();
             let y: Vec<f32> = xx.iter().map(|&v| t.record(0, v, drive)).collect();
             let worst = y.windows(2).skip(1000).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);

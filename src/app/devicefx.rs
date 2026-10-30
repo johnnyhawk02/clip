@@ -1,7 +1,7 @@
 //! Track effects used offline, as the sound-editor effects are: a track device's settings in a
 //! dialog, printed into the selection (or the whole clip) when you press Apply.
 
-use super::deviceview::{delay_panel, phaser_panel, pultec_panel, reverb_panel, spring_panel, tape_panel};
+use super::deviceview::{delay_panel, phaser_panel, pultec_panel, reverb_panel, riser_panel, spring_panel, tape_panel};
 use super::*;
 use crate::devices::{Device, State};
 
@@ -23,6 +23,8 @@ impl App {
                 Device::Spring(s) => s.mix = 0.3,
                 Device::Tape(s) => s.mix = 0.35,
                 Device::Phaser(_) | Device::Pultec(_) => {}
+                // Printed, it rises across the selection: all the way, to a full wash.
+                Device::Riser(s) => s.amount = 1.0,
                 Device::Delay(s) => s.mix = 0.35,
                 Device::Spacer(_) => {}
             }
@@ -51,6 +53,7 @@ impl App {
                 Device::Tape(s) => _ = tape_panel(ui, s),
                 Device::Phaser(s) => _ = phaser_panel(ui, s),
                 Device::Pultec(s) => _ = pultec_panel(ui, s),
+                Device::Riser(s) => _ = riser_panel(ui, s, true),
                 Device::Spacer(_) => {}
             }
             if whole {
@@ -85,6 +88,7 @@ impl App {
             Device::Tape(_) => "Tape Device",
             Device::Phaser(_) => "Phaser Device",
             Device::Pultec(_) => "Pultec Device",
+            Device::Riser(_) => "Riser Device",
             Device::Spacer(_) => return,
         };
         let Some(a) = self.audio.clone() else { return };
@@ -99,7 +103,17 @@ impl App {
         let beat = self.beat_frames();
         let lead = if wrap { ((WRAP_LEAD_SECS * rate as f64) / n as f64).ceil().clamp(1.0, 64.0) as usize } else { 0 };
         let mut frames: Vec<[f32; 2]> = (0..n * (lead + 1)).map(|k| [at(0, k % n), at(1, k % n)]).collect();
-        st.process(&d, &mut frames, None, beat);
+        match d {
+            // Rising: Amount climbs from none at the start of the sound to its setting at the end.
+            Device::Riser(r) if r.ramp => {
+                for (b, chunk) in frames.chunks_mut(256).enumerate() {
+                    let at = (b * 256) % n;
+                    let step = Device::Riser(crate::riser::Settings { amount: r.amount * at as f32 / n as f32, ..r });
+                    st.process(&step, chunk, None, beat);
+                }
+            }
+            _ => st.process(&d, &mut frames, None, beat),
+        }
         let mut out = frames.split_off(n * lead);
         if !wrap {
             // Run on through silence until the tail has died away.

@@ -16,6 +16,7 @@ mod spacer;
 mod tape;
 mod phaser;
 mod pultec;
+mod riser;
 mod recorder;
 
 fn main() -> eframe::Result {

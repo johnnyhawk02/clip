@@ -329,6 +329,7 @@ impl App {
             Action::DeviceTape => self.open_device_fx("Tape"),
             Action::DevicePhaser => self.open_device_fx("Phaser"),
             Action::DevicePultec => self.open_device_fx("Pultec"),
+            Action::DeviceRiser => self.open_device_fx("Riser"),
             Action::Flanger => self.dialog = Some(Dialog::Flanger),
             Action::Smooth => self.dialog = Some(Dialog::Smooth),
             Action::NoiseGate => self.dialog = Some(Dialog::NoiseGate),

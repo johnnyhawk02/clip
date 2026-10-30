@@ -8,6 +8,7 @@ use crate::fx;
 use crate::tape;
 use crate::phaser;
 use crate::pultec;
+use crate::riser;
 
 /// Width of one device panel.
 const DEV_W: f32 = 560.0;
@@ -87,7 +88,12 @@ impl App {
                     for (i, d) in chain.iter_mut().enumerate() {
                         let h = ui.available_height();
                         // Tape has a third column, for its LFO.
-                        let w = if matches!(d, Device::Tape(_)) { DEV_W + 300.0 } else { DEV_W };
+                        let w = match d {
+                            Device::Tape(_) => DEV_W + 300.0,
+                            // Riser is one knob.
+                            Device::Riser(_) => 180.0,
+                            _ => DEV_W,
+                        };
                         let (panel, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
                         ui.painter().rect_filled(panel, 3.0, gray(250));
                         ui.painter().rect_stroke(panel, 3.0, Stroke::new(1.0, rule()), egui::StrokeKind::Inside);
@@ -118,6 +124,7 @@ impl App {
                             Device::Tape(s) => tape_panel(&mut inner, s),
                             Device::Phaser(s) => phaser_panel(&mut inner, s),
                             Device::Pultec(s) => pultec_panel(&mut inner, s),
+                            Device::Riser(s) => riser_panel(&mut inner, s, false),
                         };
                     }
                     // + Add Effect, as Live's "Drop Audio Effects Here".
@@ -480,5 +487,49 @@ pub(super) fn pultec_panel(ui: &mut egui::Ui, s: &mut pultec::Settings) -> bool 
             ui.end_row();
         });
     });
+    active
+}
+
+/// Riser's one big knob (drag up and down; double-click for none), and, printed offline, whether
+/// it rises across the selection.
+pub(super) fn riser_panel(ui: &mut egui::Ui, s: &mut riser::Settings, offline: bool) -> bool {
+    ui.vertical_centered(|ui| riser_knob(ui, s, offline)).inner
+}
+
+fn riser_knob(ui: &mut egui::Ui, s: &mut riser::Settings, offline: bool) -> bool {
+    let size = 96.0;
+    let (r, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click_and_drag());
+    if resp.dragged() {
+        // A full turn over 200 points; Shift for fine.
+        let fine = if ui.input(|i| i.modifiers.shift) { 0.2 } else { 1.0 };
+        s.amount = (s.amount - resp.drag_delta().y / 200.0 * fine).clamp(0.0, 1.0);
+    }
+    if resp.double_clicked() {
+        s.amount = 0.0;
+    }
+    let active = resp.dragged();
+    let p = ui.painter();
+    let c = r.center();
+    let rad = size * 0.42;
+    // 300° of travel, from lower left round to lower right.
+    let (a0, a1) = (std::f32::consts::PI * 0.75, std::f32::consts::PI * 2.25);
+    let arc = |from: f32, to: f32| -> Vec<Pos2> {
+        let n = 48;
+        (0..=n).map(|i| { let a = from + (to - from) * i as f32 / n as f32; c + Vec2::angled(a) * rad }).collect()
+    };
+    p.add(egui::Shape::line(arc(a0, a1), Stroke::new(6.0, gray(215))));
+    let at = a0 + (a1 - a0) * s.amount;
+    if s.amount > 0.0 {
+        p.add(egui::Shape::line(arc(a0, at), Stroke::new(6.0, Color32::from_rgb(255, 173, 86))));
+    }
+    p.circle_filled(c, rad - 9.0, gray(if resp.hovered() || resp.dragged() { 238 } else { 244 }));
+    p.line_segment([c + Vec2::angled(at) * (rad - 24.0), c + Vec2::angled(at) * (rad - 10.0)], Stroke::new(2.5, ink()));
+    p.text(c, Align2::CENTER_CENTER, format!("{:.0} %", s.amount * 100.0), FontId::proportional(14.0), ink());
+    resp.on_hover_text("Amount: drag up to build. Shift-drag for fine, double-click for none");
+    ui.label("Amount");
+    if offline {
+        ui.add_space(6.0);
+        ui.checkbox(&mut s.ramp, "Rise from nothing to Amount across it");
+    }
     active
 }
