@@ -54,6 +54,9 @@ pub struct Shared {
     pub step: f64,
     /// Preferences ▸ Audio's test tone: a quiet 440 Hz sine over whatever plays.
     pub test_tone: bool,
+    /// A file auditioned from the browser, heard over whatever plays (as Live's preview), and
+    /// where it has got to (in its own frames).
+    pub preview: Option<(Arc<Audio>, f64)>,
 }
 
 /// The audio setup, as Live's Preferences ▸ Audio: devices by name and the sample rate and
@@ -142,6 +145,7 @@ impl Player {
             wrapped: false,
             step: 1.0,
             test_tone: false,
+            preview: None,
         }));
         let mut p = Player { shared, _stream: None, error: None, running: Running::default() };
         p.reopen(setup);
@@ -168,6 +172,16 @@ impl Player {
 
     pub fn set_test_tone(&self, on: bool) {
         self.shared.lock().unwrap().test_tone = on;
+    }
+
+    /// Audition `audio` (from its start) over playback, or with `None` stop auditioning.
+    pub fn preview(&self, audio: Option<Arc<Audio>>) {
+        self.shared.lock().unwrap().preview = audio.map(|a| (a, 0.0));
+    }
+
+    /// Whether a preview is still sounding.
+    pub fn previewing(&self) -> bool {
+        self.shared.lock().unwrap().preview.is_some()
     }
 
     pub fn set_audio(&self, audio: Arc<Audio>) {
@@ -412,11 +426,36 @@ where
                     tone = (tone + 440.0 / out_rate).fract();
                     (tone * std::f64::consts::TAU).sin() as f32 * 0.1
                 };
+                // The browser's preview, mixed in after everything else.
+                let mut preview = s.preview.take();
+                let mut next_preview = || {
+                    let Some((a, pos)) = &mut preview else { return [0.0; 2] };
+                    let i0 = *pos as usize;
+                    if i0 + 1 >= a.frames() {
+                        preview = None;
+                        return [0.0; 2];
+                    }
+                    let f = (*pos - i0 as f64) as f32;
+                    let n = a.num_channels();
+                    let at = |c: usize| {
+                        let ch = &a.channels[c.min(n - 1)];
+                        ch[i0] * (1.0 - f) + ch[i0 + 1] * f
+                    };
+                    *pos += a.rate as f64 / out_rate;
+                    [at(0), at(1)]
+                };
+                let silent = |frame: &mut [T], t: f32, pv: [f32; 2]| {
+                    for (c, out) in frame.iter_mut().enumerate() {
+                        let v = t + if c < 2 { pv[c] } else { 0.0 };
+                        *out = T::from_sample((v * level).clamp(-1.0, 1.0));
+                    }
+                };
                 for (k, frame) in data.chunks_mut(out_ch).enumerate() {
                     let t = next_tone();
+                    let pv = next_preview();
                     if !s.playing {
                         xfeed.reset();
-                        frame.fill(T::from_sample(t * level));
+                        silent(frame, t, pv);
                         continue;
                     }
                     if s.pos >= s.end as f64 {
@@ -430,7 +469,7 @@ where
                         } else {
                             s.playing = false;
                             s.pos = s.end as f64;
-                            frame.fill(T::from_sample(t * level));
+                            silent(frame, t, pv);
                             continue;
                         }
                     }
@@ -457,14 +496,16 @@ where
                     let (l, r) = if crossfeed { xfeed.process(l, r) } else { (l, r) };
                     for (c, out) in frame.iter_mut().enumerate() {
                         let v = match c {
-                            0 => l,
-                            1 => r,
+                            0 => l + pv[0],
+                            1 => r + pv[1],
                             _ => 0.0,
                         };
                         *out = T::from_sample(((v + t) * level).clamp(-1.0, 1.0));
                     }
                     s.pos += step * if matches!(s.source, Source::Song(_)) { s.speed } else { 1.0 };
                 }
+                drop(next_preview);
+                s.preview = preview;
             },
             |err| eprintln!("audio stream error: {err}"),
             None,

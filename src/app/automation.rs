@@ -226,6 +226,12 @@ impl App {
                         let files = parts.iter().skip(2).map(PathBuf::from).collect();
                         self.handle_drop(files, Some(q), ctx);
                     }
+                    "browse" => {
+                        // browse:dir — show the browser with `dir` open in Places.
+                        self.show_browser = true;
+                        self.browser.add_place(PathBuf::from(arg));
+                    }
+                    "browserstate" => eprintln!("browser: previewing {} selected {:?}", self.player.previewing(), self.browser.selected),
                     "als" => {
                         let p = Path::new(arg);
                         let r = self.write_ableton(&self.song_tracks(), p, "Test");

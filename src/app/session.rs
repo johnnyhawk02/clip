@@ -783,6 +783,6 @@ impl App {
 }
 
 /// A small play triangle centred on `c`.
-fn play_triangle(p: &egui::Painter, c: Pos2, color: Color32) {
+pub(super) fn play_triangle(p: &egui::Painter, c: Pos2, color: Color32) {
     p.add(egui::Shape::convex_polygon(vec![c + Vec2::new(-4.0, -5.0), c + Vec2::new(5.0, 0.0), c + Vec2::new(-4.0, 5.0)], color, Stroke::NONE));
 }

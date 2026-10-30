@@ -175,6 +175,7 @@ pub enum Action {
     SwapSection,
     ShowPool,
     AddToPool,
+    ShowBrowser,
 }
 
 use Action::*;
@@ -193,7 +194,7 @@ pub const ALL: &[Action] = &[
     ToggleSnap, ToolSplit, LoopClip, CollapseClip, CollapseTrack, WarpClip, AutoWarp, SliceClip, ReverseClip,
     MangleShuffle, MangleReverse, MangleSwap, MangleStutter, MangleRandomReverse, MangleDropOut, MangleBBCut, MangleAgain, DockPalette,
     MangleCutHouse, MangleCutHipHop, MangleCutDembow, MangleCutFootwork, MangleCutTrap, MangleCutBreakcore, MangleCutHalftime,
-    ExportAbleton, AutoArrange, PrevVariation, NextVariation, SwapSection, ShowPool, AddToPool,
+    ExportAbleton, AutoArrange, PrevVariation, NextVariation, SwapSection, ShowPool, AddToPool, ShowBrowser,
 ];
 
 pub enum Item {
@@ -272,7 +273,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
         ],
     ),
     ("Control", &[Do(PlayPause), Do(Continue), Do(Stop), Do(Loop), Do(Follow), Do(Metronome), Do(RecordToSong), Separator, Do(GoStart), Do(GoEnd), Separator, Do(AddLocator), Do(PrevLocator), Do(NextLocator), Separator, Do(DelayCompensation), Do(Crossfeed)]),
-    ("View", &[Do(ZoomIn), Do(ZoomOut), Do(ZoomSel), Do(ZoomBack), Do(ZoomFit), Separator, Do(ToolSelect), Do(ToolSplit)]),
+    ("View", &[Do(ShowBrowser), Separator, Do(ZoomIn), Do(ZoomOut), Do(ZoomSel), Do(ZoomBack), Do(ZoomFit), Separator, Do(ToolSelect), Do(ToolSplit)]),
     // Everything from the sound-editor days, out of the way.
     (
         "More",
@@ -368,7 +369,7 @@ impl Action {
     /// Shown with a check mark in menus rather than as a plain command.
     pub fn is_check(self) -> bool {
         self.is_tool()
-            || matches!(self, Loop | MuteTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | ShowPool | Crossfeed | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues | Follow | Metronome | RecordToSong | DelayCompensation)
+            || matches!(self, Loop | MuteTrack | RulerTime | RulerSamples | RulerTimecode | ShowSpectrum | ShowRegions | ShowPool | ShowBrowser | Crossfeed | Dither | AutoGain | ToggleSnap | LoopClip | WarpClip | AutoWarp | DockPalette | FormatPcm8 | FormatPcm16 | FormatPcm24 | FormatFloat32 | ShowTools | ShowControls | ShowInfo | ShowCues | Follow | Metronome | RecordToSong | DelayCompensation)
     }
 
     pub fn label(self) -> &'static str {
@@ -533,6 +534,7 @@ impl Action {
             NextLocator => "Next Locator",
             ShowRegions => "Regions",
             ShowPool => "Loop Pool",
+            ShowBrowser => "Browser",
             AddToPool => "Add to Pool",
             Dither => "Dither",
             CutGaps => "Cut Out Gaps…",
@@ -613,6 +615,7 @@ impl Action {
             ShowSpectrum => "CmdOrCtrl+6",
             ShowRegions => "CmdOrCtrl+5",
             ShowPool => "CmdOrCtrl+7",
+            ShowBrowser => "Alt+CmdOrCtrl+B",
             PrevTrack => "Alt+CmdOrCtrl+Up",
             Record => "F9",
             AddCue => "CmdOrCtrl+M",
@@ -723,6 +726,7 @@ impl Action {
             PrevVariation => "The previous Auto Arrange variation",
             NextVariation => "Another Auto Arrange variation",
             ShowPool => "The loops you can drag onto tracks",
+            ShowBrowser => "Folders of samples: click to preview, drag onto a track or slot, ★ to keep as a favourite",
             AddToPool => "Put the selected clips (grouped ones too) in the loop pool",
             SwapSection => "Replace the selected clip with a random section of the same length from the loop pool",
             DuplicateClip => "Put a copy of the clip right after it",

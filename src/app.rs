@@ -44,6 +44,7 @@ mod session;
 mod deviceview;
 mod mixer;
 mod audioprefs;
+mod browser;
 
 use self::clip::*;
 use self::chop::*;
@@ -53,6 +54,7 @@ use self::look::*;
 use self::mixer::*;
 use self::automation::Automation;
 use self::autoarrange::{PoolDrag, PoolLoop};
+use self::browser::Browser;
 use self::session::{TrackPlay, SLOT};
 use self::arrange::{LoopGrab, LOOP_H, MAX_TICKS};
 use self::editor::EdRuler;
@@ -386,6 +388,9 @@ pub struct App {
     loop_points: Option<Sel>,
     show_regions: bool,
     show_pool: bool,
+    /// The browser (Live's), on the left.
+    show_browser: bool,
+    browser: Browser,
     /// The view before Zoom to Selection, for Zoom Back (in the arrangement or the editor).
     zoom_back: Option<(bool, f64, f64)>,
     /// Headphone crossfeed on playback, remembered between runs.
@@ -661,6 +666,8 @@ impl App {
             loop_points: None,
             show_regions: false,
             show_pool: false,
+            show_browser: false,
+            browser: Browser::load(),
             zoom_back: None,
             crossfeed: crossfeed_pref().exists(),
             master_gain: 1.0,
@@ -1181,6 +1188,32 @@ impl App {
         }
     }
 
+    /// Show where a file dragged over the arrangement will land: the track under the pointer,
+    /// or a new track below the last.
+    fn drop_highlight(&mut self, ctx: &egui::Context, q: Pos2) {
+        let Some((lanes, lane_h)) = self.arr_lanes else { return };
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("drop")));
+        ctx.request_repaint();
+        match self.drop_target_at(q) {
+            Some((Some(t), _)) => {
+                let r = Rect::from_min_size(Pos2::new(lanes.left(), lanes.top() + t as f32 * lane_h), Vec2::new(lanes.width(), lane_h));
+                painter.rect_filled(r, 0.0, Color32::from_black_alpha(25));
+                painter.rect_stroke(r.shrink(2.0), 4.0, Stroke::new(2.0, ink()), egui::StrokeKind::Inside);
+            }
+            Some((None, _)) => {
+                let top = lanes.top() + self.tracks.len() as f32 * lane_h;
+                let r = Rect::from_min_size(Pos2::new(lanes.left(), top), Vec2::new(lanes.width(), lane_h.min(lanes.bottom() - top)));
+                painter.rect_stroke(r.shrink(4.0), 4.0, Stroke::new(2.0, ink()), egui::StrokeKind::Inside);
+                painter.text(r.center(), Align2::CENTER_CENTER, "New track", FontId::proportional(16.0), ink());
+            }
+            None => {}
+        }
+        if lanes.contains(q) {
+            painter.line_segment([Pos2::new(q.x, lanes.top()), Pos2::new(q.x, lanes.bottom())], Stroke::new(1.5, ink()));
+        }
+        self.status = "Drop on a track to add a clip there, or below the tracks for a new track".into();
+    }
+
     // ---------- tempo grid ----------
 
     fn confirm_dialog(&mut self, ctx: &egui::Context) {
@@ -1277,6 +1310,7 @@ impl eframe::App for App {
         }
 
         // Drag and drop.
+        self.browser_drag(&ctx);
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect());
         self.track_window(&ctx);
         // Files Finder asks us to open (double-click, Open With, the Dock icon).
@@ -1343,6 +1377,17 @@ impl eframe::App for App {
                 self.floating_palette(ui);
             });
             self.show_tools &= open;
+        }
+        if self.show_browser {
+            let r = egui::Panel::left("browser")
+                .frame(egui::Frame::new().fill(panel()).inner_margin(egui::Margin::symmetric(8, 4)))
+                .resizable(true)
+                .default_size(260.0)
+                .size_range(180.0..=480.0)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.browser_panel(ui));
+                });
+            self.browser.rect = Some(r.response.rect);
         }
         if self.show_tools && self.palette_docked {
             egui::Panel::left("tools")
@@ -1459,27 +1504,8 @@ impl eframe::App for App {
             let hover = ctx.input(|i| i.viewport().inner_rect).and_then(crate::menu::mouse_in_window);
             #[cfg(not(target_os = "macos"))]
             let hover = ctx.input(|i| i.pointer.latest_pos());
-            if let (true, Some(q), Some((lanes, lane_h))) = (self.view == View::Arrangement && !self.tracks.is_empty(), hover, self.arr_lanes) {
-                // Show where the drop will land: the track under the mouse, or a new track.
-                ctx.request_repaint();
-                match self.drop_target_at(q) {
-                    Some((Some(t), _)) => {
-                        let r = Rect::from_min_size(Pos2::new(lanes.left(), lanes.top() + t as f32 * lane_h), Vec2::new(lanes.width(), lane_h));
-                        painter.rect_filled(r, 0.0, Color32::from_black_alpha(25));
-                        painter.rect_stroke(r.shrink(2.0), 4.0, Stroke::new(2.0, ink()), egui::StrokeKind::Inside);
-                    }
-                    Some((None, _)) => {
-                        let top = lanes.top() + self.tracks.len() as f32 * lane_h;
-                        let r = Rect::from_min_size(Pos2::new(lanes.left(), top), Vec2::new(lanes.width(), lane_h.min(lanes.bottom() - top)));
-                        painter.rect_stroke(r.shrink(4.0), 4.0, Stroke::new(2.0, ink()), egui::StrokeKind::Inside);
-                        painter.text(r.center(), Align2::CENTER_CENTER, "New track", FontId::proportional(16.0), ink());
-                    }
-                    None => {}
-                }
-                if lanes.contains(q) {
-                    painter.line_segment([Pos2::new(q.x, lanes.top()), Pos2::new(q.x, lanes.bottom())], Stroke::new(1.5, ink()));
-                }
-                self.status = "Drop on a track to add a clip there, or below the tracks for a new track".into();
+            if let (true, Some(q), Some(_)) = (self.view == View::Arrangement && !self.tracks.is_empty(), hover, self.arr_lanes) {
+                self.drop_highlight(&ctx, q);
             } else {
                 painter.rect_filled(screen, 0.0, Color32::from_black_alpha(140));
                 painter.text(screen.center(), Align2::CENTER_CENTER, "Drop to open", FontId::proportional(24.0), gray(255));

@@ -74,6 +74,8 @@ pub struct ViewState {
     pub follow: bool,
     pub fit_height: bool,
     pub show_pool: bool,
+    #[serde(default)]
+    pub show_browser: bool,
     pub show_devices: bool,
     pub device_target: usize,
     pub show_tools: bool,

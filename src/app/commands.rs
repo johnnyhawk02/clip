@@ -12,7 +12,7 @@ impl App {
                 Action::New | Action::Open | Action::Quit | Action::Preferences | Action::BatchConvert | Action::Record | Action::NewClip | Action::ImportClip => true,
                 Action::SaveProject | Action::SaveProjectAs => doc,
                 Action::FormatPcm8 | Action::FormatPcm16 | Action::FormatPcm24 | Action::FormatFloat32 | Action::Dither | Action::AutoGain => true,
-                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed | Action::Follow | Action::Metronome | Action::DockPalette | Action::RecordToSong | Action::DelayCompensation => true,
+                Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::ShowBrowser | Action::Crossfeed | Action::Follow | Action::Metronome | Action::DockPalette | Action::RecordToSong | Action::DelayCompensation => true,
                 Action::Continue | Action::AddLocator => doc,
                 Action::PrevLocator | Action::NextLocator => !self.locators.is_empty(),
                 Action::RenameLocator => self.rename_target().is_some(),
@@ -88,7 +88,7 @@ impl App {
             Action::ClearLoop => has && self.loop_points.is_some(),
             Action::ExportRegions => has && !self.regions.is_empty(),
             Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
-            Action::ShowSpectrum | Action::BatchConvert | Action::ShowRegions | Action::ShowPool => true,
+            Action::ShowSpectrum | Action::BatchConvert | Action::ShowRegions | Action::ShowPool | Action::ShowBrowser => true,
             Action::FmSynth | Action::OffsetTrack | Action::TrackColor | Action::Spacer | Action::AddReturn => has,
             Action::Dither | Action::AutoGain => true,
             Action::AddCue => has,
@@ -140,6 +140,7 @@ impl App {
             Action::ShowSpectrum => self.show_spectrum,
             Action::ShowRegions => self.show_regions,
             Action::ShowPool => self.show_pool,
+            Action::ShowBrowser => self.show_browser,
             Action::Crossfeed => self.crossfeed,
             Action::Follow => self.follow,
             Action::Metronome => self.metronome,
@@ -501,6 +502,12 @@ impl App {
             Action::RulerTimecode => self.ruler = RulerUnits::Timecode,
             Action::ShowSpectrum => self.show_spectrum = !self.show_spectrum,
             Action::ShowRegions => self.show_regions = !self.show_regions,
+            Action::ShowBrowser => {
+                self.show_browser = !self.show_browser;
+                if !self.show_browser {
+                    self.stop_preview();
+                }
+            }
             Action::ShowPool => {
                 self.show_pool = !self.show_pool;
                 if self.show_pool && self.pool.is_empty() {

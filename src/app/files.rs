@@ -872,6 +872,7 @@ impl App {
             follow: self.follow,
             fit_height: self.fit_height,
             show_pool: self.show_pool,
+            show_browser: self.show_browser,
             show_devices: self.show_devices,
             device_target: self.device_target,
             show_tools: self.show_tools,
@@ -900,6 +901,7 @@ impl App {
         (self.metronome, self.session_rec, self.follow, self.fit_height) = (v.metronome, v.arrangement_record, v.follow, v.fit_height);
         self.delay_comp = !v.no_delay_comp;
         self.show_pool = v.show_pool;
+        self.show_browser = v.show_browser;
         self.show_devices = v.show_devices && self.dev_track(v.device_target).is_some();
         if self.show_devices {
             self.device_target = v.device_target;
