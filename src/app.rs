@@ -72,6 +72,8 @@ struct NestFrame {
     from_session: bool,
     /// Opened from a playing slot: the song time then, to play on out at the same moment.
     outer_at: Option<(usize, std::time::Instant)>,
+    /// The loop brace (and whether loop is on) outside, while the group shows its own.
+    outer_loop: (Option<Sel>, bool),
 }
 
 /// Which view is showing: the arrangement of clips, or one clip open in the waveform editor.
@@ -784,11 +786,21 @@ impl App {
     /// Put new content into a group clip and re-render it, keeping its trim where possible.
     fn set_group_content(&self, c: &mut Clip, tracks: Vec<Track>) {
         let showed_all = c.trim == 0 && c.len >= c.audio.frames();
-        let audio = Arc::new(self.render_tracks(&tracks, false));
+        let audio = Arc::new(self.group_mix(&tracks, c.loop_points));
         c.peaks = Arc::new(Peaks::build(&audio));
         c.len = if showed_all { audio.frames() } else { c.len.min(audio.frames().saturating_sub(c.trim)) };
         c.audio = audio;
         c.group = Some(Arc::new(tracks));
+    }
+
+    /// A group's mix: its tracks rendered, with silence after them to the end of its loop brace
+    /// (a loop can run past the last clip, as in Live).
+    fn group_mix(&self, tracks: &[Track], brace: Option<Sel>) -> Audio {
+        let mut a = self.render_tracks(tracks, false);
+        if let Some((_, e)) = brace.filter(|&(_, e)| e > a.frames()) {
+            a.channels.iter_mut().for_each(|ch| ch.resize(e, 0.0));
+        }
+        a
     }
 
     /// The mix of a set of tracks, with their volumes and pan (solo wins over mute), as in Live.

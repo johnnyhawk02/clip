@@ -611,10 +611,14 @@ impl App {
         // A Session slot: where its loop is now, to carry on from there inside. One waiting for
         // its launch is placed to reach its start on time; one not launched at all keeps to the
         // song's bars.
+        let (_, _, _, frames) = clip.picture();
+        let brace = clip.loop_points.filter(|_| c >= SLOT).unwrap_or((0, frames.max(1)));
         let in_slot = playing.filter(|_| c >= SLOT).map(|pos| {
             let from = self.session_play.get(t).and_then(|p| p.segments.iter().rev().find(|seg| seg.0 == c - SLOT && seg.2.is_none())).map_or(0, |seg| seg.1);
-            let len = clip.len.max(1) as i64;
-            let inside = (pos as i64 - from as i64).rem_euclid(len) as usize;
+            let inside = match pos.checked_sub(from) {
+                Some(i) => clip.source(i),
+                None => brace.0 + (pos as i64 - from as i64).rem_euclid((brace.1 - brace.0).max(1) as i64) as usize,
+            };
             (pos, inside)
         });
         self.nest.push(NestFrame {
@@ -626,7 +630,15 @@ impl App {
             view_len: self.arr_view_len,
             from_session: self.show_session,
             outer_at: in_slot.map(|(pos, _)| (pos, std::time::Instant::now())),
+            outer_loop: (self.arr_loop, self.looping),
         });
+        // As a Session clip in Live's clip view, a group from a slot shows its loop brace: what
+        // the slot plays round. Opened from the song, it starts with none.
+        if c >= SLOT {
+            (self.arr_loop, self.looping) = (Some(brace), true);
+        } else {
+            self.arr_loop = None;
+        }
         // A group opens as its own arrangement, whichever view it was launched from.
         self.show_session = false;
         self.full_edit = false;
@@ -640,10 +652,11 @@ impl App {
             let inside = (pos.saturating_sub(clip.start) + clip.trim).min(self.arrangement_frames());
             self.go_to_frame(inside);
         } else if let Some((_, inside)) = in_slot {
-            // It loops inside as it did in its slot.
-            let end = self.arrangement_frames();
+            // It loops inside as it did in its slot, round its brace.
+            let end = self.arrangement_frames().max(brace.1);
             self.arr_cursor = inside.min(end);
-            self.player.play_from(0, end, inside.min(end.saturating_sub(1)), true);
+            self.play_origin = brace.0;
+            self.player.play_from(brace.0, brace.1.min(end), inside, true);
         }
         self.status = format!("Inside {} — ⌘Return or the path above goes back up", clip.name);
     }
@@ -654,6 +667,10 @@ impl App {
         let playing = self.player.is_playing().then(|| self.player.position());
         let inner = std::mem::replace(&mut self.tracks, f.tracks);
         if let Some(mut c) = self.clip((f.track, f.clip)).cloned() {
+            if f.clip >= SLOT {
+                // The brace set inside is what the slot plays round now.
+                c.loop_points = self.arr_loop.filter(|&(s, e)| e > s);
+            }
             self.set_group_content(&mut c, inner);
             if f.clip >= SLOT {
                 c = session::slot_clip(c);
@@ -663,6 +680,7 @@ impl App {
             }
         }
         self.active = f.active;
+        (self.arr_loop, self.looping) = f.outer_loop;
         self.show_session = f.from_session;
         self.status = "Closed the group".into();
         if f.clip >= SLOT {

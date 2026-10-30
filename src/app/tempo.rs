@@ -73,13 +73,12 @@ impl App {
                     let mut inner = (*g).clone();
                     if self.refit_tracks(&mut inner, tempo, r, moved, true) {
                         // Its trim and loop stay on the same beats of the new mix.
-                        let old = c.audio.frames().max(1);
-                        let showed_all = c.trim == 0 && c.len >= old;
-                        let audio = Arc::new(self.render_tracks(&inner, false));
-                        let f = audio.frames() as f64 / old as f64;
+                        let showed_all = c.trim == 0 && c.len >= c.audio.frames();
+                        let f = content_end(&inner) as f64 / content_end(&g).max(1) as f64;
                         let sc = |x: usize| (x as f64 * f).round() as usize;
                         (c.trim, c.len) = (sc(c.trim), sc(c.len).max(1));
                         c.loop_points = c.loop_points.map(|(a, b)| (sc(a), sc(b)));
+                        let audio = Arc::new(self.group_mix(&inner, c.loop_points));
                         if showed_all {
                             (c.trim, c.len) = (0, audio.frames().max(1));
                         }
@@ -172,4 +171,9 @@ fn off_tempo(tracks: &[Track], tempo: f64) -> bool {
         && tracks.iter().flat_map(|t| t.clips.iter().chain(t.slots.iter().flatten())).any(|c| {
             c.warp.as_ref().is_some_and(|w| (w.tempo - tempo).abs() >= 1e-6) || c.group.as_ref().is_some_and(|g| off_tempo(g, tempo))
         })
+}
+
+/// Where the last clip in `tracks` ends.
+fn content_end(tracks: &[Track]) -> usize {
+    tracks.iter().flat_map(|t| t.clips.iter().map(|c| c.end())).max().unwrap_or(0)
 }

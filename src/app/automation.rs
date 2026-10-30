@@ -104,9 +104,14 @@ impl App {
                     // loop:A-B sets the arrangement loop from bar A to bar B (counting from 0) and turns Loop on.
                     "loop" => {
                         let (a, b) = arg.split_once('-').unwrap_or(("0", "1"));
-                        let bar = |t: &str| (t.parse::<f64>().unwrap_or(0.0) * self.bar_frames()) as usize;
+                        let bf = self.bar_frames();
+                        let bar = |t: &str| (t.parse::<f64>().unwrap_or(0.0) * bf) as usize;
                         self.arr_loop = Some((bar(a), bar(b)));
                         self.looping = true;
+                        // As letting go of a dragged brace: playing on round it.
+                        if self.player.is_playing() {
+                            self.player.set_range(bar(a), bar(b), true);
+                        }
                     }
                     "deselect" => {
                         self.sel_clip = None;
@@ -226,7 +231,7 @@ impl App {
                     // pos: print where the transport is, and what it plays.
                     "pos" => {
                         let s = self.player.shared.lock().unwrap();
-                        eprintln!("pos {arg} playing {} at {:.0} range {}..{} looping {} nest {} session {:?}", s.playing, s.pos, s.start, s.end, s.looping, self.nest.len(), self.session_play.iter().map(|p| p.segments.clone()).collect::<Vec<_>>());
+                        eprintln!("pos {arg} playing {} at {:.0} range {}..{} looping {} nest {} brace {:?} session {:?}", s.playing, s.pos, s.start, s.end, s.looping, self.nest.len(), self.arr_loop, self.session_play.iter().map(|p| p.segments.clone()).collect::<Vec<_>>());
                     }
                     "launch" => {
                         // launch:t|s launches the clip in track t's slot s.
@@ -239,7 +244,7 @@ impl App {
                             for (si, c) in tr.slots.iter().enumerate() {
                                 if let Some(c) = c {
                                     let peak = c.audio.channels.iter().flatten().fold(0.0f32, |m, v| m.max(v.abs()));
-                                    eprintln!("slot t{ti} s{si} {:?} len {} frames {} trim {} looping {} warp {} peak {peak:.3} active {} gain {}", c.name, c.len, c.audio.frames(), c.trim, c.looping, c.warp.is_some(), c.active, c.gain);
+                                    eprintln!("slot t{ti} s{si} {:?} len {} frames {} trim {} looping {} loop {:?} warp {} peak {peak:.3} active {} gain {}", c.name, c.len, c.audio.frames(), c.trim, c.looping, c.loop_points, c.warp.is_some(), c.active, c.gain);
                                 }
                             }
                         }

@@ -135,6 +135,20 @@ impl Player {
         self.shared.lock().unwrap().playing = false;
     }
 
+    /// Play on within `start..end` from where it is now: from before it, on into it (as Live);
+    /// from past its end, round from `start`.
+    pub fn set_range(&self, start: usize, end: usize, looping: bool) {
+        let mut s = self.shared.lock().unwrap();
+        let end = end.min(s.source.frames());
+        if start >= end {
+            return;
+        }
+        (s.start, s.end, s.looping) = (start, end, looping);
+        if s.pos >= end as f64 {
+            s.pos = start as f64;
+        }
+    }
+
     pub fn set_looping(&self, looping: bool) {
         self.shared.lock().unwrap().looping = looping;
     }

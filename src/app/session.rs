@@ -137,11 +137,15 @@ pub(super) struct TrackPlay {
 #[derive(Clone, Copy)]
 pub(super) struct SlotDrag(pub(super) usize, pub(super) usize);
 
-/// A clip made ready for a slot: it loops its whole audio, from the start.
+/// A clip made ready for a slot: it loops its whole audio, from the start. A group keeps the
+/// loop brace set inside it, and plays round that.
 pub(super) fn slot_clip(mut c: Clip) -> Clip {
     let (_, _, _, frames) = c.picture();
     (c.start, c.trim, c.looping) = (0, 0, true);
-    c.loop_points = None;
+    c.loop_points = c.loop_points.filter(|&(s, e)| c.group.is_some() && e > s && s < frames);
+    if let Some((s, _)) = c.loop_points {
+        c.trim = s;
+    }
     c.len = frames.max(1);
     c
 }
