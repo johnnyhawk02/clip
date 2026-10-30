@@ -58,6 +58,13 @@ type Sel = (usize, usize);
 /// Undo history is capped by memory rather than step count, since each step is a full copy.
 const UNDO_BUDGET_BYTES: usize = 2 << 30;
 
+/// What Edit ▸ Rename renames: the selected clip (or Session clip), else the selected locator.
+#[derive(Clone, Copy)]
+enum Renaming {
+    Clip((usize, usize)),
+    Locator(usize),
+}
+
 /// One level up from the arrangement being shown: the parent's tracks, and which of its clips
 /// is the open group.
 #[derive(Clone)]
@@ -222,7 +229,8 @@ pub struct App {
     /// Dragging this locator along the ruler.
     loc_drag: Option<usize>,
     /// The Rename Locator box: which locator and the name being typed.
-    loc_rename: Option<(usize, String)>,
+    /// Edit ▸ Rename (⌘R): what is being renamed, and the name typed so far.
+    loc_rename: Option<(Renaming, String)>,
     /// Layers share all the song view's height (H) instead of stopping at their usual size.
     fit_height: bool,
     /// Edit ▸ Copy / Cut Time: a stretch of every layer (length, each layer's pieces from 0).

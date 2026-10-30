@@ -101,14 +101,27 @@ impl App {
         self.dirty = true;
     }
 
-    /// Control ▸ Rename Locator (⌘R): a small box to type the selected locator's new name.
+    /// What Edit ▸ Rename (⌘R) would rename now: the selected clip (a Session clip in the Session
+    /// view), else the selected locator, as in Live.
+    pub(super) fn rename_target(&self) -> Option<Renaming> {
+        let clip = if self.show_session && self.view == View::Arrangement && self.nest.is_empty() {
+            self.sel_slot.map(|(t, s)| (t, SLOT + s))
+        } else {
+            self.sel_clip
+        };
+        clip.filter(|&p| self.clip(p).is_some())
+            .map(Renaming::Clip)
+            .or(self.selected_locator.filter(|&i| i < self.locators.len()).map(Renaming::Locator))
+    }
+
+    /// Edit ▸ Rename (⌘R): a small box to type the selected clip's or locator's new name.
     pub(super) fn rename_locator_dialog(&mut self, ctx: &egui::Context) {
-        let Some((i, mut name)) = self.loc_rename.take() else { return };
+        let Some((what, mut name)) = self.loc_rename.take() else { return };
         let mut ok = false;
         let mut cancel = false;
         let resp = dialog_modal("rename-locator").show(ctx, |ui| {
             ui.set_width(300.0);
-            dialog_header(ui, "Rename Locator", "");
+            dialog_header(ui, if matches!(what, Renaming::Clip(_)) { "Rename Clip" } else { "Rename Locator" }, "");
             let edit = ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY));
             edit.request_focus();
             ok = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -120,13 +133,25 @@ impl App {
             return;
         }
         if ok {
-            if i < self.locators.len() && !name.trim().is_empty() {
-                self.push_undo("Rename Locator");
-                self.locators[i].1 = name.trim().to_string();
-                self.dirty = true;
+            let name = name.trim().to_string();
+            match what {
+                _ if name.is_empty() => {}
+                Renaming::Clip(p) if self.clip(p).is_some() => {
+                    self.push_undo("Rename Clip");
+                    if let Some(c) = self.clip_mut(p) {
+                        c.name = name;
+                    }
+                    self.dirty = true;
+                }
+                Renaming::Locator(i) if i < self.locators.len() => {
+                    self.push_undo("Rename Locator");
+                    self.locators[i].1 = name;
+                    self.dirty = true;
+                }
+                _ => {}
             }
             return;
         }
-        self.loc_rename = Some((i, name));
+        self.loc_rename = Some((what, name));
     }
 }

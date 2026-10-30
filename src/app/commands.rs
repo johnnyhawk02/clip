@@ -15,7 +15,7 @@ impl App {
                 Action::Loop | Action::ShowTools | Action::ShowControls | Action::ShowInfo | Action::ShowCues | Action::ShowRegions | Action::ShowPool | Action::Crossfeed | Action::Follow | Action::Metronome | Action::DockPalette | Action::RecordToSong => true,
                 Action::Continue | Action::AddLocator => doc,
                 Action::PrevLocator | Action::NextLocator => !self.locators.is_empty(),
-                Action::RenameLocator => self.selected_locator.is_some(),
+                Action::RenameLocator => self.rename_target().is_some(),
                 Action::GroupClips if self.show_session => self.sel_slot.is_some(),
                 Action::Quantize | Action::ClipOnOff => has_clip,
                 Action::ShowSpectrum | Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
@@ -510,7 +510,15 @@ impl App {
             Action::Quantize => self.quantize(),
             Action::ClipOnOff => self.toggle_clips_on(),
             Action::AddLocator => self.add_locator(self.arr_cursor),
-            Action::RenameLocator => self.loc_rename = self.selected_locator.and_then(|i| self.locators.get(i).map(|l| (i, l.1.clone()))),
+            Action::RenameLocator => {
+                self.loc_rename = self.rename_target().map(|r| {
+                    let name = match r {
+                        Renaming::Clip(p) => self.clip(p).map(|c| c.name.clone()),
+                        Renaming::Locator(i) => self.locators.get(i).map(|l| l.1.clone()),
+                    };
+                    (r, name.unwrap_or_default())
+                })
+            }
             Action::PrevLocator => self.jump_locator(false),
             Action::NextLocator => self.jump_locator(true),
             Action::Continue => self.continue_play(),

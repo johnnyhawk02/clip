@@ -209,7 +209,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Sub("Export Format", &[Do(FormatPcm8), Do(FormatPcm16), Do(FormatPcm24), Do(FormatFloat32), Separator, Do(Dither)]),
         ],
     ),
-    ("Edit", &[Do(Undo), Do(Redo), Separator, Do(Cut), Do(Copy), Do(Paste), Do(Delete), Separator, Do(CutTime), Do(CopyTime), Do(PasteTime), Do(DuplicateTime), Do(DeleteTime), Do(InsertTime), Separator, Do(SelectAll), Do(SelectNone)]),
+    ("Edit", &[Do(Undo), Do(Redo), Separator, Do(Cut), Do(Copy), Do(Paste), Do(Delete), Do(RenameLocator), Separator, Do(CutTime), Do(CopyTime), Do(PasteTime), Do(DuplicateTime), Do(DeleteTime), Do(InsertTime), Separator, Do(SelectAll), Do(SelectNone)]),
     (
         "Clip",
         &[
@@ -259,7 +259,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Do(CollapseTrack),
         ],
     ),
-    ("Control", &[Do(PlayPause), Do(Continue), Do(Stop), Do(Loop), Do(Follow), Do(Metronome), Do(RecordToSong), Separator, Do(GoStart), Do(GoEnd), Separator, Do(AddLocator), Do(RenameLocator), Do(PrevLocator), Do(NextLocator), Separator, Do(Crossfeed)]),
+    ("Control", &[Do(PlayPause), Do(Continue), Do(Stop), Do(Loop), Do(Follow), Do(Metronome), Do(RecordToSong), Separator, Do(GoStart), Do(GoEnd), Separator, Do(AddLocator), Do(PrevLocator), Do(NextLocator), Separator, Do(Crossfeed)]),
     ("View", &[Do(ZoomIn), Do(ZoomOut), Do(ZoomSel), Do(ZoomBack), Do(ZoomFit), Separator, Do(ToolSelect), Do(ToolSplit)]),
     // Everything from the sound-editor days, out of the way.
     (
@@ -490,7 +490,7 @@ impl Action {
             Continue => "Continue Playing",
             Follow => "Follow",
             AddLocator => "Add Locator",
-            RenameLocator => "Rename Locator…",
+            RenameLocator => "Rename…",
             Metronome => "Metronome",
             RecordToSong => "Arrangement Record",
             PrevLocator => "Previous Locator",
