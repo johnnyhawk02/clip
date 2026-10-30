@@ -331,6 +331,7 @@ impl App {
             Action::DeviceChorus => self.open_device_fx("Chorus"),
             Action::DevicePultec => self.open_device_fx("Pultec"),
             Action::DeviceRiser => self.open_device_fx("Riser"),
+            Action::DeviceTame => self.open_device_fx("Tame"),
             Action::Flanger => self.dialog = Some(Dialog::Flanger),
             Action::Smooth => self.dialog = Some(Dialog::Smooth),
             Action::NoiseGate => self.dialog = Some(Dialog::NoiseGate),

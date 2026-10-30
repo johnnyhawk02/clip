@@ -197,6 +197,14 @@ impl Player {
         }
     }
 
+    /// Device `i` of track `t`: a Tame's cut curve and level right now, when running.
+    pub fn tame_view(&self, t: usize, i: usize) -> Option<([f32; crate::tame::CURVE], [f32; crate::tame::CURVE])> {
+        match &self.shared.lock().unwrap().source {
+            Source::Song(song) => song.layers.iter().chain(&song.returns).find(|l| l.track == t)?.device_state.lock().unwrap().get(i)?.as_ref()?.tame_view(),
+            Source::Buffer(_) => None,
+        }
+    }
+
     pub fn take_peaks(&self) -> [f32; 2] {
         std::mem::take(&mut self.shared.lock().unwrap().peak)
     }

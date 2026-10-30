@@ -10,6 +10,7 @@ use crate::phaser;
 use crate::chorus;
 use crate::pultec;
 use crate::riser;
+use crate::tame;
 
 /// Width of one device panel.
 const DEV_W: f32 = 560.0;
@@ -79,6 +80,7 @@ impl App {
         let others: Vec<(usize, String)> = self.tracks.iter().enumerate().filter(|(i, _)| *i != t).map(|(i, tr)| (i, tr.name.clone())).collect();
         let playing = self.player.is_playing();
         let cuts: Vec<_> = (0..chain.len()).map(|i| self.player.spacer_cuts(t, i).filter(|_| playing)).collect();
+        let tames: Vec<_> = (0..chain.len()).map(|i| self.player.tame_view(t, i).filter(|_| playing)).collect();
         let mut remove = None;
         let mut add = None;
         let mut active = false;
@@ -127,6 +129,7 @@ impl App {
                             Device::Chorus(s) => chorus_panel(&mut inner, s),
                             Device::Pultec(s) => pultec_panel(&mut inner, s),
                             Device::Riser(s) => riser_panel(&mut inner, s, false),
+                            Device::Tame(s) => tame_panel(&mut inner, s, tames[i]),
                         };
                     }
                     // + Add Effect, as Live's "Drop Audio Effects Here".
@@ -166,7 +169,7 @@ impl App {
         if !active {
             self.device_edit = false;
         }
-        if cuts.iter().any(|c| c.is_some()) {
+        if cuts.iter().any(|c| c.is_some()) || tames.iter().any(|c| c.is_some()) {
             ui.ctx().request_repaint();
         }
     }
@@ -241,6 +244,98 @@ fn spacer_panel(ui: &mut egui::Ui, s: &mut spacer::Settings, others: &[(usize, S
         let deepest = cuts.map_or(0.0, |c| c.iter().flatten().fold(0.0f32, |a, &v| a.max(v)));
         let label = if cuts.is_some() { format!("-{deepest:.1} dB") } else { "play to see\nthe cuts".into() };
         p.text(r.center_bottom() - Vec2::new(0.0, 6.0), Align2::CENTER_BOTTOM, label, FontId::proportional(9.5), muted());
+        p.text(r.left_top() + Vec2::new(3.0, 2.0), Align2::LEFT_TOP, "cut", FontId::proportional(9.0), muted());
+    }
+    active
+}
+
+/// Tame's controls, and beside them the cut it's making across the spectrum (while playing; in
+/// the print dialog, `view` is `None` and the controls take the whole width).
+pub(super) fn tame_panel(ui: &mut egui::Ui, s: &mut tame::Settings, view: Option<([f32; tame::CURVE], [f32; tame::CURVE])>) -> bool {
+    let mut active = false;
+    let full = ui.max_rect();
+    let live = full.width() > 400.0 && full.height() < 400.0;
+    let side = Rect::from_min_max(Pos2::new(full.left() + 330.0, full.top()), full.max);
+    ui.spacing_mut().slider_width = 120.0;
+    ui.spacing_mut().interact_size.y = 18.0;
+    ui.spacing_mut().item_spacing.y = 2.0;
+    let left = Rect::from_min_max(full.min, Pos2::new(side.left() - 10.0, full.bottom()));
+    let mut controls = |ui: &mut egui::Ui| egui::Grid::new("tamegrid").num_columns(2).spacing(Vec2::new(10.0, 1.0)).show(ui, |ui| {
+        ui.label("Depth");
+        active |= pct(ui, &mut s.depth);
+        ui.end_row();
+        ui.label("Detail").on_hover_text("Low: broad, gentle cuts. High: only narrow, sharp resonances");
+        active |= pct(ui, &mut s.detail);
+        ui.end_row();
+        ui.label("Speed").on_hover_text("How fast the cuts come and go");
+        active |= pct(ui, &mut s.speed);
+        ui.end_row();
+        ui.label("Low / High");
+        ui.horizontal(|ui| {
+            let a = ui.add(egui::DragValue::new(&mut s.low).range(20.0..=5000.0).speed(2.0).suffix(" Hz").fixed_decimals(0));
+            let b = ui.add(egui::DragValue::new(&mut s.high).range(200.0..=20000.0).speed(20.0).suffix(" Hz").fixed_decimals(0));
+            active |= busy(&a) || busy(&b);
+        });
+        ui.end_row();
+        ui.label("Mode");
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut s.hard, false, "Soft").on_hover_text("Resonances at any level");
+            ui.radio_value(&mut s.hard, true, "Hard").on_hover_text("Only resonances louder than the threshold");
+            ui.add_space(12.0);
+            ui.checkbox(&mut s.delta, "Delta").on_hover_text("Hear only what's being taken away");
+        });
+        ui.end_row();
+        if s.hard {
+            ui.label("Threshold");
+            let w = ui.add(egui::Slider::new(&mut s.threshold, -60.0..=0.0).suffix(" dB").fixed_decimals(1));
+            active |= busy(&w);
+            ui.end_row();
+        }
+        ui.label("Dry / Wet");
+        active |= pct(ui, &mut s.mix);
+        ui.end_row();
+    });
+    // In the print dialog the controls flow on; in the device view the curve sits beside them.
+    if live {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| controls(ui));
+    } else {
+        controls(ui);
+    }
+    // The cut across the spectrum, 20 Hz to 20 kHz (log): the level in grey, the cut hanging
+    // from the top in black, 0 to -12 dB; outside Low-High shaded.
+    if live && side.width() > 60.0 && side.height() > 30.0 {
+        let r = side;
+        let p = ui.painter();
+        p.rect_filled(r, 3.0, gray(238));
+        let x_of = |hz: f32| r.left() + r.width() * ((hz.max(20.0) / 20.0).log10() / 3.0).clamp(0.0, 1.0);
+        let (lo, hi) = (x_of(s.low), x_of(s.high));
+        p.rect_filled(Rect::from_min_max(r.min, Pos2::new(lo, r.bottom())), 3.0, gray(228));
+        p.rect_filled(Rect::from_min_max(Pos2::new(hi, r.top()), r.max), 3.0, gray(228));
+        for hz in [100.0, 1000.0, 10000.0] {
+            let x = x_of(hz);
+            p.line_segment([Pos2::new(x, r.top()), Pos2::new(x, r.bottom())], Stroke::new(1.0, gray(225)));
+            let label = if hz >= 1000.0 { format!("{}k", hz as u32 / 1000) } else { format!("{}", hz as u32) };
+            p.text(Pos2::new(x + 2.0, r.bottom() - 2.0), Align2::LEFT_BOTTOM, label, FontId::proportional(9.0), muted());
+        }
+        let x_at = |j: usize| r.left() + r.width() * j as f32 / (tame::CURVE - 1) as f32;
+        if let Some((curve, level)) = view {
+            // Level: -90 to 0 dB up the height.
+            let pts: Vec<Pos2> = (0..tame::CURVE).map(|j| Pos2::new(x_at(j), r.bottom() - r.height() * ((level[j] + 90.0) / 90.0).clamp(0.0, 1.0))).collect();
+            p.add(egui::Shape::line(pts, Stroke::new(1.0, gray(170))));
+            let depth = |c: f32| r.top() + 2.0 + (c / tame::MAX_CUT).clamp(0.0, 1.0) * (r.height() * 0.6);
+            let mut fill = vec![Pos2::new(x_at(0), r.top() + 2.0)];
+            fill.extend((0..tame::CURVE).map(|j| Pos2::new(x_at(j), depth(curve[j]))));
+            fill.push(Pos2::new(x_at(tame::CURVE - 1), r.top() + 2.0));
+            for w in fill.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                p.add(egui::Shape::convex_polygon(vec![Pos2::new(a.x, r.top() + 2.0), a, b, Pos2::new(b.x, r.top() + 2.0)], gray(120), Stroke::NONE));
+            }
+            p.add(egui::Shape::line(fill[1..fill.len() - 1].to_vec(), Stroke::new(1.5, ink())));
+            let deepest = curve.iter().fold(0.0f32, |a, &v| a.max(v));
+            p.text(r.right_bottom() - Vec2::new(4.0, 16.0), Align2::RIGHT_BOTTOM, format!("-{deepest:.1} dB"), FontId::proportional(9.5), muted());
+        } else {
+            p.text(r.center(), Align2::CENTER_CENTER, "play to see the cuts", FontId::proportional(9.5), muted());
+        }
         p.text(r.left_top() + Vec2::new(3.0, 2.0), Align2::LEFT_TOP, "cut", FontId::proportional(9.0), muted());
     }
     active
