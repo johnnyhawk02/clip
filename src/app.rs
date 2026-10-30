@@ -42,12 +42,14 @@ mod clipview;
 mod locators;
 mod session;
 mod deviceview;
+mod mixer;
 
 use self::clip::*;
 use self::chop::*;
 use self::dialogs::*;
 use self::files::*;
 use self::look::*;
+use self::mixer::*;
 use self::automation::Automation;
 use self::autoarrange::{PoolDrag, PoolLoop};
 use self::session::{TrackPlay, SLOT};

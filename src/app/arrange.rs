@@ -388,77 +388,66 @@ impl App {
             }
             let ctx = ui.ctx().clone();
             bg.context_menu(|ui| self.track_menu(ui, ti, &ctx));
-            let inner = r.shrink2(Vec2::new(10.0, 6.0));
-            ui.scope_builder(egui::UiBuilder::new().max_rect(inner), |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
-                let t = &mut self.tracks[ti];
-                let name = ui.add(egui::TextEdit::singleline(&mut t.name).desired_width(inner.width()).font(egui::TextStyle::Body));
-                if name.gained_focus() {
-                    activate = Some(ti);
+            // As Live's: the name on the track's colour, then the activator, Solo, volume and pan
+            // boxes, the sends when the lane is tall enough, and the level meter down the right edge.
+            let level = self.track_meter.get(ti).copied().unwrap_or(0.0);
+            let meter = Rect::from_min_max(Pos2::new(r.right() - 9.0, r.top() + 5.0), Pos2::new(r.right() - 5.0, r.bottom() - 5.0));
+            vmeter(ui.painter(), meter, level);
+            let inner = Rect::from_min_max(r.min + Vec2::new(10.0, 5.0), Pos2::new(meter.left() - 6.0, r.bottom() - 5.0));
+            let t = &mut self.tracks[ti];
+            let name_r = Rect::from_min_size(inner.min, Vec2::new(inner.width(), inner.height().min(20.0)));
+            ui.painter().rect_filled(name_r, 2.0, live_color(t.color));
+            let mut name_ui = ui.new_child(egui::UiBuilder::new().max_rect(name_r).id_salt(("track_name", ti)));
+            let name = name_ui.add(
+                egui::TextEdit::singleline(&mut t.name)
+                    .frame(egui::Frame::NONE)
+                    .margin(Vec2::new(5.0, 2.0))
+                    .desired_width(name_r.width())
+                    .font(egui::TextStyle::Body)
+                    .text_color(DARK_TEXT),
+            );
+            if name.gained_focus() {
+                activate = Some(ti);
+            }
+            const ROW: f32 = 18.0;
+            if inner.height() > 44.0 {
+                let y = name_r.bottom() + 5.0;
+                let act = Rect::from_min_size(Pos2::new(inner.left(), y), Vec2::new(22.0, ROW));
+                let solo = Rect::from_min_size(Pos2::new(act.right() + 3.0, y), Vec2::new(22.0, ROW));
+                let pan = Rect::from_min_max(Pos2::new(inner.right() - 34.0, y), Pos2::new(inner.right(), y + ROW));
+                let vol = Rect::from_min_max(Pos2::new(solo.right() + 6.0, y), Pos2::new(pan.left() - 3.0, y + ROW));
+                let on = !t.mute;
+                if mix_button(ui, act, ui.scope_id().with(("track_act", ti)), &(ti + 1).to_string(), on, ACTIVATOR, if on { "Track on (click to mute)" } else { "Track muted (click to turn on)" }) {
+                    t.mute = !t.mute;
+                    changed = true;
                 }
-                if inner.height() > 44.0 {
-                    ui.horizontal(|ui| {
-                        // Live's track activator (its number, lit while the track plays) and Solo.
-                        let (act, act_r) = ui.allocate_exact_size(Vec2::new(22.0, 20.0), Sense::click());
-                        let on = !t.mute;
-                        ui.painter().rect(act, 3.0, if on { ink() } else { Color32::TRANSPARENT }, Stroke::new(1.0, ink()), egui::StrokeKind::Inside);
-                        ui.painter().text(act.center(), Align2::CENTER_CENTER, (ti + 1).to_string(), FontId::proportional(11.0), if on { gray(255) } else { ink() });
-                        if act_r.on_hover_text(if on { "Track on (click to mute)" } else { "Track muted (click to turn on)" }).clicked() {
-                            t.mute = !t.mute;
-                            changed = true;
-                        }
-                        if ui.add(Button::new("S").selected(t.solo).min_size(Vec2::new(22.0, 20.0))).on_hover_text("Solo").clicked() {
-                            t.solo = !t.solo;
-                            changed = true;
-                        }
-                        ui.spacing_mut().slider_width = (inner.width() - 60.0).max(30.0);
-                        let vol = ui.add(egui::Slider::new(&mut t.gain, 0.0..=2.0).show_value(false)).on_hover_text(format!("Volume {:.0}%", t.gain * 100.0));
-                        if vol.drag_stopped() || (vol.changed() && !vol.dragged()) {
-                            changed = true;
-                        }
-                    });
+                if mix_button(ui, solo, ui.scope_id().with(("track_solo", ti)), "S", t.solo, SOLO, "Solo") {
+                    t.solo = !t.solo;
+                    changed = true;
                 }
-                if inner.height() > 70.0 {
-                    ui.horizontal(|ui| {
-                        let (sw, swr) = ui.allocate_exact_size(Vec2::new(22.0, 20.0), Sense::click());
-                        ui.painter().rect_filled(sw.shrink(3.0), 3.0, live_color(t.color));
-                        let swr = swr.on_hover_text("Track colour");
-                        if let Some(i) = egui::Popup::menu(&swr).show(|ui| color_picker(ui, t.color)).and_then(|r| r.inner) {
-                            t.color = i;
-                            changed = true;
-                        }
-                        ui.label(egui::RichText::new("Pan").size(11.0).color(muted()));
-                        ui.spacing_mut().slider_width = (inner.width() - 64.0).max(30.0);
-                        let tip = match t.pan {
-                            p if p.abs() < 0.01 => "Pan centre".to_string(),
-                            p if p < 0.0 => format!("Pan {:.0}% left", -p * 100.0),
-                            p => format!("Pan {:.0}% right", p * 100.0),
-                        };
-                        let pan = ui.add(egui::Slider::new(&mut t.pan, -1.0..=1.0).show_value(false)).on_hover_text(tip);
-                        if pan.double_clicked() {
-                            t.pan = 0.0;
-                            changed = true;
-                        }
-                        if pan.drag_stopped() || (pan.changed() && !pan.dragged()) {
-                            changed = true;
-                        }
-                    });
+                let (ch, rel) = value_box(ui, vol, ui.scope_id().with(("track_vol", ti)), &mut t.gain, BoxKind::Volume, "Volume (dB; double-click for 0 dB)");
+                live |= ch;
+                changed |= rel;
+                let (ch, rel) = value_box(ui, pan, ui.scope_id().with(("track_pan", ti)), &mut t.pan, BoxKind::Pan, "Pan (double-click for centre)");
+                live |= ch;
+                changed |= rel;
+                // Sends to the return tracks, a box each under their letter.
+                if inner.height() > 68.0 && n_ret > 0 {
+                    let y = y + ROW + 5.0;
+                    t.sends.resize(n_ret, 0.0);
+                    let w = ((inner.width() + 3.0) / n_ret as f32 - 3.0).min(48.0);
+                    for (k, sv) in t.sends.iter_mut().enumerate() {
+                        let letter = ((b'A' + (k % 26) as u8) as char).to_string();
+                        let x = inner.left() + k as f32 * (w + 3.0);
+                        let label = Rect::from_min_size(Pos2::new(x, y), Vec2::new(10.0, ROW));
+                        ui.painter().text(label.center(), Align2::CENTER_CENTER, &letter, FontId::proportional(9.5), muted());
+                        let b = Rect::from_min_max(Pos2::new(label.right() + 1.0, y), Pos2::new(x + w, y + ROW));
+                        let (ch, rel) = value_box(ui, b, ui.scope_id().with(("send", ti, k)), sv, BoxKind::Send, &format!("Send {letter} (double-click for none)"));
+                        live |= ch;
+                        changed |= rel;
+                    }
                 }
-                // Sends to the return tracks, when the lane is tall enough.
-                if inner.height() > 104.0 && n_ret > 0 {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("Sends").size(11.0).color(muted()));
-                        t.sends.resize(n_ret, 0.0);
-                        for (r, s) in t.sends.iter_mut().enumerate() {
-                            let (k, _) = ui.allocate_exact_size(Vec2::new(24.0, 30.0), Sense::hover());
-                            let letter = ((b'A' + (r % 26) as u8) as char).to_string();
-                            let (ch, rel) = send_knob(ui, k.center() - Vec2::new(0.0, 4.0), ui.scope_id().with(("send", ti, r)), s, &letter);
-                            live |= ch;
-                            changed |= rel;
-                        }
-                    });
-                }
-            });
+            }
         }
         if live && !changed {
             self.refresh_playback();
@@ -724,7 +713,7 @@ impl App {
     /// The arrangement: track headers on the left, clips on track lanes along a timeline.
     pub(super) fn arrangement(&mut self, ui: &mut egui::Ui) {
         let full = ui.available_rect_before_wrap();
-        let header_w = 150.0;
+        let header_w = 184.0;
         let ruler_h = 22.0 + LOOP_H + LOC_H;
         let ruler = Rect::from_min_max(Pos2::new(full.left() + header_w, full.top()), Pos2::new(full.right(), full.top() + ruler_h));
         let scroll = Rect::from_min_max(Pos2::new(full.left() + header_w, full.bottom() - 15.0), full.max);
@@ -1243,13 +1232,15 @@ impl App {
         }
     }
 
-    /// The return tracks, one row each above the master: name (click for its effects), on/off,
-    /// level, volume and pan.
+    /// The return tracks, one row each above the Main track: on/off, name (click for its
+    /// effects), volume, pan and level.
     fn return_strips(&mut self, ui: &mut egui::Ui, r: Rect, header_w: f32) {
         if r.height() < 1.0 {
             return;
         }
         let mut changed = false;
+        // Heard as they're dragged; the project counts as changed once let go.
+        let mut live = false;
         let mut show = None;
         let mut delete = None;
         for (i, ret) in self.returns.iter_mut().enumerate() {
@@ -1258,21 +1249,24 @@ impl App {
             p.rect_filled(row, 0.0, gray(240));
             p.line_segment([row.left_top(), row.right_top()], Stroke::new(1.0, gray(205)));
             p.line_segment([Pos2::new(row.left() + header_w - 1.0, row.top()), Pos2::new(row.left() + header_w - 1.0, row.bottom())], Stroke::new(1.0, rule()));
-            // Header: the activator (its letter) and name.
+            // Header, as a track's: the activator (its letter), name, volume and pan, and the level meter.
             let letter = ((b'A' + (i % 26) as u8) as char).to_string();
-            let act = Rect::from_min_size(Pos2::new(row.left() + 10.0, row.center().y - 9.0), Vec2::new(22.0, 18.0));
-            let ar = ui.interact(act, ui.scope_id().with(("ret_act", i)), Sense::click());
+            let level = self.return_meter.get(i).copied().unwrap_or(0.0);
+            let right = row.left() + header_w - 1.0;
+            vmeter(ui.painter(), Rect::from_min_max(Pos2::new(right - 9.0, row.top() + 5.0), Pos2::new(right - 5.0, row.bottom() - 5.0)), level);
+            let y = row.center().y - 9.0;
+            let act = Rect::from_min_size(Pos2::new(row.left() + 10.0, y), Vec2::new(22.0, 18.0));
+            let pan = Rect::from_min_size(Pos2::new(right - 15.0 - 34.0, y), Vec2::new(34.0, 18.0));
+            let vol = Rect::from_min_max(Pos2::new(pan.left() - 47.0, y), Pos2::new(pan.left() - 3.0, y + 18.0));
             let on = !ret.mute;
-            ui.painter().rect(act, 3.0, if on { ink() } else { Color32::TRANSPARENT }, Stroke::new(1.0, ink()), egui::StrokeKind::Inside);
-            ui.painter().text(act.center(), Align2::CENTER_CENTER, &letter, FontId::proportional(11.0), if on { gray(255) } else { ink() });
-            if ar.on_hover_text("Return track on / mute").clicked() {
+            if mix_button(ui, act, ui.scope_id().with(("ret_act", i)), &letter, on, ACTIVATOR, "Return track on / mute") {
                 ret.mute = !ret.mute;
                 changed = true;
             }
-            let name = Rect::from_min_max(Pos2::new(act.right() + 6.0, row.top()), Pos2::new(row.left() + header_w - 6.0, row.bottom()));
+            let name = Rect::from_min_max(Pos2::new(act.right() + 6.0, row.top()), Pos2::new(vol.left() - 4.0, row.bottom()));
             let nr = ui.interact(name, ui.scope_id().with(("ret_name", i)), Sense::click());
             let shown = ret.name.strip_prefix(&format!("{letter} ")).unwrap_or(&ret.name).to_string();
-            ui.painter().text(name.left_center(), Align2::LEFT_CENTER, shown, FontId::proportional(12.0), if nr.hovered() { ink() } else { muted() });
+            ui.painter().with_clip_rect(name).text(name.left_center(), Align2::LEFT_CENTER, shown, FontId::proportional(12.0), if nr.hovered() { ink() } else { muted() });
             nr.context_menu(|ui| {
                 if ui.button("Delete Return Track").clicked() {
                     ui.close();
@@ -1282,27 +1276,15 @@ impl App {
             if nr.on_hover_text("Show this return track's effects (right-click to delete it)").clicked() {
                 show = Some(i);
             }
-            // Lane side: level, volume, pan.
-            let lane = Rect::from_min_max(Pos2::new(row.left() + header_w + 12.0, row.top() + 5.0), Pos2::new((row.left() + header_w + 520.0).min(row.right() - 12.0), row.bottom() - 5.0));
-            let level = self.return_meter.get(i).copied().unwrap_or(0.0);
-            let meter = Rect::from_min_size(lane.min + Vec2::new(0.0, 7.0), Vec2::new(160.0, 6.0));
-            draw_meter(ui.painter(), meter, level);
-            let sliders = Rect::from_min_max(Pos2::new(meter.right() + 12.0, lane.top()), lane.max);
-            ui.scope_builder(egui::UiBuilder::new().max_rect(sliders).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-                ui.spacing_mut().slider_width = 110.0;
-                let v = ui.add(egui::Slider::new(&mut ret.gain, 0.0..=2.0).show_value(false)).on_hover_text(format!("Volume {:.0}%", ret.gain * 100.0));
-                if v.double_clicked() {
-                    ret.gain = 1.0;
-                }
-                changed |= v.drag_stopped() || v.double_clicked() || (v.changed() && !v.dragged());
-                ui.label(egui::RichText::new("Pan").size(11.0).color(muted()));
-                ui.spacing_mut().slider_width = 70.0;
-                let pn = ui.add(egui::Slider::new(&mut ret.pan, -1.0..=1.0).show_value(false));
-                if pn.double_clicked() {
-                    ret.pan = 0.0;
-                }
-                changed |= pn.drag_stopped() || pn.double_clicked() || (pn.changed() && !pn.dragged());
-            });
+            let (ch, rel) = value_box(ui, vol, ui.scope_id().with(("ret_vol", i)), &mut ret.gain, BoxKind::Volume, "Volume (dB; double-click for 0 dB)");
+            live |= ch;
+            changed |= rel;
+            let (ch, rel) = value_box(ui, pan, ui.scope_id().with(("ret_pan", i)), &mut ret.pan, BoxKind::Pan, "Pan (double-click for centre)");
+            live |= ch;
+            changed |= rel;
+        }
+        if live && !changed {
+            self.refresh_playback();
         }
         if let Some(i) = show {
             self.show_return_devices(i);
@@ -1316,12 +1298,8 @@ impl App {
         }
     }
 
-
-
-
-
-
-    /// The master channel: the whole mix's volume and level, and the headphone crossfeed switch.
+    /// The Main track (Live 12's name for the master): the whole mix's volume and level, and the
+    /// headphone crossfeed switch.
     fn master_strip(&mut self, ui: &mut egui::Ui, r: Rect, header_w: f32) {
         let p = ui.painter();
         p.rect_filled(r, 0.0, panel());
@@ -1329,38 +1307,29 @@ impl App {
         p.rect_filled(Rect::from_min_size(Pos2::new(r.left(), r.bottom()), Vec2::new(header_w, 15.0)), 0.0, panel());
         p.line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, gray(190)));
         p.line_segment([Pos2::new(r.left() + header_w - 1.0, r.top()), Pos2::new(r.left() + header_w - 1.0, r.bottom())], Stroke::new(1.0, rule()));
-        // Level meters along the lane side.
-        let m = Rect::from_min_max(Pos2::new(r.left() + header_w + 12.0, r.top() + 11.0), Pos2::new((r.left() + header_w + 372.0).min(r.right() - 12.0), r.bottom() - 11.0));
-        let n = self.meter.len().max(1);
-        let h = (m.height() - 2.0 * (n - 1) as f32) / n as f32;
-        for c in 0..n {
-            let row = Rect::from_min_size(Pos2::new(m.left(), m.top() + c as f32 * (h + 2.0)), Vec2::new(m.width(), h));
-            draw_meter(p, row, self.meter.get(c).copied().unwrap_or(0.0));
-        }
-        let inner = Rect::from_min_max(Pos2::new(r.left() + 10.0, r.top() + 1.0), Pos2::new(r.left() + header_w - 10.0, r.bottom()));
+        // As Live's Main track: its name, the crossfeed switch, the volume box and the output meters.
+        let right = r.left() + header_w - 1.0;
+        let levels = [self.meter.first().copied().unwrap_or(0.0), self.meter.get(1).copied().unwrap_or(0.0)];
+        meters(p, Rect::from_min_max(Pos2::new(right - 12.0, r.top() + 6.0), Pos2::new(right - 5.0, r.bottom() - 6.0)), &levels);
+        p.text(Pos2::new(r.left() + 10.0, r.center().y), Align2::LEFT_CENTER, "Main", FontId::proportional(12.5), ink());
         let mut toggle = false;
         let mut changed = false;
-        ui.scope_builder(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
-            ui.label(egui::RichText::new("Master").strong().color(ink()));
-            let (b, resp) = ui.allocate_exact_size(Vec2::new(26.0, 22.0), Sense::click());
-            let on = self.crossfeed;
-            let hover = resp.hovered();
-            ui.painter().rect(b, 4.0, if on { ink() } else if hover { gray(232) } else { gray(255) }, Stroke::new(1.0, if on { ink() } else { rule() }), egui::StrokeKind::Inside);
-            paint_icon(ui.painter(), b, Action::Crossfeed, if on { gray(255) } else { ink() }, false);
-            if resp.on_hover_text(if on { "Headphone crossfeed is on (click to turn off)" } else { "Headphone crossfeed: hear the mix as if from speakers" }).clicked() {
-                toggle = true;
-            }
-            ui.spacing_mut().slider_width = ui.available_width().max(20.0);
-            let vol = ui.add(egui::Slider::new(&mut self.master_gain, 0.0..=2.0).show_value(false)).on_hover_text(format!("Master volume {:.0}%", self.master_gain * 100.0));
-            if vol.double_clicked() {
-                self.master_gain = 1.0;
-                changed = true;
-            }
-            if vol.drag_stopped() || (vol.changed() && !vol.dragged()) {
-                changed = true;
-            }
-        });
+        let mut live = false;
+        let vol = Rect::from_min_size(Pos2::new(right - 18.0 - 52.0, r.center().y - 9.0), Vec2::new(52.0, 18.0));
+        let b = Rect::from_min_size(Pos2::new(vol.left() - 6.0 - 26.0, r.center().y - 11.0), Vec2::new(26.0, 22.0));
+        let resp = ui.interact(b, ui.scope_id().with("crossfeed"), Sense::click());
+        let on = self.crossfeed;
+        ui.painter().rect(b, 2.0, if on { ink() } else if resp.hovered() { gray(214) } else { gray(225) }, Stroke::new(1.0, gray(170)), egui::StrokeKind::Inside);
+        paint_icon(ui.painter(), b, Action::Crossfeed, if on { gray(255) } else { ink() }, false);
+        if resp.on_hover_text(if on { "Headphone crossfeed is on (click to turn off)" } else { "Headphone crossfeed: hear the mix as if from speakers" }).clicked() {
+            toggle = true;
+        }
+        let (ch, rel) = value_box(ui, vol, ui.scope_id().with("main_vol"), &mut self.master_gain, BoxKind::Volume, "Main volume (dB; double-click for 0 dB)");
+        live |= ch;
+        changed |= rel;
+        if live && !changed {
+            self.refresh_playback();
+        }
         if toggle {
             let ctx = ui.ctx().clone();
             self.run(Action::Crossfeed, &ctx);

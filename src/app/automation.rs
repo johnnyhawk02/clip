@@ -114,6 +114,12 @@ impl App {
                             self.player.set_range(bar(a), bar(b), true);
                         }
                     }
+                    // selclip:t|c selects that clip (as clicking it).
+                    "selclip" => {
+                        let (t, c) = arg.split_once('|').unwrap_or(("0", "0"));
+                        self.sel_clip = Some((t.parse().unwrap_or(0), c.parse().unwrap_or(0)));
+                        self.sel_extra.clear();
+                    }
                     "deselect" => {
                         self.sel_clip = None;
                         self.sel_extra.clear();
