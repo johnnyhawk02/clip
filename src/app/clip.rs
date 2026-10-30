@@ -658,7 +658,7 @@ impl App {
             self.play_origin = brace.0;
             self.player.play_from(brace.0, brace.1.min(end), inside, true);
         }
-        self.status = format!("Inside {} — ⌘Return or the path above goes back up", clip.name);
+        self.status = format!("Group view: {} — ⌘Return or the path above goes back up", clip.name);
     }
 
     /// Close the open group, folding its arrangement back into its clip.
@@ -682,7 +682,7 @@ impl App {
         self.active = f.active;
         (self.arr_loop, self.looping) = f.outer_loop;
         self.show_session = f.from_session;
-        self.status = "Closed the group".into();
+        self.status = "Closed the Group view".into();
         if f.clip >= SLOT {
             self.sel_slot = Some((f.track, f.clip - SLOT));
             self.sel_clip = None;
