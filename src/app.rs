@@ -1355,9 +1355,10 @@ impl eframe::App for App {
         if self.show_devices && (self.sel_clip, self.sel_slot) != self.devices_over {
             self.show_devices = false;
         }
-        let devices = self.show_devices && self.view == View::Arrangement && !self.tracks.is_empty();
+        // The detail view stays open: the selected clip, or else the selected track's effects.
+        let devices = (self.show_devices || detail.is_none()) && self.view == View::Arrangement && !self.tracks.is_empty();
         // A double-click opens the clip in full: the editor fills the window.
-        self.split = (devices || detail.is_some()) && !self.tracks.is_empty() && !(self.full_edit && matches!(self.view, View::Editor { .. }));
+        self.split = !self.tracks.is_empty() && !(self.full_edit && matches!(self.view, View::Editor { .. }));
         if let (View::Arrangement, Some(p)) = (self.view, detail) {
             if self.detail_key != self.detail_key_of(p) {
                 self.load_detail(p);
