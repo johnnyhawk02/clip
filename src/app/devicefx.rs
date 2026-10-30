@@ -43,12 +43,8 @@ impl App {
         let mut wrap = self.device_fx_wrap;
         let (mut apply, mut cancel) = (false, false);
         let resp = dialog_modal("device-fx").show(ctx, |ui| {
-            // (Tape's and Auto Filter's columns need more room.)
-            ui.set_width(match d {
-                Device::Tape(_) => DIALOG_W + 420.0,
-                Device::AutoFilter(_) => super::deviceview::AUTOFILTER_W,
-                _ => DIALOG_W,
-            });
+            // As wide as the device's panel (Tape's and Auto Filter's columns need more room).
+            ui.set_width(super::deviceview::device_width(&d).max(DIALOG_W));
             let about = match d {
                 // No tail; printed, its cuts look ahead.
                 Device::Tame(_) => format!("The track effect, printed into {scope}, its cuts opening just ahead of each resonance."),
@@ -66,9 +62,9 @@ impl App {
                 Device::Chorus(s) => _ = chorus_panel(ui, s),
                 Device::Pultec(s) => _ = pultec_panel(ui, s),
                 Device::Riser(s) => _ = riser_panel(ui, s, true),
-                Device::Tame(s) => _ = tame_panel(ui, s, None),
-                Device::Opto(s) => _ = opto_panel(ui, s, None),
-                Device::AutoFilter(s) => _ = autofilter_panel(ui, s, None),
+                Device::Tame(s) => _ = tame_panel(ui, s, None, false),
+                Device::Opto(s) => _ = opto_panel(ui, s, None, false),
+                Device::AutoFilter(s) => _ = autofilter_panel(ui, s, None, false),
                 Device::Spacer(_) => {}
             }
             if whole && !matches!(d, Device::Tame(_)) {

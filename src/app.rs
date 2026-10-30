@@ -1354,7 +1354,8 @@ impl eframe::App for App {
                 ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0, rule()));
                 ui.scope_builder(egui::UiBuilder::new().max_rect(bar.shrink2(Vec2::new(12.0, 4.0))), |ui| self.view_bar(ui));
                 let body = Rect::from_min_max(Pos2::new(full.left(), bar.bottom()), full.max);
-                let detail_h = (body.height() * 0.42).clamp(150.0, 440.0);
+                // The device view is a fixed height, as Live's; the clip view grows with the window.
+                let detail_h = if devices { deviceview::DEVICE_VIEW_H.min(body.height() * 0.6) } else { (body.height() * 0.42).clamp(150.0, 440.0) };
                 let top = Rect::from_min_max(body.min, Pos2::new(body.right(), body.bottom() - detail_h));
                 let bottom = Rect::from_min_max(Pos2::new(body.left(), top.bottom()), body.max);
                 let side = Rect::from_min_max(bottom.min, Pos2::new(bottom.left() + 250.0, bottom.bottom()));
