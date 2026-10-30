@@ -23,7 +23,7 @@ category = "public.app-category.music"
 short_description = "Loop-based audio editor"
 
 [profile.release]
-strip = true
+strip = "debuginfo"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
