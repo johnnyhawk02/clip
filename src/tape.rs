@@ -30,6 +30,9 @@ pub struct Settings {
     /// 0..1: wet against dry (all wet on a return track).
     pub mix: f32,
     pub on: bool,
+    /// Folded down to its title in the device view (Live: double-click the title bar).
+    #[serde(default)]
+    pub folded: bool,
     /// An LFO on the delay time: its shape (`LFO_SHAPES`), rate (Hz, times 0.01 with `lfo_slow`
     /// for very slow drifts), depth (ms) and slew (0..1: how slowly it follows its shape).
     #[serde(default)]
@@ -57,7 +60,7 @@ fn default_bias() -> f32 {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { beats: 0.75, feedback: 0.5, drive: 0.5, bias: default_bias(), wow: 0.3, speed: 15.0, spacing: 5.0, mix: 1.0, on: true, lfo_shape: 0, lfo_rate: default_lfo_rate(), lfo_slow: false, lfo_depth: 0.0, lfo_slew: 0.0 }
+        Settings { beats: 0.75, feedback: 0.5, drive: 0.5, bias: default_bias(), wow: 0.3, speed: 15.0, spacing: 5.0, mix: 1.0, on: true, folded: false, lfo_shape: 0, lfo_rate: default_lfo_rate(), lfo_slow: false, lfo_depth: 0.0, lfo_slew: 0.0 }
     }
 }
 

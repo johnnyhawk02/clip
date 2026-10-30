@@ -119,6 +119,41 @@ impl Device {
         }
     }
 
+    /// Whether it shows folded down to its title in the device view.
+    pub fn folded(&self) -> bool {
+        match self {
+            Device::Spacer(s) => s.folded,
+            Device::Reverb(s) => s.folded,
+            Device::Delay(s) => s.folded,
+            Device::Spring(s) => s.folded,
+            Device::Tape(s) => s.folded,
+            Device::Phaser(s) => s.folded,
+            Device::Chorus(s) => s.folded,
+            Device::Pultec(s) => s.folded,
+            Device::Riser(s) => s.folded,
+            Device::Tame(s) => s.folded,
+            Device::Opto(s) => s.folded,
+            Device::AutoFilter(s) => s.folded,
+        }
+    }
+
+    pub fn set_folded(&mut self, folded: bool) {
+        match self {
+            Device::Spacer(s) => s.folded = folded,
+            Device::Reverb(s) => s.folded = folded,
+            Device::Delay(s) => s.folded = folded,
+            Device::Spring(s) => s.folded = folded,
+            Device::Tape(s) => s.folded = folded,
+            Device::Phaser(s) => s.folded = folded,
+            Device::Chorus(s) => s.folded = folded,
+            Device::Pultec(s) => s.folded = folded,
+            Device::Riser(s) => s.folded = folded,
+            Device::Tame(s) => s.folded = folded,
+            Device::Opto(s) => s.folded = folded,
+            Device::AutoFilter(s) => s.folded = folded,
+        }
+    }
+
     /// How many samples late its output is (for delay compensation); none while off.
     pub fn latency(&self) -> usize {
         match self {

@@ -16,11 +16,14 @@ pub struct ReverbSettings {
     /// 0..1: wet against dry (all wet on a return track).
     pub mix: f32,
     pub on: bool,
+    /// Folded down to its title in the device view (Live: double-click the title bar).
+    #[serde(default)]
+    pub folded: bool,
 }
 
 impl Default for ReverbSettings {
     fn default() -> Self {
-        ReverbSettings { size: 0.7, damping: 0.5, width: 1.0, predelay: 10.0, mix: 1.0, on: true }
+        ReverbSettings { size: 0.7, damping: 0.5, width: 1.0, predelay: 10.0, mix: 1.0, on: true, folded: false }
     }
 }
 
@@ -39,11 +42,14 @@ pub struct DelaySettings {
     /// 0..1: wet against dry (all wet on a return track).
     pub mix: f32,
     pub on: bool,
+    /// Folded down to its title in the device view (Live: double-click the title bar).
+    #[serde(default)]
+    pub folded: bool,
 }
 
 impl Default for DelaySettings {
     fn default() -> Self {
-        DelaySettings { beats: 0.75, feedback: 0.45, ping_pong: true, low_cut: 200.0, high_cut: 6000.0, mix: 1.0, on: true }
+        DelaySettings { beats: 0.75, feedback: 0.45, ping_pong: true, low_cut: 200.0, high_cut: 6000.0, mix: 1.0, on: true, folded: false }
     }
 }
 
@@ -207,11 +213,14 @@ pub struct SpringSettings {
     /// 0..1: wet against dry (all wet on a return track).
     pub mix: f32,
     pub on: bool,
+    /// Folded down to its title in the device view (Live: double-click the title bar).
+    #[serde(default)]
+    pub folded: bool,
 }
 
 impl Default for SpringSettings {
     fn default() -> Self {
-        SpringSettings { length: 56.0, decay: 0.7, tone: 4300.0, chirp: 0.6, mix: 1.0, on: true }
+        SpringSettings { length: 56.0, decay: 0.7, tone: 4300.0, chirp: 0.6, mix: 1.0, on: true, folded: false }
     }
 }
 
@@ -354,7 +363,7 @@ mod tests {
     #[test]
     fn delay_repeats_after_its_time() {
         let mut d = Delay::new(1000);
-        let s = DelaySettings { beats: 1.0, feedback: 0.5, ping_pong: false, low_cut: 10.0, high_cut: 20000.0, mix: 1.0, on: true };
+        let s = DelaySettings { beats: 1.0, feedback: 0.5, ping_pong: false, low_cut: 10.0, high_cut: 20000.0, mix: 1.0, on: true, folded: false };
         let mut buf = vec![[0.0f32; 2]; 400];
         buf[0] = [1.0, 1.0];
         d.process(&s, &mut buf, 100.0);

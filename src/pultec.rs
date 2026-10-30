@@ -24,11 +24,14 @@ pub struct Settings {
     pub atten_sel: f32,
     pub high_atten: f32,
     pub on: bool,
+    /// Folded down to its title in the device view (Live: double-click the title bar).
+    #[serde(default)]
+    pub folded: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { low_freq: 60.0, low_boost: 0.0, low_atten: 0.0, high_freq: 10.0, high_boost: 0.0, bandwidth: 5.0, atten_sel: 10.0, high_atten: 0.0, on: true }
+        Settings { low_freq: 60.0, low_boost: 0.0, low_atten: 0.0, high_freq: 10.0, high_boost: 0.0, bandwidth: 5.0, atten_sel: 10.0, high_atten: 0.0, on: true, folded: false }
     }
 }
 

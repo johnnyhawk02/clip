@@ -16,11 +16,14 @@ pub struct Settings {
     /// 0..1: wet against dry. At 1 it's the pedal (which already mixes in the dry signal).
     pub mix: f32,
     pub on: bool,
+    /// Folded down to its title in the device view (Live: double-click the title bar).
+    #[serde(default)]
+    pub folded: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { speed: 0.5, mix: 1.0, on: true }
+        Settings { speed: 0.5, mix: 1.0, on: true, folded: false }
     }
 }
 

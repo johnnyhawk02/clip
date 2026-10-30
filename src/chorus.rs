@@ -45,11 +45,14 @@ pub struct Settings {
     /// 0..1, Tape mode: drive into the tape.
     pub drive: f32,
     pub on: bool,
+    /// Folded down to its title in the device view (Live: double-click the title bar).
+    #[serde(default)]
+    pub folded: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { mode: 0, rate: preset(0).rate, amount: 1.0, mix: 0.5, noise: 0.0, drive: 0.0, on: true }
+        Settings { mode: 0, rate: preset(0).rate, amount: 1.0, mix: 0.5, noise: 0.0, drive: 0.0, on: true, folded: false }
     }
 }
 

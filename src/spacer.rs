@@ -39,6 +39,9 @@ pub struct Settings {
     /// Off keeps the settings but passes the track through untouched.
     #[serde(default = "on")]
     pub on: bool,
+    /// Folded down to its title in the device view (Live: double-click the title bar).
+    #[serde(default)]
+    pub folded: bool,
 }
 
 fn on() -> bool {
@@ -47,7 +50,7 @@ fn on() -> bool {
 
 impl Settings {
     pub fn new(source: usize) -> Settings {
-        Settings { source, amount: 0.6, low_cut: 30.0, high_cut: 18000.0, attack: 8.0, release: 150.0, stereo: 0, output: 0.0, on: true }
+        Settings { source, amount: 0.6, low_cut: 30.0, high_cut: 18000.0, attack: 8.0, release: 150.0, stereo: 0, output: 0.0, on: true, folded: false }
     }
 }
 

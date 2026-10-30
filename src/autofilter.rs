@@ -135,6 +135,9 @@ pub struct Settings {
     /// 0..1: dry against wet.
     pub mix: f32,
     pub on: bool,
+    /// Folded down to its title in the device view (Live: double-click the title bar).
+    #[serde(default)]
+    pub folded: bool,
 }
 
 fn one() -> f32 {
@@ -222,6 +225,7 @@ impl Default for Settings {
             output: 0.0,
             mix: 1.0,
             on: true,
+            folded: false,
         }
     }
 }

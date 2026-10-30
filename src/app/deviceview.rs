@@ -21,6 +21,8 @@ pub(super) const DEVICE_VIEW_H: f32 = 252.0;
 // fixed width apart, small muted labels, one slider length and text size, and any graph or
 // meter in a column of its own beside them.
 const TITLE_H: f32 = 22.0;
+/// A folded device's width: just its title, on end.
+const FOLDED_W: f32 = 26.0;
 const PAD: f32 = 10.0;
 const DEV_LABEL_W: f32 = 80.0;
 const SLIDER_W: f32 = 92.0;
@@ -191,26 +193,51 @@ impl App {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     for (i, d) in chain.iter_mut().enumerate() {
                         let h = ui.available_height();
-                        let (panel, _) = ui.allocate_exact_size(Vec2::new(device_width(d), h), Sense::hover());
+                        let w = if d.folded() { FOLDED_W } else { device_width(d) };
+                        let (panel, _) = ui.allocate_exact_size(Vec2::new(w, h), Sense::hover());
                         ui.painter().rect_filled(panel, 3.0, gray(250));
                         ui.painter().rect_stroke(panel, 3.0, Stroke::new(1.0, rule()), egui::StrokeKind::Inside);
-                        // Title strip: on/off, name, remove.
-                        let title = Rect::from_min_size(panel.min, Vec2::new(panel.width(), TITLE_H));
-                        ui.painter().rect_filled(title.shrink(1.0), egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, gray(232));
-                        ui.painter().line_segment([title.left_bottom(), title.right_bottom()], Stroke::new(1.0, rule()));
-                        let sw = Rect::from_center_size(title.left_center() + Vec2::new(PAD + 4.0, 0.0), Vec2::splat(10.0));
+                        // Title strip: on/off, name, remove; folded, the whole panel is its title, standing on end.
+                        let title = if d.folded() { panel } else { Rect::from_min_size(panel.min, Vec2::new(panel.width(), TITLE_H)) };
+                        // Double-clicking the title folds the device down, as in Live (registered first, so the
+                        // switch and × above it still take their clicks).
+                        let tr = ui.interact(title, ui.scope_id().with(("devtitle", i)), Sense::click());
+                        if tr.double_clicked() {
+                            d.set_folded(!d.folded());
+                        }
+                        let fill = if tr.hovered() { gray(226) } else { gray(232) };
+                        let corners = if d.folded() { egui::CornerRadius::same(2) } else { egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 } };
+                        ui.painter().rect_filled(title.shrink(1.0), corners, fill);
+                        let name_col = if d.on() { ink() } else { muted() };
+                        let (sw_at, x_at) = if d.folded() {
+                            (title.center_top() + Vec2::new(0.0, TITLE_H / 2.0), title.center_bottom() - Vec2::new(0.0, TITLE_H / 2.0))
+                        } else {
+                            ui.painter().line_segment([title.left_bottom(), title.right_bottom()], Stroke::new(1.0, rule()));
+                            (title.left_center() + Vec2::new(PAD + 4.0, 0.0), title.right_center() - Vec2::new(PAD + 2.0, 0.0))
+                        };
+                        let sw = Rect::from_center_size(sw_at, Vec2::splat(10.0));
                         let swr = ui.interact(sw.expand(4.0), ui.scope_id().with(("devon", i)), Sense::click());
                         ui.painter().circle(sw.center(), 4.5, if d.on() { ACCENT } else { gray(210) }, Stroke::new(1.0, gray(160)));
                         if swr.on_hover_text("Device on / off").clicked() {
                             d.set_on(!d.on());
                         }
-                        let name_col = if d.on() { ink() } else { muted() };
-                        ui.painter().text(title.left_center() + Vec2::new(PAD + 16.0, 0.0), Align2::LEFT_CENTER, d.name(), FontId::proportional(12.0), name_col);
-                        let x = Rect::from_center_size(title.right_center() - Vec2::new(PAD + 2.0, 0.0), Vec2::splat(16.0));
+                        if d.folded() {
+                            // The name reads upwards, as Live's folded devices do.
+                            let galley = ui.painter().layout_no_wrap(d.name().to_string(), FontId::proportional(12.0), name_col);
+                            let at = Pos2::new(title.center().x - galley.size().y / 2.0, sw.bottom() + 10.0 + galley.size().x);
+                            ui.painter().add(egui::epaint::TextShape::new(at, galley, name_col).with_angle(-std::f32::consts::FRAC_PI_2));
+                        } else {
+                            ui.painter().text(title.left_center() + Vec2::new(PAD + 16.0, 0.0), Align2::LEFT_CENTER, d.name(), FontId::proportional(12.0), name_col);
+                        }
+                        let x = Rect::from_center_size(x_at, Vec2::splat(16.0));
                         let xr = ui.interact(x, ui.scope_id().with(("devx", i)), Sense::click());
                         ui.painter().text(x.center(), Align2::CENTER_CENTER, "×", FontId::proportional(14.0), if xr.hovered() { ink() } else { muted() });
                         if xr.on_hover_text("Remove this effect").clicked() {
                             remove = Some(i);
+                        }
+                        _ = tr.on_hover_text(if d.folded() { "Double-click to unfold" } else { "Double-click to fold" });
+                        if d.folded() {
+                            continue;
                         }
                         let body = Rect::from_min_max(Pos2::new(panel.left() + PAD, title.bottom() + 8.0), panel.max - Vec2::new(PAD, 8.0));
                         // A child that doesn't move the row along (the panel already did).
@@ -253,7 +280,14 @@ impl App {
         if let Some(n) = add {
             return self.add_device(t, n);
         }
-        if chain != before {
+        // Folding only changes the look: saved with the project, but no undo step.
+        let unfolded = |c: &[Device]| c.iter().map(|d| { let mut d = *d; d.set_folded(false); d }).collect::<Vec<_>>();
+        if chain != before && remove.is_none() && unfolded(&chain) == unfolded(&before) {
+            if let Some(tr) = self.dev_track_mut(t) {
+                tr.devices = chain.clone();
+            }
+            self.dirty = true;
+        } else if chain != before {
             if !self.device_edit {
                 self.push_undo(if remove.is_some() { "Remove Effect" } else { "Effect Settings" });
                 self.device_edit = true;

@@ -40,11 +40,14 @@ pub struct Settings {
     /// 0..1: dry against wet.
     pub mix: f32,
     pub on: bool,
+    /// Folded down to its title in the device view (Live: double-click the title bar).
+    #[serde(default)]
+    pub folded: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { peak_reduction: 0.4, gain: 0.0, limit: false, colour: 0.3, mix: 1.0, on: true }
+        Settings { peak_reduction: 0.4, gain: 0.0, limit: false, colour: 0.3, mix: 1.0, on: true, folded: false }
     }
 }
 

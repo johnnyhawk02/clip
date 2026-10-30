@@ -18,11 +18,14 @@ pub struct Settings {
     #[serde(default)]
     pub ramp: bool,
     pub on: bool,
+    /// Folded down to its title in the device view (Live: double-click the title bar).
+    #[serde(default)]
+    pub folded: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { amount: 0.5, ramp: true, on: true }
+        Settings { amount: 0.5, ramp: true, on: true, folded: false }
     }
 }
 
@@ -136,8 +139,8 @@ impl Riser {
             *f = [y[0] * dry * lift, y[1] * dry * lift];
         }
         let x = self.x;
-        let ds = fx::DelaySettings { beats: 0.5, feedback: 0.25 + 0.45 * x, ping_pong: true, low_cut: 250.0, high_cut: 7000.0, mix: 1.0, on: true };
-        let rs = fx::ReverbSettings { size: 0.55 + 0.43 * x, damping: 0.35, width: 1.0, predelay: 15.0, mix: 1.0, on: true };
+        let ds = fx::DelaySettings { beats: 0.5, feedback: 0.25 + 0.45 * x, ping_pong: true, low_cut: 250.0, high_cut: 7000.0, mix: 1.0, on: true, folded: false };
+        let rs = fx::ReverbSettings { size: 0.55 + 0.43 * x, damping: 0.35, width: 1.0, predelay: 15.0, mix: 1.0, on: true, folded: false };
         // Echoes, then the echoes and the sound into the reverb.
         self.echoes.clear();
         self.echoes.extend_from_slice(&self.wet);

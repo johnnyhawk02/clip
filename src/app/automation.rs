@@ -121,14 +121,16 @@ impl App {
                     // seed:N makes Mangle and BBCut repeatable.
                     "seed" => self.mangle_seed = arg.parse::<u64>().unwrap_or(1) | 1,
                     // rclick:x|y and hover:x|y — pointer events at window point (x, y), a few frames apart.
-                    "rclick" | "click" | "hover" => {
+                    // dclick:x|y double-clicks.
+                    "rclick" | "click" | "dclick" | "hover" => {
                         let (x, y) = arg.split_once('|').unwrap_or(("0", "0"));
                         let pos = Pos2::new(x.parse().unwrap_or(0.0), y.parse().unwrap_or(0.0));
                         let at = self.synth.last().map_or(self.synth_frame, |l| l.0) + 1;
                         self.synth.push((at, egui::Event::PointerMoved(pos)));
                         if cmd != "hover" {
                             let button = if cmd == "rclick" { egui::PointerButton::Secondary } else { egui::PointerButton::Primary };
-                            for (i, pressed) in [(1, true), (2, false)] {
+                            let presses: &[(u32, bool)] = if cmd == "dclick" { &[(1, true), (2, false), (3, true), (4, false)] } else { &[(1, true), (2, false)] };
+                            for &(i, pressed) in presses {
                                 self.synth.push((at + i, egui::Event::PointerButton { pos, button, pressed, modifiers: Modifiers::NONE }));
                             }
                         }
