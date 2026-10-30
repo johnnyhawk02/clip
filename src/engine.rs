@@ -164,11 +164,16 @@ pub struct LayerSrc {
     pub devices: Vec<(Device, Option<usize>)>,
     /// The effects' running state (filters, envelopes), carried from block to block.
     pub device_state: std::sync::Mutex<Vec<Option<devices::State>>>,
+    /// How much goes to each return track (post-fader, 0..1).
+    pub sends: Vec<f32>,
 }
+
+/// Return track `r` counts as track `RETURN + r` (for meters and carrying effects over).
+pub const RETURN: usize = 1 << 20;
 
 impl LayerSrc {
     pub fn new(track: usize, gain: f32, pan: (f32, f32), clips: Vec<ClipSrc>) -> LayerSrc {
-        LayerSrc { gain, pan, clips, track, peak: std::sync::atomic::AtomicU32::new(0), devices: Vec::new(), device_state: std::sync::Mutex::new(Vec::new()) }
+        LayerSrc { gain, pan, clips, track, peak: std::sync::atomic::AtomicU32::new(0), devices: Vec::new(), device_state: std::sync::Mutex::new(Vec::new()), sends: Vec::new() }
     }
 }
 
@@ -181,6 +186,29 @@ pub struct Song {
     pub master: f32,
     /// The metronome, when on: a beat's length in song frames and the beats in a bar.
     pub click: Option<(f64, u32)>,
+    /// Return tracks: fed by the layers' sends, then their effects, into the mix.
+    pub returns: Vec<LayerSrc>,
+    /// A beat's length in song frames (for tempo-synced effects).
+    pub beat: f64,
+}
+
+/// Run `layer`'s effects on `buf`; `dry` holds every layer's sound (for sidechains).
+fn run_devices(layers: &[LayerSrc], li: Option<usize>, layer: &LayerSrc, buf: &mut [[f32; 2]], dry: &[Vec<[f32; 2]>], rate: u32, beat: f64) {
+    if layer.devices.is_empty() {
+        return;
+    }
+    let mut state = layer.device_state.lock().unwrap();
+    state.resize_with(layer.devices.len(), || None);
+    for ((d, src), st) in layer.devices.iter().zip(state.iter_mut()) {
+        if !d.on() {
+            continue;
+        }
+        let side: Option<Vec<[f32; 2]>> = src.filter(|&s| Some(s) != li && s < dry.len()).map(|s| {
+            let g = layers[s].gain;
+            dry[s].iter().map(|f| [f[0] * g, f[1] * g]).collect()
+        });
+        st.get_or_insert_with(|| devices::State::new(d, rate)).process(d, buf, side.as_deref(), beat);
+    }
 }
 
 impl Song {
@@ -215,25 +243,11 @@ impl Song {
         // sidechain) hears that track after its volume, before its own effects.
         let dry: Vec<Vec<[f32; 2]>> = if self.layers.iter().any(|l| l.devices.iter().any(|d| d.1.is_some())) { bufs.clone() } else { Vec::new() };
         for (li, layer) in self.layers.iter().enumerate() {
-            if layer.devices.is_empty() {
-                continue;
-            }
-            let mut state = layer.device_state.lock().unwrap();
-            state.resize_with(layer.devices.len(), || None);
-            for ((d, src), st) in layer.devices.iter().zip(state.iter_mut()) {
-                if !d.on() {
-                    continue;
-                }
-                let side: Option<Vec<[f32; 2]>> = src.filter(|&s| s != li && s < dry.len()).map(|s| {
-                    let g = self.layers[s].gain;
-                    dry[s].iter().map(|f| [f[0] * g, f[1] * g]).collect()
-                });
-                st.get_or_insert_with(|| devices::State::new(d, self.rate)).process(d, &mut bufs[li], side.as_deref());
-            }
+            run_devices(&self.layers, Some(li), layer, &mut bufs[li], &dry, self.rate, self.beat);
         }
         let mut peaks = vec![0.0f32; self.layers.len()];
+        let mut rbufs = vec![vec![[0.0f32; 2]; n]; self.returns.len()];
         for (k, frame) in out.iter_mut().enumerate() {
-            let t = from + step * k as f64;
             *frame = [0.0, 0.0];
             for (li, layer) in self.layers.iter().enumerate() {
                 let (pl, pr) = layer.pan;
@@ -241,7 +255,33 @@ impl Song {
                 frame[0] += lr[0];
                 frame[1] += lr[1];
                 peaks[li] = peaks[li].max(lr[0].abs()).max(lr[1].abs());
+                // Sends, after the track's volume and pan (as Live's post-fader sends).
+                for (rb, &s) in rbufs.iter_mut().zip(&layer.sends) {
+                    if s > 0.0 {
+                        rb[k][0] += lr[0] * s;
+                        rb[k][1] += lr[1] * s;
+                    }
+                }
             }
+        }
+        // The return tracks: their effects, then into the mix.
+        for (ret, rb) in self.returns.iter().zip(rbufs.iter_mut()) {
+            run_devices(&self.returns, None, ret, rb, &[], self.rate, self.beat);
+            let (pl, pr) = ret.pan;
+            let mut peak = 0.0f32;
+            for (frame, f) in out.iter_mut().zip(rb.iter()) {
+                let lr = [f[0] * ret.gain * pl, f[1] * ret.gain * pr];
+                frame[0] += lr[0];
+                frame[1] += lr[1];
+                peak = peak.max(lr[0].abs()).max(lr[1].abs());
+            }
+            let old = f32::from_bits(ret.peak.load(std::sync::atomic::Ordering::Relaxed));
+            if peak > old {
+                ret.peak.store(peak.to_bits(), std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        for (k, frame) in out.iter_mut().enumerate() {
+            let t = from + step * k as f64;
             frame[0] *= self.master;
             frame[1] *= self.master;
             if let Some((beat, bpb)) = self.click {
@@ -261,7 +301,7 @@ impl Song {
 
     /// Each heard track's loudest level since the last look, as (track, level), resetting them.
     pub fn take_track_peaks(&self) -> Vec<(usize, f32)> {
-        self.layers.iter().map(|l| (l.track, f32::from_bits(l.peak.swap(0, std::sync::atomic::Ordering::Relaxed)))).collect()
+        self.layers.iter().chain(&self.returns).map(|l| (l.track, f32::from_bits(l.peak.swap(0, std::sync::atomic::Ordering::Relaxed)))).collect()
     }
 }
 
@@ -272,7 +312,7 @@ mod tests {
     #[test]
     fn metronome_clicks_on_beats_higher_on_the_bar() {
         // A beat every 22050 frames (120 BPM at 44.1 kHz), 4 to a bar.
-        let song = Song { layers: Vec::new(), end: 200_000, rate: 44100, master: 1.0, click: Some((22050.0, 4)) };
+        let song = Song { layers: Vec::new(), end: 200_000, rate: 44100, master: 1.0, click: Some((22050.0, 4)), returns: Vec::new(), beat: 22050.0 };
         let mut out = vec![[0.0; 2]; 400];
         song.render(22050.0, 1.0, &mut out);
         assert!(out.iter().any(|f| f[0].abs() > 0.05), "a click on beat 2");
@@ -285,11 +325,25 @@ mod tests {
         // A ramp 0, 1, 2… read at speed 2: song frame t hears source frame 2t.
         let audio = Arc::new(Audio { rate: 1000, channels: vec![(0..100).map(|i| i as f32).collect()] });
         let clip = ClipSrc { audio, speed: 2.0, start: 10, len: 40, trim: 0, looping: None, frames: 50, fades: (0, 0), gain: 1.0 };
-        let song = Song { layers: vec![LayerSrc::new(0, 1.0, (1.0, 1.0), vec![clip])], end: 50, rate: 1000, master: 1.0, click: None };
+        let song = Song { layers: vec![LayerSrc::new(0, 1.0, (1.0, 1.0), vec![clip])], end: 50, rate: 1000, master: 1.0, click: None, returns: Vec::new(), beat: 1000.0 };
         let mut out = vec![[0.0; 2]; 4];
         song.render(20.0, 1.0, &mut out);
         assert_eq!(out.iter().map(|f| f[0]).collect::<Vec<_>>(), vec![20.0, 22.0, 24.0, 26.0]);
         song.render(5.0, 1.0, &mut out);
         assert_eq!(out[0], [0.0, 0.0], "silence before the clip");
+    }
+
+    #[test]
+    fn sends_feed_the_return_tracks() {
+        // A steady 0.25 clip sent at full to one return: the return adds it again.
+        let audio = Arc::new(Audio { rate: 1000, channels: vec![vec![0.25; 100]] });
+        let clip = ClipSrc { audio, speed: 1.0, start: 0, len: 100, trim: 0, looping: None, frames: 100, fades: (0, 0), gain: 1.0 };
+        let mut layer = LayerSrc::new(0, 1.0, (1.0, 1.0), vec![clip]);
+        layer.sends = vec![1.0];
+        let ret = LayerSrc::new(RETURN, 1.0, (1.0, 1.0), Vec::new());
+        let song = Song { layers: vec![layer], end: 100, rate: 1000, master: 1.0, click: None, returns: vec![ret], beat: 500.0 };
+        let mut out = vec![[0.0; 2]; 4];
+        song.render(10.0, 1.0, &mut out);
+        assert_eq!(out[0], [0.5, 0.5]);
     }
 }

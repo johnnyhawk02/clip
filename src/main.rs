@@ -7,6 +7,7 @@ mod audio;
 mod crossfeed;
 mod devices;
 mod effects;
+mod fx;
 mod engine;
 mod menu;
 mod player;

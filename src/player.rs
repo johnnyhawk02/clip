@@ -89,8 +89,8 @@ impl Player {
         let n = source.frames();
         // A new song keeps each track's Spacer running (its envelopes), so edits don't glitch it.
         if let (Source::Song(old), Source::Song(new)) = (&s.source, &source) {
-            for l in &new.layers {
-                if let Some(o) = old.layers.iter().find(|o| o.track == l.track) {
+            for l in new.layers.iter().chain(&new.returns) {
+                if let Some(o) = old.layers.iter().chain(&old.returns).find(|o| o.track == l.track) {
                     // Only while the chain is the same effects in the same order.
                     if o.devices.len() == l.devices.len() && o.devices.iter().zip(&l.devices).all(|(a, b)| a.0.name() == b.0.name()) {
                         let state = std::mem::take(&mut *o.device_state.lock().unwrap());
@@ -178,7 +178,7 @@ impl Player {
     /// Device `i` of track `t`: a Spacer's cuts right now (dB per band, two rows), when running.
     pub fn spacer_cuts(&self, t: usize, i: usize) -> Option<[[f32; crate::spacer::BANDS]; 2]> {
         match &self.shared.lock().unwrap().source {
-            Source::Song(song) => song.layers.iter().find(|l| l.track == t)?.device_state.lock().unwrap().get(i)?.as_ref()?.spacer_cuts(),
+            Source::Song(song) => song.layers.iter().chain(&song.returns).find(|l| l.track == t)?.device_state.lock().unwrap().get(i)?.as_ref()?.spacer_cuts(),
             Source::Buffer(_) => None,
         }
     }

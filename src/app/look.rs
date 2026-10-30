@@ -547,3 +547,37 @@ pub(super) fn dialog_buttons(ui: &mut egui::Ui, ok_label: &str, ok_enabled: bool
     });
     out
 }
+
+/// A send knob, as on Live's tracks: a small dial from nothing to full, its return's letter
+/// beneath. Drag up or down; double-click for nothing. Returns (changed, let go).
+pub(super) fn send_knob(ui: &mut egui::Ui, c: Pos2, id: egui::Id, v: &mut f32, letter: &str) -> (bool, bool) {
+    use std::f32::consts::PI;
+    let r = 8.0;
+    let resp = ui.interact(Rect::from_center_size(c + Vec2::new(0.0, 4.0), Vec2::new(r * 2.0 + 6.0, r * 2.0 + 14.0)), id, Sense::click_and_drag());
+    let p = ui.painter();
+    let ang = |t: f32| 0.75 * PI + t * 1.5 * PI;
+    let arc = |from: f32, to: f32| -> Vec<Pos2> { (0..=20).map(|k| ang(from + (to - from) * k as f32 / 20.0)).map(|a| c + Vec2::new(a.cos(), a.sin()) * r).collect() };
+    p.add(egui::Shape::line(arc(0.0, 1.0), Stroke::new(2.0, gray(200))));
+    if *v > 0.001 {
+        p.add(egui::Shape::line(arc(0.0, *v), Stroke::new(2.0, ink())));
+    }
+    let a = ang(*v);
+    p.line_segment([c, c + Vec2::new(a.cos(), a.sin()) * (r - 1.0)], Stroke::new(1.2, ink()));
+    p.text(c + Vec2::new(0.0, r + 6.0), Align2::CENTER_CENTER, letter, FontId::proportional(9.5), muted());
+    let mut changed = false;
+    if resp.dragged() {
+        let fine = if ui.input(|i| i.modifiers.shift) { 0.2 } else { 1.0 };
+        *v = (*v - resp.drag_delta().y * 0.008 * fine).clamp(0.0, 1.0);
+        changed = true;
+    }
+    if resp.double_clicked() {
+        *v = 0.0;
+        changed = true;
+    }
+    if resp.hovered() || resp.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+    }
+    let db = if *v < 1e-4 { "-inf dB".to_string() } else { format!("{:.1} dB", 20.0 * v.log10()) };
+    resp.on_hover_text(format!("Send {letter}: {db} (double-click for none)"));
+    (changed, changed && !ui.input(|i| i.pointer.any_down()))
+}

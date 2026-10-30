@@ -10,6 +10,7 @@ impl App {
         self.undo.push(Snapshot {
             audio: self.audio.clone(),
             tracks: self.tracks.clone(),
+            returns: self.returns.clone(),
             nest: self.nest.clone(),
             active: self.active,
             sel_clip: self.sel_clip,
@@ -63,6 +64,7 @@ impl App {
         self.redo.push(Snapshot {
             audio: cur,
             tracks: std::mem::replace(&mut self.tracks, snap.tracks),
+            returns: std::mem::replace(&mut self.returns, snap.returns),
             nest: std::mem::replace(&mut self.nest, snap.nest),
             active: std::mem::replace(&mut self.active, snap.active),
             sel_clip: std::mem::replace(&mut self.sel_clip, snap.sel_clip),
@@ -91,6 +93,7 @@ impl App {
         self.undo.push(Snapshot {
             audio: cur,
             tracks: std::mem::replace(&mut self.tracks, snap.tracks),
+            returns: std::mem::replace(&mut self.returns, snap.returns),
             nest: std::mem::replace(&mut self.nest, snap.nest),
             active: std::mem::replace(&mut self.active, snap.active),
             sel_clip: std::mem::replace(&mut self.sel_clip, snap.sel_clip),

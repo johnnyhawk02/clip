@@ -394,11 +394,18 @@ pub(super) struct Track {
     pub(super) solo: bool,
     /// Its built-in effects, in order (Live's device chain).
     pub(super) devices: Vec<devices::Device>,
+    /// How much it sends to each return track (0..1, post-fader).
+    pub(super) sends: Vec<f32>,
 }
 
 impl Track {
     pub(super) fn new(name: impl Into<String>) -> Track {
-        Track { name: name.into(), clips: Vec::new(), slots: Vec::new(), gain: 1.0, pan: 0.0, color: next_color(), mute: false, solo: false, devices: Vec::new() }
+        Track { name: name.into(), clips: Vec::new(), slots: Vec::new(), gain: 1.0, pan: 0.0, color: next_color(), mute: false, solo: false, devices: Vec::new(), sends: Vec::new() }
+    }
+
+    /// A return track: like a track, but it doesn't take a colour from new tracks' turn.
+    pub(super) fn new_return(name: impl Into<String>) -> Track {
+        Track { name: name.into(), clips: Vec::new(), slots: Vec::new(), gain: 1.0, pan: 0.0, color: 0, mute: false, solo: false, devices: Vec::new(), sends: Vec::new() }
     }
 }
 

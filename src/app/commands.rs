@@ -50,6 +50,7 @@ impl App {
                 Action::NewTrack | Action::ImportTrack | Action::DuplicateTrack | Action::MuteTrack => doc,
                 Action::TrackColor | Action::OffsetTrack => doc,
                 Action::Spacer => doc && self.tracks.len() > 1,
+                Action::AddReturn => doc && self.nest.is_empty(),
                 Action::DeleteTrack | Action::MixDown | Action::NextTrack | Action::PrevTrack => self.tracks.len() > 1,
                 Action::LayerUp => self.active > 0,
                 Action::DuplicateTime | Action::DeleteTime | Action::InsertTime | Action::CopyTime | Action::CutTime => self.time_sel.is_some(),
@@ -88,7 +89,7 @@ impl App {
             Action::ExportRegions => has && !self.regions.is_empty(),
             Action::RulerTime | Action::RulerSamples | Action::RulerTimecode => true,
             Action::ShowSpectrum | Action::BatchConvert | Action::ShowRegions | Action::ShowPool => true,
-            Action::FmSynth | Action::OffsetTrack | Action::TrackColor | Action::Spacer => has,
+            Action::FmSynth | Action::OffsetTrack | Action::TrackColor | Action::Spacer | Action::AddReturn => has,
             Action::Dither | Action::AutoGain => true,
             Action::AddCue => has,
             Action::NextCue | Action::PrevCue => has && !self.cues.is_empty(),
@@ -527,6 +528,7 @@ impl App {
             Action::InsertTime => self.insert_time(),
             Action::Preferences => self.prefs_open = Some((self.phrase_bars, repitch_mode(), APPEARANCE.load(std::sync::atomic::Ordering::Relaxed))),
             Action::Spacer => self.add_device(self.active, "Spacer"),
+            Action::AddReturn => self.add_return(),
             Action::TrackColor => {
                 let t = &mut self.tracks[self.active];
                 t.color = (t.color + 1) % LIVE_PALETTE.len();

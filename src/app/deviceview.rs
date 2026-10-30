@@ -4,27 +4,53 @@
 
 use super::*;
 use crate::devices::{self, Device};
+use crate::fx;
 
 /// Width of one device panel.
 const DEV_W: f32 = 560.0;
 
+/// Return track `r` is device target `RETURN + r`; a plain number is a track.
+use crate::engine::RETURN;
+
 impl App {
+    /// The track (or return track) device target `k` names.
+    pub(super) fn dev_track(&self, k: usize) -> Option<&Track> {
+        if k >= RETURN { self.returns.get(k - RETURN) } else { self.tracks.get(k) }
+    }
+
+    fn dev_track_mut(&mut self, k: usize) -> Option<&mut Track> {
+        if k >= RETURN { self.returns.get_mut(k - RETURN) } else { self.tracks.get_mut(k) }
+    }
+
     /// Show track `t`'s effects in the detail view (clicking its name, as in Live).
     pub(super) fn show_track_devices(&mut self, t: usize) {
         self.set_active(t);
+        self.device_target = t;
         self.show_devices = true;
         self.devices_over = (self.sel_clip, self.sel_slot);
     }
 
-    /// Add effect `name` to track `t` and show its chain.
-    pub(super) fn add_device(&mut self, t: usize, name: &str) {
-        let Some(d) = Device::new(name, t, self.tracks.len()) else { return };
+    /// Show return track `r`'s effects in the detail view.
+    pub(super) fn show_return_devices(&mut self, r: usize) {
+        self.device_target = RETURN + r;
+        self.show_devices = true;
+        self.devices_over = (self.sel_clip, self.sel_slot);
+    }
+
+    /// Add effect `name` to track (or return track) `k` and show its chain.
+    pub(super) fn add_device(&mut self, k: usize, name: &str) {
+        let Some(d) = Device::new(name, k, self.tracks.len()) else { return };
+        if self.dev_track(k).is_none() {
+            return;
+        }
         self.push_undo("Add Effect");
-        self.tracks[t].devices.push(d);
-        self.show_track_devices(t);
+        let t = self.dev_track_mut(k).unwrap();
+        t.devices.push(d);
+        let tn = t.name.clone();
+        if k >= RETURN { self.show_return_devices(k - RETURN) } else { self.show_track_devices(k) }
         self.dirty = true;
         self.refresh_playback();
-        self.status = format!("Added {name} to {}", self.tracks[t].name);
+        self.status = format!("Added {name} to {tn}");
     }
 
     /// The menu of effects to add to track `t`.
@@ -39,8 +65,8 @@ impl App {
 
     /// The selected track's device chain in `r`.
     pub(super) fn device_view(&mut self, ui: &mut egui::Ui, r: Rect) {
-        let t = self.active.min(self.tracks.len().saturating_sub(1));
-        let Some(track) = self.tracks.get(t) else { return };
+        let t = if self.device_target >= RETURN { self.device_target } else { self.active.min(self.tracks.len().saturating_sub(1)) };
+        let Some(track) = self.dev_track(t) else { return };
         ui.painter().rect_filled(r, 0.0, gray(236));
         let before = track.devices.clone();
         let mut chain = before.clone();
@@ -79,9 +105,11 @@ impl App {
                         let body = Rect::from_min_max(Pos2::new(panel.left() + 10.0, title.bottom() + 4.0), panel.max - Vec2::splat(6.0));
                         // A child that doesn't move the row along (the panel already did).
                         let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(body).id_salt(("device", i)));
-                        match d {
-                            Device::Spacer(s) => active |= spacer_panel(&mut inner, s, &others, cuts[i]),
-                        }
+                        active |= match d {
+                            Device::Spacer(s) => spacer_panel(&mut inner, s, &others, cuts[i]),
+                            Device::Reverb(s) => reverb_panel(&mut inner, s),
+                            Device::Delay(s) => delay_panel(&mut inner, s),
+                        };
                     }
                     // + Add Effect, as Live's "Drop Audio Effects Here".
                     let h = ui.available_height();
@@ -111,7 +139,9 @@ impl App {
                 self.push_undo(if remove.is_some() { "Remove Effect" } else { "Effect Settings" });
                 self.device_edit = true;
             }
-            self.tracks[t].devices = chain;
+            if let Some(tr) = self.dev_track_mut(t) {
+                tr.devices = chain;
+            }
             self.dirty = true;
             self.refresh_playback();
         }
@@ -143,7 +173,6 @@ fn spacer_panel(ui: &mut egui::Ui, s: &mut spacer::Settings, others: &[(usize, S
             }
         });
         ui.end_row();
-        let busy = |w: &egui::Response| w.dragged() || w.has_focus();
         ui.label("Amount");
         let mut pct = s.amount * 100.0;
         let w = ui.add(egui::Slider::new(&mut pct, 0.0..=100.0).suffix(" %").fixed_decimals(0));
@@ -196,5 +225,80 @@ fn spacer_panel(ui: &mut egui::Ui, s: &mut spacer::Settings, others: &[(usize, S
         p.text(r.center_bottom() - Vec2::new(0.0, 6.0), Align2::CENTER_BOTTOM, label, FontId::proportional(9.5), muted());
         p.text(r.left_top() + Vec2::new(3.0, 2.0), Align2::LEFT_TOP, "cut", FontId::proportional(9.0), muted());
     }
+    active
+}
+
+/// Whether a control is being dragged or typed in.
+fn busy(w: &egui::Response) -> bool {
+    w.dragged() || w.has_focus()
+}
+
+/// A 0..1 setting as a percentage slider.
+fn pct(ui: &mut egui::Ui, v: &mut f32) -> bool {
+    let mut p = *v * 100.0;
+    let w = ui.add(egui::Slider::new(&mut p, 0.0..=100.0).suffix(" %").fixed_decimals(0));
+    *v = p / 100.0;
+    busy(&w)
+}
+
+/// Reverb's controls.
+fn reverb_panel(ui: &mut egui::Ui, s: &mut fx::ReverbSettings) -> bool {
+    let mut active = false;
+    ui.spacing_mut().slider_width = 160.0;
+    egui::Grid::new("reverbgrid").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+        ui.label("Size");
+        active |= pct(ui, &mut s.size);
+        ui.end_row();
+        ui.label("Damping");
+        active |= pct(ui, &mut s.damping);
+        ui.end_row();
+        ui.label("Width");
+        active |= pct(ui, &mut s.width);
+        ui.end_row();
+        ui.label("Pre-delay");
+        let w = ui.add(egui::Slider::new(&mut s.predelay, 0.0..=200.0).suffix(" ms").fixed_decimals(0));
+        active |= busy(&w);
+        ui.end_row();
+        ui.label("Dry / Wet");
+        active |= pct(ui, &mut s.mix);
+        ui.end_row();
+    });
+    active
+}
+
+/// Delay's controls: the time in notes (synced to the tempo).
+fn delay_panel(ui: &mut egui::Ui, s: &mut fx::DelaySettings) -> bool {
+    const TIMES: [(&str, f32); 8] = [("1/16", 0.25), ("1/8", 0.5), ("3/16", 0.75), ("1/4", 1.0), ("3/8", 1.5), ("1/2", 2.0), ("3/4", 3.0), ("1 bar", 4.0)];
+    let mut active = false;
+    ui.spacing_mut().slider_width = 160.0;
+    egui::Grid::new("delaygrid").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+        ui.label("Time");
+        let current = TIMES.iter().find(|t| (t.1 - s.beats).abs() < 1e-3).map_or("custom", |t| t.0);
+        egui::ComboBox::from_id_salt("delay_time").width(90.0).selected_text(current).show_ui(ui, |ui| {
+            for (n, b) in TIMES {
+                ui.selectable_value(&mut s.beats, b, n);
+            }
+        });
+        ui.end_row();
+        ui.label("Feedback");
+        let mut p = s.feedback * 100.0;
+        let w = ui.add(egui::Slider::new(&mut p, 0.0..=95.0).suffix(" %").fixed_decimals(0));
+        s.feedback = p / 100.0;
+        active |= busy(&w);
+        ui.end_row();
+        ui.label("Ping Pong");
+        ui.checkbox(&mut s.ping_pong, "");
+        ui.end_row();
+        ui.label("Filter");
+        ui.horizontal(|ui| {
+            let a = ui.add(egui::DragValue::new(&mut s.low_cut).range(20.0..=2000.0).speed(2.0).suffix(" Hz").fixed_decimals(0));
+            let b = ui.add(egui::DragValue::new(&mut s.high_cut).range(500.0..=20000.0).speed(20.0).suffix(" Hz").fixed_decimals(0));
+            active |= busy(&a) || busy(&b);
+        });
+        ui.end_row();
+        ui.label("Dry / Wet");
+        active |= pct(ui, &mut s.mix);
+        ui.end_row();
+    });
     active
 }

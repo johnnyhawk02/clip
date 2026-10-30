@@ -35,6 +35,9 @@ pub struct ProjectFile {
     /// The Session view's scene names.
     #[serde(default)]
     pub scenes: Vec<String>,
+    /// Return tracks (none in projects from before them: they get the default two).
+    #[serde(default)]
+    pub returns: Option<Vec<TrackData>>,
     pub rate: u32,
     pub tracks: Vec<TrackData>,
     pub audio: Vec<AudioData>,
@@ -89,6 +92,9 @@ pub struct TrackData {
     /// Its built-in effects, in order.
     #[serde(default)]
     pub devices: Vec<crate::devices::Device>,
+    /// How much it sends to each return track.
+    #[serde(default)]
+    pub sends: Vec<f32>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -192,6 +198,7 @@ mod tests {
             master_gain: 1.0,
             locators: Vec::new(),
             scenes: Vec::new(),
+            returns: None,
             rate: 1000,
             tracks: vec![TrackData {
                 name: "T".into(),
@@ -222,6 +229,7 @@ mod tests {
                 slots: Vec::new(),
                 spacer: None,
                 devices: Vec::new(),
+                sends: Vec::new(),
             }],
             audio: vec![AudioData { rate: 1000, channels: 2, frames: 3 }],
         };

@@ -138,12 +138,17 @@ impl App {
         for m in self.track_meter.iter_mut() {
             *m *= 0.85;
         }
+        self.return_meter.resize(self.returns.len(), 0.0);
+        for m in self.return_meter.iter_mut() {
+            *m *= 0.85;
+        }
         for (t, p) in now {
-            if let Some(m) = self.track_meter.get_mut(t) {
+            let m = if t >= crate::engine::RETURN { self.return_meter.get_mut(t - crate::engine::RETURN) } else { self.track_meter.get_mut(t) };
+            if let Some(m) = m {
                 *m = m.max(p);
             }
         }
-        if self.meter.iter().chain(&self.track_meter).any(|m| *m > 0.001) {
+        if self.meter.iter().chain(&self.track_meter).chain(&self.return_meter).any(|m| *m > 0.001) {
             ctx.request_repaint();
         }
     }

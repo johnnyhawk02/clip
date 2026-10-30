@@ -5,6 +5,8 @@ use super::*;
 
 /// Height of the master channel strip under the tracks.
 const MASTER_H: f32 = 40.0;
+/// Height of a return track's row (above the master).
+const RETURN_H: f32 = 30.0;
 
 /// Where the parts of the arrangement view sit this frame.
 #[derive(Clone, Copy)]
@@ -366,6 +368,9 @@ impl App {
         ui.painter().line_segment([header.right_top(), header.right_bottom()], Stroke::new(1.0, rule()));
         let mut activate = None;
         let mut changed = false;
+        // Sends are heard as they're turned; the project counts as changed once let go.
+        let mut live = false;
+        let n_ret = if self.nest.is_empty() { self.returns.len() } else { 0 };
         for ti in 0..n_tracks {
             let l = lane(ti);
             let r = Rect::from_min_max(Pos2::new(header.left(), l.top()), Pos2::new(header.right() - 1.0, l.bottom()));
@@ -439,7 +444,24 @@ impl App {
                         }
                     });
                 }
+                // Sends to the return tracks, when the lane is tall enough.
+                if inner.height() > 104.0 && n_ret > 0 {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Sends").size(11.0).color(muted()));
+                        t.sends.resize(n_ret, 0.0);
+                        for (r, s) in t.sends.iter_mut().enumerate() {
+                            let (k, _) = ui.allocate_exact_size(Vec2::new(24.0, 30.0), Sense::hover());
+                            let letter = ((b'A' + (r % 26) as u8) as char).to_string();
+                            let (ch, rel) = send_knob(ui, k.center() - Vec2::new(0.0, 4.0), ui.scope_id().with(("send", ti, r)), s, &letter);
+                            live |= ch;
+                            changed |= rel;
+                        }
+                    });
+                }
             });
+        }
+        if live && !changed {
+            self.refresh_playback();
         }
         if let Some(ti) = activate {
             // Clicking a track's header shows its effects below, as in Live.
@@ -708,7 +730,10 @@ impl App {
         let scroll = Rect::from_min_max(Pos2::new(full.left() + header_w, full.bottom() - 15.0), full.max);
         // The master channel sits under the tracks, above the scroll bar.
         let master = Rect::from_min_max(Pos2::new(full.left(), scroll.top() - MASTER_H), Pos2::new(full.right(), scroll.top()));
-        let lanes = Rect::from_min_max(Pos2::new(full.left() + header_w, ruler.bottom()), Pos2::new(full.right(), master.top()));
+        // Return tracks sit just above it (none inside an open group).
+        let n_ret = if self.nest.is_empty() { self.returns.len() } else { 0 };
+        let returns = Rect::from_min_max(Pos2::new(full.left(), master.top() - n_ret as f32 * RETURN_H), Pos2::new(full.right(), master.top()));
+        let lanes = Rect::from_min_max(Pos2::new(full.left() + header_w, ruler.bottom()), Pos2::new(full.right(), returns.top()));
         let n_tracks = self.tracks.len().max(1);
         // Layers are up to 120 points tall, or share all the height (H, as Live's Optimize Height).
         let lane_h = if self.fit_height { lanes.height() / n_tracks as f32 } else { (lanes.height() / n_tracks as f32).min(120.0) };
@@ -1211,7 +1236,81 @@ impl App {
         if !self.tracks.is_empty() {
             let header = Rect::from_min_max(Pos2::new(full.left(), ruler.bottom()), Pos2::new(full.left() + header_w, lanes.bottom()));
             self.track_headers(ui, header, self.tracks.len(), &lane);
+            self.return_strips(ui, returns, header_w);
             self.master_strip(ui, master, header_w);
+        }
+    }
+
+    /// The return tracks, one row each above the master: name (click for its effects), on/off,
+    /// level, volume and pan.
+    fn return_strips(&mut self, ui: &mut egui::Ui, r: Rect, header_w: f32) {
+        if r.height() < 1.0 {
+            return;
+        }
+        let mut changed = false;
+        let mut show = None;
+        let mut delete = None;
+        for (i, ret) in self.returns.iter_mut().enumerate() {
+            let row = Rect::from_min_size(Pos2::new(r.left(), r.top() + i as f32 * RETURN_H), Vec2::new(r.width(), RETURN_H));
+            let p = ui.painter();
+            p.rect_filled(row, 0.0, gray(240));
+            p.line_segment([row.left_top(), row.right_top()], Stroke::new(1.0, gray(205)));
+            p.line_segment([Pos2::new(row.left() + header_w - 1.0, row.top()), Pos2::new(row.left() + header_w - 1.0, row.bottom())], Stroke::new(1.0, rule()));
+            // Header: the activator (its letter) and name.
+            let letter = ((b'A' + (i % 26) as u8) as char).to_string();
+            let act = Rect::from_min_size(Pos2::new(row.left() + 10.0, row.center().y - 9.0), Vec2::new(22.0, 18.0));
+            let ar = ui.interact(act, ui.scope_id().with(("ret_act", i)), Sense::click());
+            let on = !ret.mute;
+            ui.painter().rect(act, 3.0, if on { ink() } else { Color32::TRANSPARENT }, Stroke::new(1.0, ink()), egui::StrokeKind::Inside);
+            ui.painter().text(act.center(), Align2::CENTER_CENTER, &letter, FontId::proportional(11.0), if on { gray(255) } else { ink() });
+            if ar.on_hover_text("Return track on / mute").clicked() {
+                ret.mute = !ret.mute;
+                changed = true;
+            }
+            let name = Rect::from_min_max(Pos2::new(act.right() + 6.0, row.top()), Pos2::new(row.left() + header_w - 6.0, row.bottom()));
+            let nr = ui.interact(name, ui.scope_id().with(("ret_name", i)), Sense::click());
+            let shown = ret.name.strip_prefix(&format!("{letter} ")).unwrap_or(&ret.name).to_string();
+            ui.painter().text(name.left_center(), Align2::LEFT_CENTER, shown, FontId::proportional(12.0), if nr.hovered() { ink() } else { muted() });
+            nr.context_menu(|ui| {
+                if ui.button("Delete Return Track").clicked() {
+                    ui.close();
+                    delete = Some(i);
+                }
+            });
+            if nr.on_hover_text("Show this return track's effects (right-click to delete it)").clicked() {
+                show = Some(i);
+            }
+            // Lane side: level, volume, pan.
+            let lane = Rect::from_min_max(Pos2::new(row.left() + header_w + 12.0, row.top() + 5.0), Pos2::new((row.left() + header_w + 520.0).min(row.right() - 12.0), row.bottom() - 5.0));
+            let level = self.return_meter.get(i).copied().unwrap_or(0.0);
+            let meter = Rect::from_min_size(lane.min + Vec2::new(0.0, 7.0), Vec2::new(160.0, 6.0));
+            draw_meter(ui.painter(), meter, level);
+            let sliders = Rect::from_min_max(Pos2::new(meter.right() + 12.0, lane.top()), lane.max);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(sliders).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+                ui.spacing_mut().slider_width = 110.0;
+                let v = ui.add(egui::Slider::new(&mut ret.gain, 0.0..=2.0).show_value(false)).on_hover_text(format!("Volume {:.0}%", ret.gain * 100.0));
+                if v.double_clicked() {
+                    ret.gain = 1.0;
+                }
+                changed |= v.drag_stopped() || v.double_clicked() || (v.changed() && !v.dragged());
+                ui.label(egui::RichText::new("Pan").size(11.0).color(muted()));
+                ui.spacing_mut().slider_width = 70.0;
+                let pn = ui.add(egui::Slider::new(&mut ret.pan, -1.0..=1.0).show_value(false));
+                if pn.double_clicked() {
+                    ret.pan = 0.0;
+                }
+                changed |= pn.drag_stopped() || pn.double_clicked() || (pn.changed() && !pn.dragged());
+            });
+        }
+        if let Some(i) = show {
+            self.show_return_devices(i);
+        }
+        if let Some(i) = delete {
+            return self.delete_return(i);
+        }
+        if changed {
+            self.dirty = true;
+            self.refresh_playback();
         }
     }
 

@@ -16,7 +16,7 @@ const HEAD_H: f32 = 22.0;
 /// Width of the Main column on the right (scene launch buttons).
 const SCENE_W: f32 = 150.0;
 /// Height of the mixer along the bottom.
-const MIX_H: f32 = 196.0;
+const MIX_H: f32 = 236.0;
 
 /// Live's track activator and Solo colours.
 const ACTIVATOR: Color32 = Color32::from_rgb(255, 173, 86);
@@ -172,7 +172,10 @@ impl App {
             // Main stays pinned to the right, as in Live; the track columns scroll sideways under
             // it (trackpad, Shift-wheel or the bar above the mixer).
             let main_x = area.right() - SCENE_W - 8.0;
-            let tracks_clip = Rect::from_min_max(area.min, Pos2::new(main_x - 4.0, area.bottom()));
+            // The return tracks sit just left of Main, pinned with it.
+            let n_ret = if self.nest.is_empty() { self.returns.len() } else { 0 };
+            let ret_x = |r: usize| main_x - 4.0 - (n_ret - r) as f32 * COL_W;
+            let tracks_clip = Rect::from_min_max(area.min, Pos2::new(ret_x(0) - 4.0, area.bottom()));
             let content_w = n_tracks as f32 * COL_W + 6.0;
             let max_scroll = (content_w - tracks_clip.width()).max(0.0);
             if ui.rect_contains_pointer(tracks_clip) {
@@ -212,6 +215,29 @@ impl App {
             let main_head = Rect::from_min_size(Pos2::new(main_x, top), Vec2::new(SCENE_W, HEAD_H));
             p.rect_filled(main_head, 0.0, gray(200));
             p.text(main_head.left_center() + Vec2::new(6.0, 0.0), Align2::LEFT_CENTER, "Main", FontId::proportional(11.5), ink());
+            for r in 0..n_ret {
+                let head = Rect::from_min_size(Pos2::new(ret_x(r), top), Vec2::new(COL_W - 1.0, HEAD_H));
+                let hr = ui.interact(head, ui.scope_id().with(("rhead", r)), Sense::click());
+                p.rect_filled(head, 0.0, if hr.hovered() { gray(190) } else { gray(205) });
+                p.text(head.left_center() + Vec2::new(5.0, 0.0), Align2::LEFT_CENTER, &self.returns[r].name, FontId::proportional(11.5), ink());
+                let mut delete = false;
+                hr.context_menu(|ui| {
+                    if ui.button("Delete Return Track").clicked() {
+                        ui.close();
+                        delete = true;
+                    }
+                });
+                if hr.on_hover_text("Show this return track's effects (right-click to delete it)").clicked() {
+                    self.show_return_devices(r);
+                }
+                if delete {
+                    self.delete_return(r);
+                    return;
+                }
+                // Return tracks have no clips: a plain column down to the mixer.
+                let col = Rect::from_min_max(Pos2::new(head.left(), head.bottom() + 1.0), Pos2::new(head.right(), stop_top + ROW_H - 1.0));
+                p.rect_filled(col, 0.0, gray(228));
+            }
 
             // The slots and scenes, scrolling up and down between the title bars and the stops.
             let grid = Rect::from_min_max(Pos2::new(area.left(), top + HEAD_H + 1.0), Pos2::new(area.right(), stop_top - 2.0));
@@ -292,8 +318,18 @@ impl App {
                 let level = self.track_meter.get(t).copied().unwrap_or(0.0);
                 let tr = &mut self.tracks[t];
                 if !compact {
-                        changed |= pan_knob(ui, Pos2::new(c.center().x, c.top() + 16.0), ui.scope_id().with(("span", t)), &mut tr.pan);
-                        let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + 38.0), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
+                        // Sends to the return tracks, in a row above the pan knob.
+                        tr.sends.resize(n_ret, 0.0);
+                        let span = 26.0 * n_ret.saturating_sub(1) as f32;
+                        for (r, s) in tr.sends.iter_mut().enumerate() {
+                            let letter = ((b'A' + (r % 26) as u8) as char).to_string();
+                            let kc = Pos2::new(c.center().x - span / 2.0 + r as f32 * 26.0, c.top() + 10.0);
+                            let (ch, rel) = send_knob(ui, kc, ui.scope_id().with(("ssend", t, r)), s, &letter);
+                            changed |= ch;
+                            released |= rel;
+                        }
+                        changed |= pan_knob(ui, Pos2::new(c.center().x, c.top() + 50.0), ui.scope_id().with(("span", t)), &mut tr.pan);
+                        let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + 72.0), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
                         let (ch, rel) = fader(ui, fr, ui.scope_id().with(("sfader", t)), &mut tr.gain, &[level]);
                         changed |= ch;
                         released |= rel;
@@ -335,16 +371,42 @@ impl App {
                     self.session_scroll = (self.session_scroll + r.drag_delta().x * max_scroll / (bar.width() - w).max(1.0)).clamp(0.0, max_scroll);
                 }
             }
+            // The return tracks' mixers: pan, level and fader, and the activator (their letter).
+            for r in 0..n_ret {
+                let x = ret_x(r);
+                let c = Rect::from_min_max(Pos2::new(x, mix_top + 6.0), Pos2::new(x + COL_W - 1.0, area.bottom() - 6.0));
+                ui.painter().line_segment([Pos2::new(c.left() - 1.0, c.top()), Pos2::new(c.left() - 1.0, c.bottom())], Stroke::new(1.0, rule()));
+                let level = self.return_meter.get(r).copied().unwrap_or(0.0);
+                let ret = &mut self.returns[r];
+                if !compact {
+                    changed |= pan_knob(ui, Pos2::new(c.center().x, c.top() + 50.0), ui.scope_id().with(("rpan", r)), &mut ret.pan);
+                    let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + 72.0), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
+                    let (ch, rel) = fader(ui, fr, ui.scope_id().with(("rfader", r)), &mut ret.gain, &[level]);
+                    changed |= ch;
+                    released |= rel;
+                    ui.painter().text(Pos2::new(c.center().x, fr.bottom() + 6.0), Align2::CENTER_TOP, db_text(ret.gain), FontId::proportional(10.5), muted());
+                }
+                let act = Rect::from_min_size(Pos2::new(c.center().x - 15.0, c.bottom() - 18.0), Vec2::new(30.0, 18.0));
+                let ar = ui.interact(act, ui.scope_id().with(("ract", r)), Sense::click());
+                let on = !ret.mute;
+                ui.painter().rect(act, 2.0, if on { ACTIVATOR } else { gray(225) }, Stroke::new(1.0, gray(170)), egui::StrokeKind::Inside);
+                ui.painter().text(act.center(), Align2::CENTER_CENTER, ((b'A' + (r % 26) as u8) as char).to_string(), FontId::proportional(11.0), if on { DARK_TEXT } else { muted() });
+                if ar.on_hover_text("Return track on / mute").clicked() {
+                    ret.mute = !ret.mute;
+                    changed = true;
+                    released = true;
+                }
+            }
             // The Main track's fader, with the output meters.
             if !compact {
-            let c = Rect::from_min_max(Pos2::new(main_x, mix_top + 6.0), Pos2::new(main_x + SCENE_W, area.bottom() - 6.0));
-            let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + 38.0), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
-            let meters = [self.meter.first().copied().unwrap_or(0.0), self.meter.get(1).copied().unwrap_or(0.0)];
-            let (ch, rel) = fader(ui, fr, ui.scope_id().with("smain"), &mut self.master_gain, &meters);
-            changed |= ch;
-            released |= rel;
-            ui.painter().text(Pos2::new(c.center().x, fr.bottom() + 6.0), Align2::CENTER_TOP, db_text(self.master_gain), FontId::proportional(10.5), muted());
-            ui.painter().text(Pos2::new(c.center().x, c.bottom() - 9.0), Align2::CENTER_CENTER, "Main", FontId::proportional(11.0), muted());
+                let c = Rect::from_min_max(Pos2::new(main_x, mix_top + 6.0), Pos2::new(main_x + SCENE_W, area.bottom() - 6.0));
+                let fr = Rect::from_min_max(Pos2::new(c.center().x - 22.0, c.top() + 72.0), Pos2::new(c.center().x + 22.0, c.bottom() - 44.0));
+                let meters = [self.meter.first().copied().unwrap_or(0.0), self.meter.get(1).copied().unwrap_or(0.0)];
+                let (ch, rel) = fader(ui, fr, ui.scope_id().with("smain"), &mut self.master_gain, &meters);
+                changed |= ch;
+                released |= rel;
+                ui.painter().text(Pos2::new(c.center().x, fr.bottom() + 6.0), Align2::CENTER_TOP, db_text(self.master_gain), FontId::proportional(10.5), muted());
+                ui.painter().text(Pos2::new(c.center().x, c.bottom() - 9.0), Align2::CENTER_CENTER, "Main", FontId::proportional(11.0), muted());
             }
         }
         if changed {

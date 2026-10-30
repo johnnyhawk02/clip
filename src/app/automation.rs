@@ -211,6 +211,17 @@ impl App {
                         self.status = format!("saveproj {arg}: {r:?}");
                     }
                     "openproj" => self.open_project(PathBuf::from(arg)),
+                    "send" => {
+                        // send:t|r|amount sets track t's send to return r.
+                        let v: Vec<&str> = arg.split('|').collect();
+                        if let (Some(t), Some(r), Some(x)) = (v.first().and_then(|s| s.parse::<usize>().ok()), v.get(1).and_then(|s| s.parse::<usize>().ok()), v.get(2).and_then(|s| s.parse::<f32>().ok())) {
+                            if let Some(tr) = self.tracks.get_mut(t) {
+                                tr.sends.resize(tr.sends.len().max(r + 1), 0.0);
+                                tr.sends[r] = x;
+                            }
+                            self.refresh_playback();
+                        }
+                    }
                     "spacer" => {
                         // spacer:t|source gives track t a Spacer making room for track source.
                         let mut it = arg.split('|').filter_map(|v| v.parse::<usize>().ok());
@@ -224,7 +235,7 @@ impl App {
                     "playhead" => self.arr_cursor = (arg.parse::<f64>().unwrap_or(0.0) * rate) as usize,
                     "liveexport" => {
                         // What the live engine plays, rendered start to end (to compare with export).
-                        let song = tracks::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain, None, &self.session_play);
+                        let song = tracks::song(&self.tracks, &self.returns, self.rate(), self.arrangement_frames(), self.master_gain, None, self.beat_frames(), &self.session_play);
                         let mut out = vec![[0.0f32; 2]; song.end];
                         song.render(0.0, 1.0, &mut out);
                         let a = Audio { rate: song.rate, channels: vec![out.iter().map(|f| f[0]).collect(), out.iter().map(|f| f[1]).collect()] };

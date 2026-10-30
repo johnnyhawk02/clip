@@ -6,7 +6,8 @@ use crate::engine;
 
 /// The song as the live engine plays it: the heard tracks' clips, read straight from their audio
 /// (a re-pitched clip from its original, at the speed the tempo needs), mixed as in Live.
-pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32, click: Option<(f64, u32)>, session: &[TrackPlay]) -> engine::Song {
+#[allow(clippy::too_many_arguments)]
+pub(super) fn song(tracks: &[Track], returns: &[Track], rate: u32, end: usize, master: f32, click: Option<(f64, u32)>, beat: f64, session: &[TrackPlay]) -> engine::Song {
     let any_solo = tracks.iter().any(|t| t.solo);
     let mut open = false;
     let layers: Vec<engine::LayerSrc> = tracks
@@ -39,10 +40,21 @@ pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32, click: 
     let order: Vec<usize> = layers.iter().map(|l| l.track).collect();
     for l in &mut layers {
         l.devices = tracks[l.track].devices.iter().map(|d| (*d, d.source().and_then(|s| order.iter().position(|&t| t == s)))).collect();
+        l.sends = (0..returns.len()).map(|r| tracks[l.track].sends.get(r).copied().unwrap_or(0.0)).collect();
     }
+    // Return tracks (a muted one stays in place, silent, so the sends still line up).
+    let returns = returns
+        .iter()
+        .enumerate()
+        .map(|(r, t)| {
+            let mut l = engine::LayerSrc::new(engine::RETURN + r, if t.mute { 0.0 } else { t.gain }, if t.pan == 0.0 { (1.0, 1.0) } else { effects::pan_gains(t.pan) }, Vec::new());
+            l.devices = t.devices.iter().map(|d| (*d, None)).collect();
+            l
+        })
+        .collect();
     // While a Session clip plays on, so does the transport.
     let end = if open { end.max(1) + FOREVER } else { end };
-    engine::Song { layers, end, rate, master, click }
+    engine::Song { layers, end, rate, master, click, returns, beat }
 }
 
 /// How long a launched clip can play on for (about a week of frames).
@@ -74,6 +86,34 @@ impl App {
         for t in &mut self.tracks {
             t.devices = std::mem::take(&mut t.devices).into_iter().filter_map(|d| d.remap(&f)).collect();
         }
+    }
+
+    /// Tracks ▸ Insert Return Track: a new, empty return (C, D…) with every send at nothing.
+    pub(super) fn add_return(&mut self) {
+        self.push_undo("Insert Return Track");
+        let letter = (b'A' + (self.returns.len() % 26) as u8) as char;
+        self.returns.push(Track::new_return(format!("{letter} Return")));
+        let r = self.returns.len() - 1;
+        self.show_return_devices(r);
+        self.dirty = true;
+        self.refresh_playback();
+    }
+
+    /// Remove return track `r` and every track's send to it.
+    pub(super) fn delete_return(&mut self, r: usize) {
+        if r >= self.returns.len() {
+            return;
+        }
+        self.push_undo("Delete Return Track");
+        self.returns.remove(r);
+        for t in &mut self.tracks {
+            if r < t.sends.len() {
+                t.sends.remove(r);
+            }
+        }
+        self.show_devices = false;
+        self.dirty = true;
+        self.refresh_playback();
     }
 
     pub(super) fn add_track(&mut self, track: Track, label: &'static str) {

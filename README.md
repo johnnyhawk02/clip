@@ -53,6 +53,16 @@ header) and they show along the bottom, each with its on/off switch, settings an
 and + Add Effect at the end. Right-click a track ▸ Add Effect, or Tracks ▸ Add Spacer, adds one
 too. Effects run in order, live and in exports, and are saved with the project.
 
+### Return tracks
+
+As in Live, every song has return tracks: A with a Reverb and B with a Delay to start. Each
+track's send knobs (A, B…) feed them after its volume and pan; in the Session view they sit at
+the top of each track's mixer, in the song view in the track header when it's tall enough. The
+returns show as columns beside Main in the Session view and as rows above Master in the song
+view, with their own volume, pan and on/off; click one's name for its effects. Tracks ▸ Insert
+Return Track adds another, right-click one to delete it. Reverb (size, damping, width,
+pre-delay) and Delay (tempo-synced time, feedback, ping-pong, filter) can go on any track too.
+
 ### Spacer
 
 A Trackspacer-style ducker: add it and pick the track to make room for. Wherever that track plays, this one is turned down only at the

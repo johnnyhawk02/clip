@@ -280,6 +280,7 @@ impl App {
                     palette: true,
                     spacer: None,
                     devices: t.devices.clone(),
+                    sends: t.sends.clone(),
                     mute: t.mute,
                     solo: t.solo,
                     clips: t
@@ -334,6 +335,7 @@ impl App {
             arr_loop: self.arr_loop,
             locators: self.locators.clone(),
             scenes: self.scenes.clone(),
+            returns: Some(tracks_data(&self.returns, &mut pool)),
             looping: self.looping,
             master_gain: self.master_gain,
             rate: self.rate(),
@@ -369,6 +371,7 @@ impl App {
                     (track.gain, track.pan, track.mute, track.solo) = (t.gain, t.pan, t.mute, t.solo);
                     // Projects from before the device chain kept one Spacer per track.
                     track.devices = t.devices.clone();
+                    track.sends = t.sends.clone();
                     if let (true, Some(s)) = (track.devices.is_empty(), t.spacer) {
                         track.devices.push(devices::Device::Spacer(s));
                     }
@@ -413,6 +416,7 @@ impl App {
         self.tracks = Vec::new();
         let tracks = build(self, &file.tracks, &audio, rate);
         self.tracks = tracks;
+        self.returns = file.returns.as_ref().map_or_else(default_returns, |r| build(self, r, &audio, rate));
         self.nest.clear();
         self.undo.clear();
         self.redo.clear();

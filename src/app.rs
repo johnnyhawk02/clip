@@ -111,6 +111,7 @@ const RULER_H: f32 = 30.0;
 struct Snapshot {
     audio: Option<Arc<Audio>>,
     tracks: Vec<Track>,
+    returns: Vec<Track>,
     nest: Vec<NestFrame>,
     active: usize,
     sel_clip: Option<(usize, usize)>,
@@ -387,6 +388,12 @@ pub struct App {
     /// it was opened over (another selection closes it), and whether a change is under way.
     show_devices: bool,
     devices_over: (Option<(usize, usize)>, Option<(usize, usize)>),
+    /// Whose effects it shows: a track, or return track `r` as `engine::RETURN + r`.
+    device_target: usize,
+    /// Return tracks (Live's A, B…), fed by each track's sends.
+    returns: Vec<Track>,
+    /// Each return track's level meter.
+    return_meter: Vec<f32>,
     /// How far the Session view's track columns are scrolled sideways (px).
     session_scroll: f32,
     device_edit: bool,
@@ -412,6 +419,18 @@ fn crossfeed_pref() -> PathBuf {
 fn on_time_sel(a: Action) -> bool {
     use Action::*;
     matches!(a, ReverseClip | SwapSection | SliceClip | CollapseClip | WarpClip | LoopClip | Copy | Cut | AddToPool | GroupClips)
+}
+
+/// A new song's return tracks, as Live's: A with a Reverb, B with a Delay.
+fn default_returns() -> Vec<Track> {
+    [("A Reverb", "Reverb"), ("B Delay", "Delay")]
+        .iter()
+        .map(|(name, fx)| {
+            let mut t = Track::new_return(*name);
+            t.devices = devices::Device::new(fx, 0, 1).into_iter().collect();
+            t
+        })
+        .collect()
 }
 
 /// A new song's scenes (Session view rows), as Live's: eight, numbered.
@@ -612,7 +631,10 @@ impl App {
             show_record: false,
             show_devices: false,
             devices_over: (None, None),
+            device_target: 0,
             session_scroll: 0.0,
+            returns: default_returns(),
+            return_meter: Vec::new(),
             device_edit: false,
             rec_meter: 0.0,
             curve: None,
@@ -683,7 +705,9 @@ impl App {
                 // Inside an open group its own tracks play, as an arrangement (the Session view's
                 // launches belong to the tracks outside).
                 let session = if self.nest.is_empty() { &self.session_play[..] } else { &[] };
-                let song = tracks::song(&self.tracks, self.rate(), self.arrangement_frames(), self.master_gain, click, session);
+                // Return tracks belong to the song, not to an open group.
+                let returns = if self.nest.is_empty() { &self.returns[..] } else { &[] };
+                let song = tracks::song(&self.tracks, returns, self.rate(), self.arrangement_frames(), self.master_gain, click, self.beat_frames(), session);
                 self.player.set_song(Arc::new(song));
                 self.play_audio = None;
                 return;
@@ -721,13 +745,13 @@ impl App {
 
     /// Mix of all audible tracks at the level being shown (solo wins over mute).
     fn mixdown(&self) -> Audio {
-        let mix = self.master(self.render_tracks(&self.tracks));
+        let mix = self.master(self.render_tracks(&self.tracks, self.nest.is_empty()));
         if self.auto_gain { auto_gain(mix) } else { mix }
     }
 
     /// The whole song's mix, whichever group is open.
     fn song_mix(&self) -> Audio {
-        let mix = self.master(self.render_tracks(&self.song_tracks()));
+        let mix = self.master(self.render_tracks(&self.song_tracks(), true));
         if self.auto_gain { auto_gain(mix) } else { mix }
     }
 
@@ -757,7 +781,7 @@ impl App {
     /// Put new content into a group clip and re-render it, keeping its trim where possible.
     fn set_group_content(&self, c: &mut Clip, tracks: Vec<Track>) {
         let showed_all = c.trim == 0 && c.len >= c.audio.frames();
-        let audio = Arc::new(self.render_tracks(&tracks));
+        let audio = Arc::new(self.render_tracks(&tracks, false));
         c.peaks = Arc::new(Peaks::build(&audio));
         c.len = if showed_all { audio.frames() } else { c.len.min(audio.frames().saturating_sub(c.trim)) };
         c.audio = audio;
@@ -765,7 +789,7 @@ impl App {
     }
 
     /// The mix of a set of tracks, with their volumes and pan (solo wins over mute), as in Live.
-    fn render_tracks(&self, tracks: &[Track]) -> Audio {
+    fn render_tracks(&self, tracks: &[Track], with_returns: bool) -> Audio {
         let any_solo = tracks.iter().any(|t| t.solo);
         let idx: Vec<usize> = (0..tracks.len()).filter(|&i| if any_solo { tracks[i].solo } else { !tracks[i].mute }).collect();
         let mut rendered: Vec<(Audio, f32, f32)> = idx.iter().map(|&i| (self.render_track(&tracks[i]), tracks[i].gain, tracks[i].pan)).collect();
@@ -785,13 +809,44 @@ impl App {
                 let mut main = frames(&rendered[k].0, 1.0, n);
                 for d in t.devices.iter().filter(|d| d.on()) {
                     let side = d.source().and_then(|s| idx.iter().position(|&i| i == s)).filter(|&s| s != k).map(|s| frames(&rendered[s].0, rendered[s].1, n));
-                    devices::State::new(d, self.rate()).process(d, &mut main, side.as_deref());
+                    devices::State::new(d, self.rate()).process(d, &mut main, side.as_deref(), self.beat_frames());
                 }
                 Audio { rate: self.rate(), channels: vec![main.iter().map(|f| f[0]).collect(), main.iter().map(|f| f[1]).collect()] }
             })
             .collect();
         for (r, d) in rendered.iter_mut().zip(ducked) {
             r.0 = d;
+        }
+        // Return tracks, fed by the sends after each track's volume and pan (with room for a
+        // reverb or delay tail after the end).
+        let returns: &[Track] = if with_returns { &self.returns } else { &[] };
+        if idx.iter().any(|&i| tracks[i].sends.iter().take(returns.len()).any(|&s| s > 0.0)) {
+            let rate = self.rate();
+            let n = rendered.iter().map(|r| r.0.frames()).max().unwrap_or(0) + rate as usize * 3;
+            let mut outs = Vec::new();
+            for (r, ret) in returns.iter().enumerate() {
+                let mut buf = vec![[0.0f32; 2]; n];
+                for (k, &i) in idx.iter().enumerate() {
+                    let s = tracks[i].sends.get(r).copied().unwrap_or(0.0);
+                    if s <= 0.0 {
+                        continue;
+                    }
+                    let (pl, pr) = if tracks[i].pan == 0.0 { (1.0, 1.0) } else { effects::pan_gains(tracks[i].pan) };
+                    let a = &rendered[k].0;
+                    let g = rendered[k].1 * s;
+                    let last = a.num_channels().saturating_sub(1);
+                    for (j, f) in buf.iter_mut().enumerate().take(a.frames()) {
+                        f[0] += a.channels[0][j] * g * pl;
+                        f[1] += a.channels[1.min(last)][j] * g * pr;
+                    }
+                }
+                for d in ret.devices.iter().filter(|d| d.on()) {
+                    devices::State::new(d, rate).process(d, &mut buf, None, self.beat_frames());
+                }
+                let audio = Audio { rate, channels: vec![buf.iter().map(|f| f[0]).collect(), buf.iter().map(|f| f[1]).collect()] };
+                outs.push((audio, if ret.mute { 0.0 } else { ret.gain }, ret.pan));
+            }
+            rendered.extend(outs);
         }
         let inputs: Vec<(&Audio, f32, f32)> = rendered.iter().map(|(a, g, p)| (a, *g, *p)).collect();
         effects::mix_panned(&inputs, self.rate())
