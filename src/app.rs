@@ -896,11 +896,11 @@ impl App {
 
     /// Extent of the timeline: the clip's length in the editor, or the end of the last clip
     /// in the arrangement.
+    /// The waveform editor's length: the sound it shows. (It once used the song's length in the
+    /// Arrangement view, so the detail view under it zoomed to the song: an empty one squeezed a
+    /// Session clip's waveform down to a flat line.)
     fn timeline_frames(&self) -> usize {
-        match self.view {
-            View::Editor { .. } => self.frames(),
-            View::Arrangement => self.arrangement_frames(),
-        }
+        self.frames()
     }
 
     fn arrangement_frames(&self) -> usize {
