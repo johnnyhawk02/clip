@@ -6,6 +6,7 @@ use crate::fx;
 use crate::spacer;
 use crate::tape;
 use crate::phaser;
+use crate::chorus;
 use crate::pultec;
 use crate::riser;
 
@@ -19,6 +20,7 @@ pub enum Device {
     Spring(fx::SpringSettings),
     Tape(tape::Settings),
     Phaser(phaser::Settings),
+    Chorus(chorus::Settings),
     Pultec(pultec::Settings),
     Riser(riser::Settings),
 }
@@ -30,6 +32,7 @@ pub const ALL: &[(&str, &str)] = &[
     ("Delay", "Echoes in time with the song"),
     ("Tape", "A tape echo: each repeat recorded onto modelled tape, warmer, darker and wobblier as it goes round (after Chowdhury's tape machine model)"),
     ("Phaser", "Sweeping notches from four JFET all-pass stages, as in the 1974 MXR Phase 90 (after Giampiccolo et al.)"),
+    ("Chorus", "Bucket-brigade chorus: Juno, Dimension and string-ensemble modes, plus tape and clean digital ones (after Holters and Parker's BBD model)"),
     ("Pultec", "The Pultec EQP-1A's passive EQ: broad, musical boosts and cuts; boost and cut the lows together for the low-end trick (after Barrera's model)"),
     ("Riser", "One knob for a build-up: as Amount goes up the sound thins, drives into tape, widens and washes out into echoes and reverb"),
     ("Spacer", "Ducks this track only at the frequencies another track is playing, so they sit together"),
@@ -45,6 +48,7 @@ impl Device {
             "Spring" => Some(Device::Spring(fx::SpringSettings::default())),
             "Tape" => Some(Device::Tape(tape::Settings::default())),
             "Phaser" => Some(Device::Phaser(phaser::Settings::default())),
+            "Chorus" => Some(Device::Chorus(chorus::Settings::default())),
             "Pultec" => Some(Device::Pultec(pultec::Settings::default())),
             "Riser" => Some(Device::Riser(riser::Settings::default())),
             _ => None,
@@ -59,6 +63,7 @@ impl Device {
             Device::Spring(_) => "Spring",
             Device::Tape(_) => "Tape",
             Device::Phaser(_) => "Phaser",
+            Device::Chorus(_) => "Chorus",
             Device::Pultec(_) => "Pultec",
             Device::Riser(_) => "Riser",
         }
@@ -72,6 +77,7 @@ impl Device {
             Device::Spring(s) => s.on,
             Device::Tape(s) => s.on,
             Device::Phaser(s) => s.on,
+            Device::Chorus(s) => s.on,
             Device::Pultec(s) => s.on,
             Device::Riser(s) => s.on,
         }
@@ -85,6 +91,7 @@ impl Device {
             Device::Spring(s) => s.on = on,
             Device::Tape(s) => s.on = on,
             Device::Phaser(s) => s.on = on,
+            Device::Chorus(s) => s.on = on,
             Device::Pultec(s) => s.on = on,
             Device::Riser(s) => s.on = on,
         }
@@ -94,7 +101,7 @@ impl Device {
     pub fn source(&self) -> Option<usize> {
         match self {
             Device::Spacer(s) => Some(s.source),
-            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Pultec(_) | Device::Riser(_) => None,
+            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Riser(_) => None,
         }
     }
 
@@ -102,7 +109,7 @@ impl Device {
     pub fn remap(mut self, f: &impl Fn(usize) -> Option<usize>) -> Option<Device> {
         match &mut self {
             Device::Spacer(s) => s.source = f(s.source)?,
-            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Pultec(_) | Device::Riser(_) => {}
+            Device::Reverb(_) | Device::Delay(_) | Device::Spring(_) | Device::Tape(_) | Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) | Device::Riser(_) => {}
         }
         Some(self)
     }
@@ -116,6 +123,7 @@ pub enum State {
     Spring(fx::Spring),
     Tape(Box<tape::Tape>),
     Phaser(phaser::Phaser),
+    Chorus(Box<chorus::Chorus>),
     Pultec(Box<pultec::Pultec>),
     Riser(Box<riser::Riser>),
 }
@@ -129,6 +137,7 @@ impl State {
             Device::Spring(_) => State::Spring(fx::Spring::new(rate)),
             Device::Tape(_) => State::Tape(Box::new(tape::Tape::new(rate))),
             Device::Phaser(_) => State::Phaser(phaser::Phaser::new(rate)),
+            Device::Chorus(_) => State::Chorus(Box::new(chorus::Chorus::new(rate))),
             Device::Pultec(_) => State::Pultec(Box::new(pultec::Pultec::new(rate))),
             Device::Riser(_) => State::Riser(Box::new(riser::Riser::new(rate))),
         }
@@ -148,6 +157,7 @@ impl State {
             (State::Spring(st), Device::Spring(s)) => st.process(s, main),
             (State::Tape(st), Device::Tape(s)) => st.process(s, main, beat),
             (State::Phaser(st), Device::Phaser(s)) => st.process(s, main),
+            (State::Chorus(st), Device::Chorus(s)) => st.process(s, main),
             (State::Pultec(st), Device::Pultec(s)) => st.process(s, main),
             (State::Riser(st), Device::Riser(s)) => st.process(s, main, beat),
             _ => {}

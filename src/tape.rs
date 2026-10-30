@@ -223,13 +223,36 @@ pub struct Tape {
     /// High-pass in the loop (so the low end can't build up), per side.
     hp: [f32; 2],
     hp_x: [f32; 2],
-    /// Wow and flutter phases, and a slow random drift.
+    wobble: Wobble,
+    seed: u32,
+    lfo: Lfo,
+}
+
+/// Wow and flutter: a slow and a fast sine and a slow random drift, wandering a tape's delay
+/// time. Chorus's Tape mode uses it too.
+#[derive(Default)]
+pub(crate) struct Wobble {
     wow_ph: f32,
     flut_ph: f32,
     drift: f32,
     drift_to: f32,
-    seed: u32,
-    lfo: Lfo,
+}
+
+impl Wobble {
+    /// Advance one sample (`sr` a second, with the tape's speed factor `speed_k`) and give the
+    /// delay-time swing in seconds at full wow. On `new_drift` the drift heads somewhere new,
+    /// drawn from `seed`.
+    pub(crate) fn next(&mut self, new_drift: bool, seed: &mut u32, speed_k: f32, sr: f32) -> f32 {
+        let tau = std::f32::consts::TAU;
+        self.wow_ph = (self.wow_ph + 0.55 * speed_k / sr) % 1.0;
+        self.flut_ph = (self.flut_ph + 7.3 * speed_k / sr) % 1.0;
+        if new_drift {
+            *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            self.drift_to = (*seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
+        }
+        self.drift += (self.drift_to - self.drift) * 2.0 / sr;
+        0.0016 * (tau * self.wow_ph).sin() + 0.00012 * (tau * self.flut_ph).sin() + 0.0008 * self.drift
+    }
 }
 
 /// The delay-time LFO's running state.
@@ -293,10 +316,7 @@ impl Tape {
             hi: 0,
             hp: [0.0; 2],
             hp_x: [0.0; 2],
-            wow_ph: 0.0,
-            flut_ph: 0.0,
-            drift: 0.0,
-            drift_to: 0.0,
+            wobble: Wobble::default(),
             seed: 0x9e37_79b9,
             lfo: Lfo::default(),
         }
@@ -321,19 +341,11 @@ impl Tape {
         let mix = s.mix.clamp(0.0, 1.0);
         let wow = s.wow.clamp(0.0, 1.0);
         let a_hp = (-2.0 * std::f32::consts::PI * 60.0 / self.rate).exp();
-        let tau = std::f32::consts::TAU;
         // Slower tape wobbles slower.
         let speed_k = (s.speed / 7.5).clamp(0.3, 4.0).sqrt();
         for f in main.iter_mut() {
             // Wow (slow) and flutter (fast) as a wandering delay time (§4.4), in samples.
-            self.wow_ph = (self.wow_ph + 0.55 * speed_k / self.rate) % 1.0;
-            self.flut_ph = (self.flut_ph + 7.3 * speed_k / self.rate) % 1.0;
-            if self.i % 2048 == 0 {
-                self.seed = self.seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-                self.drift_to = (self.seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
-            }
-            self.drift += (self.drift_to - self.drift) * 2.0 / self.rate;
-            let wobble = wow * self.rate * (0.0016 * (tau * self.wow_ph).sin() + 0.00012 * (tau * self.flut_ph).sin() + 0.0008 * self.drift);
+            let wobble = wow * self.rate * self.wobble.next(self.i % 2048 == 0, &mut self.seed, speed_k, self.rate);
             // The delay-time LFO.
             let lfo_rate = s.lfo_rate.clamp(0.01, 20.0) as f64 * if s.lfo_slow { 0.01 } else { 1.0 };
             let seed = &mut self.seed;

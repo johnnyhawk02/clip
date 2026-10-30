@@ -1,7 +1,7 @@
 //! Track effects used offline, as the sound-editor effects are: a track device's settings in a
 //! dialog, printed into the selection (or the whole clip) when you press Apply.
 
-use super::deviceview::{delay_panel, phaser_panel, pultec_panel, reverb_panel, riser_panel, spring_panel, tape_panel};
+use super::deviceview::{chorus_panel, delay_panel, phaser_panel, pultec_panel, reverb_panel, riser_panel, spring_panel, tape_panel};
 use super::*;
 use crate::devices::{Device, State};
 
@@ -22,7 +22,7 @@ impl App {
                 Device::Reverb(s) => s.mix = 0.3,
                 Device::Spring(s) => s.mix = 0.3,
                 Device::Tape(s) => s.mix = 0.35,
-                Device::Phaser(_) | Device::Pultec(_) => {}
+                Device::Phaser(_) | Device::Chorus(_) | Device::Pultec(_) => {}
                 // Printed, it rises across the selection: all the way, to a full wash.
                 Device::Riser(s) => s.amount = 1.0,
                 Device::Delay(s) => s.mix = 0.35,
@@ -52,6 +52,7 @@ impl App {
                 Device::Spring(s) => _ = spring_panel(ui, s),
                 Device::Tape(s) => _ = tape_panel(ui, s),
                 Device::Phaser(s) => _ = phaser_panel(ui, s),
+                Device::Chorus(s) => _ = chorus_panel(ui, s),
                 Device::Pultec(s) => _ = pultec_panel(ui, s),
                 Device::Riser(s) => _ = riser_panel(ui, s, true),
                 Device::Spacer(_) => {}
@@ -87,6 +88,7 @@ impl App {
             Device::Spring(_) => "Spring Device",
             Device::Tape(_) => "Tape Device",
             Device::Phaser(_) => "Phaser Device",
+            Device::Chorus(_) => "Chorus Device",
             Device::Pultec(_) => "Pultec Device",
             Device::Riser(_) => "Riser Device",
             Device::Spacer(_) => return,

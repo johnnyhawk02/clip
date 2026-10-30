@@ -7,6 +7,7 @@ use crate::devices::{self, Device};
 use crate::fx;
 use crate::tape;
 use crate::phaser;
+use crate::chorus;
 use crate::pultec;
 use crate::riser;
 
@@ -123,6 +124,7 @@ impl App {
                             Device::Spring(s) => spring_panel(&mut inner, s),
                             Device::Tape(s) => tape_panel(&mut inner, s),
                             Device::Phaser(s) => phaser_panel(&mut inner, s),
+                            Device::Chorus(s) => chorus_panel(&mut inner, s),
                             Device::Pultec(s) => pultec_panel(&mut inner, s),
                             Device::Riser(s) => riser_panel(&mut inner, s, false),
                         };
@@ -439,6 +441,48 @@ pub(super) fn phaser_panel(ui: &mut egui::Ui, s: &mut phaser::Settings) -> bool 
         ui.label("Dry / Wet");
         active |= pct(ui, &mut s.mix);
         ui.end_row();
+    });
+    active
+}
+
+/// Chorus's controls: the mode (which sets its rate), rate, amount, dry/wet, and hiss (Tape: drive).
+pub(super) fn chorus_panel(ui: &mut egui::Ui, s: &mut chorus::Settings) -> bool {
+    let mut active = false;
+    ui.spacing_mut().slider_width = 160.0;
+    egui::Grid::new("chorusgrid").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+        ui.label("Mode");
+        let mut m = s.mode;
+        egui::ComboBox::from_id_salt("chorus_mode").width(120.0).selected_text(chorus::MODES.get(m as usize).copied().unwrap_or("Juno I")).show_ui(ui, |ui| {
+            for (i, n) in chorus::MODES.iter().enumerate() {
+                ui.selectable_value(&mut m, i as u8, *n);
+            }
+        });
+        if m != s.mode {
+            s.set_mode(m);
+        }
+        ui.end_row();
+        ui.label("Rate");
+        let w = ui.add(egui::Slider::new(&mut s.rate, 0.01..=20.0).logarithmic(true).suffix(" Hz").fixed_decimals(2));
+        active |= busy(&w);
+        ui.end_row();
+        ui.label("Amount");
+        let w = { let mut p = s.amount * 100.0; let w = ui.add(egui::Slider::new(&mut p, 0.0..=200.0).suffix(" %").fixed_decimals(0)).on_hover_text("Depth: 100% is the original's"); s.amount = p / 100.0; w };
+        active |= busy(&w);
+        ui.end_row();
+        ui.label("Dry / Wet");
+        let w = pct(ui, &mut s.mix);
+        active |= w;
+        ui.end_row();
+        if chorus::MODES.get(s.mode as usize) != Some(&"Clean") {
+            ui.label("Noise");
+            active |= pct(ui, &mut s.noise);
+            ui.end_row();
+        }
+        if chorus::MODES.get(s.mode as usize) == Some(&"Tape") {
+            ui.label("Drive");
+            active |= pct(ui, &mut s.drive);
+            ui.end_row();
+        }
     });
     active
 }

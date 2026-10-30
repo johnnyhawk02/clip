@@ -15,6 +15,7 @@ mod project;
 mod spacer;
 mod tape;
 mod phaser;
+mod chorus;
 mod pultec;
 mod riser;
 mod recorder;
