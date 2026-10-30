@@ -582,7 +582,7 @@ impl App {
             match if self.split { View::Arrangement } else { self.view } {
                 View::Arrangement => {
                     // Path: Song ▸ Group ▸ … ; click a level to go back up to it.
-                    let mut names: Vec<String> = vec!["Song".into()];
+                    let mut names: Vec<String> = vec!["Arrangement".into()];
                     for f in &self.nest {
                         names.push(f.tracks.get(f.track).and_then(|t| t.clips.get(f.clip)).map_or("Group".into(), |c| c.name.clone()));
                     }
@@ -663,10 +663,10 @@ impl App {
                             }
                         }).response.on_hover_text("When launched clips start: the next bar, beat or none");
                     }
-                    if self.show_session && ui.add(Button::new("● Record to Song").selected(self.session_rec)).on_hover_text("Write the clips you launch into the song view (when playback stops)").clicked() {
+                    if self.show_session && ui.add(Button::new("● Arrangement Record").selected(self.session_rec)).on_hover_text("Write the clips you launch into the Arrangement view (when playback stops)").clicked() {
                         self.session_rec = !self.session_rec;
                     }
-                    if self.session_owns_any() && ui.button("Back to Arrangement").on_hover_text("Tracks play their song-view clips again").clicked() {
+                    if self.session_owns_any() && ui.button("Back to Arrangement").on_hover_text("Tracks play their Arrangement view clips again").clicked() {
                         self.back_to_song_view();
                     }
                     ui.checkbox(&mut self.snap, "Snap").on_hover_text("Snap moves, trims and the playhead to the grid (hold ⌘ to bypass)");

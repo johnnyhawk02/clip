@@ -492,7 +492,7 @@ impl Action {
             AddLocator => "Add Locator",
             RenameLocator => "Rename Locator…",
             Metronome => "Metronome",
-            RecordToSong => "Record Session to Song",
+            RecordToSong => "Arrangement Record",
             PrevLocator => "Previous Locator",
             NextLocator => "Next Locator",
             ShowRegions => "Regions",

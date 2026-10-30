@@ -181,7 +181,7 @@ impl App {
             self.pool.remove(i);
         }
         ui.add_space(8.0);
-        if ui.add_enabled(self.tracks.iter().any(|t| !t.clips.is_empty()), Button::new("Add Loops from Song")).clicked() {
+        if ui.add_enabled(self.tracks.iter().any(|t| !t.clips.is_empty()), Button::new("Add Loops from Arrangement")).clicked() {
             self.gather_pool();
         }
     }

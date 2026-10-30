@@ -799,7 +799,7 @@ impl App {
         }
         self.sel_clip = None;
         self.dirty = true;
-        self.status = "Recorded the session into the song view — Back to Arrangement to hear it there".into();
+        self.status = "Recorded the session into the Arrangement view — Back to Arrangement to hear it there".into();
     }
 
     /// Back to Arrangement (as Live): every track plays its song-view clips again.
@@ -807,7 +807,7 @@ impl App {
         self.session_play.clear();
         self.fit_slots();
         self.refresh_playback();
-        self.status = "Back to the song view's clips".into();
+        self.status = "Back to the Arrangement view's clips".into();
     }
 
     /// Whether any track is playing from the Session view instead of the song view.

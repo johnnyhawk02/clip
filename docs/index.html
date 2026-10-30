@@ -136,9 +136,9 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <ul>
     <li><b>Fill slots</b> by dropping loops from the Finder or the Loop Pool. Drag a clip to another slot to move it, <kbd>⌥</kbd>-drag to copy. Right-click a song clip ▸ <span class="path">Copy to Session</span> puts it in the first empty slot.</li>
     <li><b>Launch</b> a clip with its triangle (a click elsewhere selects it). Launches wait for the next bar (change it with Launch quantize), each track plays one clip, the scene buttons launch a row, a column's square stops its track and <b>Stop All Clips</b> stops everything.</li>
-    <li><b>Copy and paste</b> between slots and the song view with <kbd>⌘C</kbd> <kbd>⌘X</kbd> <kbd>⌘V</kbd>, both ways: into the selected slot (and the ones below), or at the insert marker on the selected track. Warp, loop and colour come along.</li>
+    <li><b>Copy and paste</b> between slots and the Arrangement view with <kbd>⌘C</kbd> <kbd>⌘X</kbd> <kbd>⌘V</kbd>, both ways: into the selected slot (and the ones below), or at the insert marker on the selected track. Warp, loop and colour come along.</li>
     <li><b>Edit</b>: click a clip to see it in the detail view under the grid, double-click to open the full clip editor. Shift-click slots and <kbd>⌘G</kbd> groups them into one clip whose parts play in turn.</li>
-    <li><b>Back to the song:</b> a track playing from the session drowns out its song clips until you press <b>Back to Arrangement</b>. Turn on <b>● Record to Song</b> and what you launch is written into the song view when you stop.</li>
+    <li><b>Back to the Arrangement:</b> a track playing from the session drowns out its Arrangement clips until you press <b>Back to Arrangement</b>. Turn on <b>● Arrangement Record</b> and what you launch is written into the Arrangement view when you stop.</li>
   </ul>
 </section>
 
@@ -150,7 +150,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 <section id="spacer">
   <h2><span class="n">03c</span>Effects and Spacer</h2>
   <p>Each track has a chain of built-in effects, like Live's devices. Click a track's name and they show along the bottom, each with an on/off switch, its settings and × to remove it; <b>+ Add Effect</b> adds another (or right-click a track ▸ <span class="path">Add Effect</span>). Effects run in order, live and in exports, and are saved with the project.</p>
-  <p><b>Return tracks</b>, as in Live: every song starts with A (Reverb) and B (Delay). Each track's send knobs feed them after its volume and pan: at the top of each track's mixer in the Session view, or in the track header in the song view when the lane is tall enough. Returns show beside Main in the Session view and above Master in the song view; click one's name for its effects. <span class="path">Tracks ▸ Insert Return Track</span> adds another; right-click one to delete it.</p>
+  <p><b>Return tracks</b>, as in Live: every song starts with A (Reverb) and B (Delay). Each track's send knobs feed them after its volume and pan: at the top of each track's mixer in the Session view, or in the track header in the Arrangement view when the lane is tall enough. Returns show beside Main in the Session view and above Master in the Arrangement view; click one's name for its effects. <span class="path">Tracks ▸ Insert Return Track</span> adds another; right-click one to delete it.</p>
   <p><b>Reverb</b>, <b>Spring</b> (a spring reverb tank: chirping, boingy echoes, after Parker and Välimäki) and <b>Delay</b> (synced to the tempo, with ping-pong) can go on any track as well.</p>
   <p><b>Spacer</b> is a Trackspacer-style ducker: add it and pick the track to make room for. Wherever that track plays, this one is turned down only at the same frequencies, across 32 bands from 30 Hz to 18 kHz with no latency, so a bass sits under a kick or a pad under a vocal without the whole sound pumping.</p>
   <ul>
@@ -200,7 +200,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
   <ul>
     <li><b>Drag a loop</b> onto any track. It lands on the grid line under the pointer. Drop it below the last track for a new track at the bottom. Drop it on a track above a loop to patch over it.</li>
     <li><b>Add to Pool</b> on a clip's right-click menu puts that exact clip in, trimmed or grouped.</li>
-    <li><b>×</b> takes a loop out. <b>Add Loops from Song</b> brings in any new ones.</li>
+    <li><b>×</b> takes a loop out. <b>Add Loops from Arrangement</b> brings in any new ones.</li>
   </ul>
   <h3>Swap a section <kbd>⇧R</kbd></h3>
   <p>Click a clip and press <kbd>⇧R</kbd>. It becomes a random section of the same length from the pool, in the same place. Press <kbd>⇧R</kbd> again for another, or <kbd>⌘Z</kbd> to go back. Works on several selected clips at once.</p>
@@ -244,7 +244,7 @@ footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line)
 
 <section id="editor">
   <h2><span class="n">09</span>The clip editor</h2>
-  <p>The ruler works like the song view's: bars and beats from the clip's start, a loop strip along the top (whole bars only), and drag the bar numbers to zoom. The black flag is the start marker, as in Live. Drag it and the clip plays from there, looping round so the audio before it comes at the end, while the waveform stays where it is. Right-click the flag and choose <b>Set 1.1.1 Here</b> to count bars from it, with -1, -2 before it.</p>
+  <p>The ruler works like the Arrangement view's: bars and beats from the clip's start, a loop strip along the top (whole bars only), and drag the bar numbers to zoom. The black flag is the start marker, as in Live. Drag it and the clip plays from there, looping round so the audio before it comes at the end, while the waveform stays where it is. Right-click the flag and choose <b>Set 1.1.1 Here</b> to count bars from it, with -1, -2 before it.</p>
   <p>Double-click a clip, or press <kbd>Return</kbd>, to edit its audio in the waveform editor. <b>◀ Arrangement</b> or <kbd>⌘Return</kbd> goes back, and <kbd>⇧Tab</kbd> flips between the two as in Live.</p>
   <figure><img src="img/editor.jpg" alt="The waveform editor showing a stereo loop"><figcaption>Editing one clip. Selections, effects and the pencil work on this clip only.</figcaption></figure>
   <div class="table"><table>
