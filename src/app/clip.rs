@@ -392,11 +392,13 @@ pub(super) struct Track {
     pub(super) color: usize,
     pub(super) mute: bool,
     pub(super) solo: bool,
+    /// Spacer: another track this one makes room for (ducking where that one plays).
+    pub(super) spacer: Option<spacer::Settings>,
 }
 
 impl Track {
     pub(super) fn new(name: impl Into<String>) -> Track {
-        Track { name: name.into(), clips: Vec::new(), slots: Vec::new(), gain: 1.0, pan: 0.0, color: next_color(), mute: false, solo: false }
+        Track { name: name.into(), clips: Vec::new(), slots: Vec::new(), gain: 1.0, pan: 0.0, color: next_color(), mute: false, solo: false, spacer: None }
     }
 }
 

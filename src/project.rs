@@ -83,6 +83,9 @@ pub struct TrackData {
     /// The track's Session view slots (one per scene).
     #[serde(default)]
     pub slots: Vec<Option<ClipData>>,
+    /// Its Spacer, ducking it where another track plays.
+    #[serde(default)]
+    pub spacer: Option<crate::spacer::Settings>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -214,6 +217,7 @@ mod tests {
                     color: None,
                 }],
                 slots: Vec::new(),
+                spacer: None,
             }],
             audio: vec![AudioData { rate: 1000, channels: 2, frames: 3 }],
         };

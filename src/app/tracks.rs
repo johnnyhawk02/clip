@@ -34,6 +34,14 @@ pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32, click: 
             engine::LayerSrc::new(i, t.gain, if t.pan == 0.0 { (1.0, 1.0) } else { effects::pan_gains(t.pan) }, clips)
         })
         .collect();
+    // Spacers: point each at its source's place among the heard tracks.
+    let mut layers = layers;
+    let order: Vec<usize> = layers.iter().map(|l| l.track).collect();
+    for l in &mut layers {
+        if let Some(set) = tracks[l.track].spacer {
+            l.spacer = order.iter().position(|&t| t == set.source).map(|src| (src, set));
+        }
+    }
     // While a Session clip plays on, so does the transport.
     let end = if open { end.max(1) + FOREVER } else { end };
     engine::Song { layers, end, rate, master, click }
@@ -63,9 +71,20 @@ impl App {
         }
     }
 
+    /// Keep each Spacer pointing at the same track after tracks move (none if it's gone).
+    fn remap_spacers(&mut self, f: impl Fn(usize) -> Option<usize>) {
+        for t in &mut self.tracks {
+            t.spacer = t.spacer.and_then(|mut s| {
+                s.source = f(s.source)?;
+                Some(s)
+            });
+        }
+    }
+
     pub(super) fn add_track(&mut self, track: Track, label: &'static str) {
         self.push_undo(label);
         let at = (self.active + 1).min(self.tracks.len());
+        self.remap_spacers(|t| Some(if t >= at { t + 1 } else { t }));
         self.tracks.insert(at, track);
         self.active = at;
         self.dirty = true;
@@ -91,6 +110,12 @@ impl App {
         }
         self.push_undo("Delete Track");
         self.tracks.remove(self.active);
+        let gone = self.active;
+        self.remap_spacers(|t| match t {
+            t if t == gone => None,
+            t if t > gone => Some(t - 1),
+            t => Some(t),
+        });
         self.active = self.active.min(self.tracks.len() - 1);
         self.sel_clip = None;
         self.dirty = true;
@@ -104,6 +129,7 @@ impl App {
         self.push_undo(if up { "Move Track Up" } else { "Move Track Down" });
         self.tracks.swap(a, b);
         let swap = |t: usize| if t == a { b } else if t == b { a } else { t };
+        self.remap_spacers(|t| Some(swap(t)));
         self.sel_clip = self.sel_clip.map(|(t, c)| (swap(t), c));
         self.sel_extra = self.sel_extra.iter().map(|&(t, c)| (swap(t), c)).collect();
         self.active = b;

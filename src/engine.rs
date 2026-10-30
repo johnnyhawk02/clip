@@ -6,6 +6,7 @@ use std::f32::consts::FRAC_PI_2;
 use std::sync::Arc;
 
 use crate::audio::Audio;
+use crate::spacer;
 
 /// One clip, ready to read from the audio thread. Positions are song frames at the tempo the
 /// song is laid out for.
@@ -159,11 +160,15 @@ pub struct LayerSrc {
     pub track: usize,
     /// Loudest it's been since the meters last looked (f32 bits).
     pub peak: std::sync::atomic::AtomicU32,
+    /// Spacer: the layer (index in `Song::layers`) it makes room for, and how.
+    pub spacer: Option<(usize, spacer::Settings)>,
+    /// The Spacer's filters and envelopes, carried from block to block.
+    pub spacer_state: std::sync::Mutex<Option<spacer::Spacer>>,
 }
 
 impl LayerSrc {
     pub fn new(track: usize, gain: f32, pan: (f32, f32), clips: Vec<ClipSrc>) -> LayerSrc {
-        LayerSrc { gain, pan, clips, track, peak: std::sync::atomic::AtomicU32::new(0) }
+        LayerSrc { gain, pan, clips, track, peak: std::sync::atomic::AtomicU32::new(0), spacer: None, spacer_state: std::sync::Mutex::new(None) }
     }
 }
 
@@ -188,23 +193,39 @@ impl Song {
             .iter()
             .map(|l| l.clips.iter().filter(|c| (c.start as f64) < to && (c.end() as f64) > from).collect())
             .collect();
-        let mut peaks = vec![0.0f32; self.layers.len()];
-        for (k, frame) in out.iter_mut().enumerate() {
+        // Each layer's own sound first (its clips, before volume and pan), so a Spacer can duck
+        // one by another.
+        let n = out.len();
+        let mut bufs = vec![vec![[0.0f32; 2]; n]; self.layers.len()];
+        for (k, ..) in out.iter().enumerate() {
             let t = from + step * k as f64;
             let ti = t as usize;
-            *frame = [0.0, 0.0];
-            for (li, layer) in self.layers.iter().enumerate() {
-                let w = layer.gain;
-                let (pl, pr) = layer.pan;
-                let mut lr = [0.0f32; 2];
+            for (li, buf) in bufs.iter_mut().enumerate() {
                 for c in &clips[li] {
                     if ti < c.start || ti >= c.end() {
                         continue;
                     }
-                    let g = w * c.gain(ti);
-                    lr[0] += c.sample(t, 0) * g * pl;
-                    lr[1] += c.sample(t, 1) * g * pr;
+                    let g = c.gain(ti);
+                    buf[k][0] += c.sample(t, 0) * g;
+                    buf[k][1] += c.sample(t, 1) * g;
                 }
+            }
+        }
+        for (li, layer) in self.layers.iter().enumerate() {
+            let Some((src, set)) = layer.spacer.filter(|(src, set)| set.on && *src != li && *src < bufs.len()) else { continue };
+            // The sidechain is the other track after its volume.
+            let g = self.layers[src].gain;
+            let sc: Vec<[f32; 2]> = bufs[src].iter().map(|f| [f[0] * g, f[1] * g]).collect();
+            let mut state = layer.spacer_state.lock().unwrap();
+            state.get_or_insert_with(|| spacer::Spacer::new(self.rate)).process(&set, &mut bufs[li], &sc);
+        }
+        let mut peaks = vec![0.0f32; self.layers.len()];
+        for (k, frame) in out.iter_mut().enumerate() {
+            let t = from + step * k as f64;
+            *frame = [0.0, 0.0];
+            for (li, layer) in self.layers.iter().enumerate() {
+                let (pl, pr) = layer.pan;
+                let lr = [bufs[li][k][0] * layer.gain * pl, bufs[li][k][1] * layer.gain * pr];
                 frame[0] += lr[0];
                 frame[1] += lr[1];
                 peaks[li] = peaks[li].max(lr[0].abs()).max(lr[1].abs());

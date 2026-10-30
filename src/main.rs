@@ -10,6 +10,7 @@ mod engine;
 mod menu;
 mod player;
 mod project;
+mod spacer;
 mod recorder;
 
 fn main() -> eframe::Result {

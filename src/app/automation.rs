@@ -211,6 +211,16 @@ impl App {
                         self.status = format!("saveproj {arg}: {r:?}");
                     }
                     "openproj" => self.open_project(PathBuf::from(arg)),
+                    "spacer" => {
+                        // spacer:t|source gives track t a Spacer making room for track source.
+                        let mut it = arg.split('|').filter_map(|v| v.parse::<usize>().ok());
+                        if let (Some(t), Some(src)) = (it.next(), it.next()) {
+                            if let Some(tr) = self.tracks.get_mut(t) {
+                                tr.spacer = Some(spacer::Settings::new(src));
+                            }
+                            self.refresh_playback();
+                        }
+                    }
                     "playhead" => self.arr_cursor = (arg.parse::<f64>().unwrap_or(0.0) * rate) as usize,
                     "liveexport" => {
                         // What the live engine plays, rendered start to end (to compare with export).

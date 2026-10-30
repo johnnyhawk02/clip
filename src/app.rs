@@ -18,6 +18,7 @@ use crate::menu::NativeMenu;
 use crate::player::Player;
 use crate::project::{self, ClipData, ProjectFile, TrackData};
 use crate::recorder::Recorder;
+use crate::spacer;
 
 mod clip;
 mod chop;
@@ -38,6 +39,7 @@ mod timesel;
 mod clipview;
 mod locators;
 mod session;
+mod spacerview;
 
 use self::clip::*;
 use self::chop::*;
@@ -373,6 +375,9 @@ pub struct App {
     show_cues: bool,
     recorder: Option<Recorder>,
     show_record: bool,
+    /// The Spacer window (for the selected track), and whether a change in it is under way.
+    show_spacer: bool,
+    spacer_edit: bool,
     rec_meter: f32,
     curve: Option<CurveKind>,
     env_points: Vec<(f32, f32)>,
@@ -395,12 +400,6 @@ fn crossfeed_pref() -> PathBuf {
 fn on_time_sel(a: Action) -> bool {
     use Action::*;
     matches!(a, ReverseClip | SwapSection | SliceClip | CollapseClip | WarpClip | LoopClip | Copy | Cut | AddToPool | GroupClips)
-}
-
-/// The tracks that are heard: the soloed ones if any are, otherwise all but the muted ones.
-fn heard(tracks: &[Track]) -> impl Iterator<Item = &Track> {
-    let any_solo = tracks.iter().any(|t| t.solo);
-    tracks.iter().filter(move |t| if any_solo { t.solo } else { !t.mute })
 }
 
 /// A new song's scenes (Session view rows), as Live's: eight, numbered.
@@ -597,6 +596,8 @@ impl App {
             show_cues: false,
             recorder: None,
             show_record: false,
+            show_spacer: false,
+            spacer_edit: false,
             rec_meter: 0.0,
             curve: None,
             env_points: CurveKind::Envelope.flat(),
@@ -746,7 +747,29 @@ impl App {
 
     /// The mix of a set of tracks, with their volumes and pan (solo wins over mute), as in Live.
     fn render_tracks(&self, tracks: &[Track]) -> Audio {
-        let rendered: Vec<(Audio, f32, f32)> = heard(tracks).map(|t| (self.render_track(t), t.gain, t.pan)).collect();
+        let any_solo = tracks.iter().any(|t| t.solo);
+        let idx: Vec<usize> = (0..tracks.len()).filter(|&i| if any_solo { tracks[i].solo } else { !tracks[i].mute }).collect();
+        let mut rendered: Vec<(Audio, f32, f32)> = idx.iter().map(|&i| (self.render_track(&tracks[i]), tracks[i].gain, tracks[i].pan)).collect();
+        // Spacers, as the live engine runs them: each ducked by its source after that track's volume.
+        let ducked: Vec<Audio> = (0..idx.len())
+            .map(|k| {
+                let t = &tracks[idx[k]];
+                let Some(set) = t.spacer.filter(|s| s.on) else { return rendered[k].0.clone() };
+                let Some(src) = idx.iter().position(|&i| i == set.source).filter(|&s| s != k) else { return rendered[k].0.clone() };
+                let frames = |a: &Audio, g: f32, n: usize| -> Vec<[f32; 2]> {
+                    let ch = |c: usize, i: usize| a.channels.get(c.min(a.num_channels().saturating_sub(1))).and_then(|v| v.get(i)).copied().unwrap_or(0.0) * g;
+                    (0..n).map(|i| [ch(0, i), ch(1, i)]).collect()
+                };
+                let n = rendered[k].0.frames();
+                let mut main = frames(&rendered[k].0, 1.0, n);
+                let sc = frames(&rendered[src].0, rendered[src].1, n);
+                spacer::Spacer::new(self.rate()).process(&set, &mut main, &sc);
+                Audio { rate: self.rate(), channels: vec![main.iter().map(|f| f[0]).collect(), main.iter().map(|f| f[1]).collect()] }
+            })
+            .collect();
+        for (r, d) in rendered.iter_mut().zip(ducked) {
+            r.0 = d;
+        }
         let inputs: Vec<(&Audio, f32, f32)> = rendered.iter().map(|(a, g, p)| (a, *g, *p)).collect();
         effects::mix_panned(&inputs, self.rate())
     }
@@ -1309,6 +1332,9 @@ impl eframe::App for App {
         if self.show_record || self.recorder.is_some() {
             self.show_record = true;
             self.record_window(&ctx);
+        }
+        if self.show_spacer {
+            self.spacer_window(&ctx);
         }
         if self.show_spectrum {
             self.spectrum_window(&ctx);

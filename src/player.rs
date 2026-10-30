@@ -87,6 +87,15 @@ impl Player {
     fn set_source(&self, source: Source) {
         let mut s = self.shared.lock().unwrap();
         let n = source.frames();
+        // A new song keeps each track's Spacer running (its envelopes), so edits don't glitch it.
+        if let (Source::Song(old), Source::Song(new)) = (&s.source, &source) {
+            for l in &new.layers {
+                if let Some(o) = old.layers.iter().find(|o| o.track == l.track) {
+                    let state = o.spacer_state.lock().unwrap().take();
+                    *l.spacer_state.lock().unwrap() = state;
+                }
+            }
+        }
         s.source = source;
         s.end = s.end.min(n);
         s.start = s.start.min(s.end);
@@ -151,6 +160,14 @@ impl Player {
         match &self.shared.lock().unwrap().source {
             Source::Song(song) => song.take_track_peaks(),
             Source::Buffer(_) => Vec::new(),
+        }
+    }
+
+    /// Track `t`'s Spacer cuts right now (dB per band, two rows), when it's running.
+    pub fn spacer_cuts(&self, t: usize) -> Option<[[f32; crate::spacer::BANDS]; 2]> {
+        match &self.shared.lock().unwrap().source {
+            Source::Song(song) => song.layers.iter().find(|l| l.track == t)?.spacer_state.lock().unwrap().as_ref().map(|s| s.cut),
+            Source::Buffer(_) => None,
         }
     }
 

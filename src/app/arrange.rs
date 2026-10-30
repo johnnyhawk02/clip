@@ -339,6 +339,9 @@ impl App {
         if item(ui, if mute { "Unmute" } else { "Mute" }, true) {
             chosen = Some(Action::MuteTrack);
         }
+        if item(ui, "Spacer…", self.tracks.len() > 1) {
+            chosen = Some(Action::Spacer);
+        }
         ui.separator();
         if item(ui, "Collapse Track to One Clip", has_clips) {
             collapse = true;
