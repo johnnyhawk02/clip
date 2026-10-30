@@ -525,8 +525,8 @@ impl App {
             self.sel_slots.clear();
             self.sel_slot = Some((t, s));
             self.set_active(t);
-            // A click anywhere on a clip launches it (and shows it below).
-            if clip_name.is_some() {
+            // A click on a clip's play triangle launches it; elsewhere it just selects it.
+            if clip_name.is_some() && resp.interact_pointer_pos().is_some_and(|q| q.x < r.left() + 22.0) {
                 self.launch_slot(t, s);
             }
         }
