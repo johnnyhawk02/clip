@@ -406,7 +406,8 @@ impl App {
             clip.active = c.active;
             clip.color = c.color;
             clip.len = if c.looping { c.len } else { clip.len };
-            if let Some((bpm, tempo, i)) = c.warp {
+            // (A group's warp only lasted while its mix rendered for a new tempo; it's mixed afresh.)
+            if let Some((bpm, tempo, i)) = c.warp.filter(|_| c.group.is_none()) {
                 if let Some(source) = audio.get(i) {
                     clip.warp = Some(Warp { bpm, source: source.clone(), source_peaks: Arc::new(Peaks::build(source)), tempo, repitch: false });
                 }
