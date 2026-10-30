@@ -13,15 +13,22 @@ impl App {
         let r = self.laid_out_tempo / tempo;
         let moved = (r - 1.0).abs() > 1e-9 && tempo > 0.0;
         let sc = |f: usize| (f as f64 * r).round() as usize;
-        for t in &mut self.tracks {
-            for c in &mut t.clips {
-                if c.warp.is_none() && moved {
-                    c.start = sc(c.start);
-                    changed = true;
-                }
-                changed |= c.fit_place_to_tempo(tempo);
+        // (Runs every frame: only touch the tracks when there's something to fit.)
+        if moved || off_tempo(&self.tracks, tempo) {
+            // A copy, as rendering a group needs the tracks' sample rate.
+            let mut tracks = self.tracks.clone();
+            changed |= self.refit_tracks(&mut tracks, tempo, r, moved, false);
+            self.tracks = tracks;
+        }
+        // The song outside an open group follows too, as does where its Session clips have got to.
+        let mut nest = std::mem::take(&mut self.nest);
+        for f in nest.iter_mut().filter(|f| moved || off_tempo(&f.tracks, tempo)) {
+            changed |= self.refit_tracks(&mut f.tracks, tempo, r, moved, false);
+            if moved {
+                f.outer_at = f.outer_at.map(|(at, when)| (sc(at + (when.elapsed().as_secs_f64() * self.rate() as f64) as usize), std::time::Instant::now()));
             }
         }
+        self.nest = nest;
         if moved {
             self.laid_out_tempo = tempo;
             self.player.rescale(r);
@@ -48,11 +55,63 @@ impl App {
         }
     }
 
+    /// Fit `tracks` to `tempo`: their song clips and Session slots, and the tracks inside their
+    /// groups (re-rendered, so a group plays in time as it would opened). `r` scales unwarped
+    /// places when the layout has `moved`. Clips inside groups are stretched straight away
+    /// (`nested`), since the group's mix is made from them. Returns whether anything changed.
+    fn refit_tracks(&self, tracks: &mut [Track], tempo: f64, r: f64, moved: bool, nested: bool) -> bool {
+        let mut changed = false;
+        for t in tracks {
+            for (slot, c) in t.clips.iter_mut().map(|c| (false, c)).chain(t.slots.iter_mut().flatten().map(|c| (true, c))) {
+                let was = changed;
+                changed = false;
+                if c.warp.is_none() && moved && !slot {
+                    c.start = (c.start as f64 * r).round() as usize;
+                    changed = true;
+                }
+                if let Some(g) = c.group.clone() {
+                    let mut inner = (*g).clone();
+                    if self.refit_tracks(&mut inner, tempo, r, moved, true) {
+                        // Its trim and loop stay on the same beats of the new mix.
+                        let old = c.audio.frames().max(1);
+                        let showed_all = c.trim == 0 && c.len >= old;
+                        let audio = Arc::new(self.render_tracks(&inner, false));
+                        let f = audio.frames() as f64 / old as f64;
+                        let sc = |x: usize| (x as f64 * f).round() as usize;
+                        (c.trim, c.len) = (sc(c.trim), sc(c.len).max(1));
+                        c.loop_points = c.loop_points.map(|(a, b)| (sc(a), sc(b)));
+                        if showed_all {
+                            (c.trim, c.len) = (0, audio.frames().max(1));
+                        }
+                        c.peaks = Arc::new(Peaks::build(&audio));
+                        c.audio = audio;
+                        c.group = Some(Arc::new(inner));
+                        changed = true;
+                    }
+                } else if c.fit_place_to_tempo(tempo) {
+                    changed = true;
+                    if nested {
+                        if let (Some((_, factor)), Some(w)) = (c.awaiting_stretch(), c.warp.as_mut()) {
+                            let (audio, peaks) = stretched(&w.source, factor, repitch_mode());
+                            w.repitch = repitch_mode();
+                            (c.audio, c.peaks) = (audio, peaks);
+                        }
+                    }
+                }
+                if slot && changed {
+                    *c = session::slot_clip(c.clone());
+                }
+                changed |= was;
+            }
+        }
+        changed
+    }
+
     /// Stretch warped clips' audio for the current tempo on another thread, so the app doesn't
     /// stop while it works; `poll_stretch` swaps the results in.
     pub(super) fn stretch_in_background(&mut self) {
         let mut jobs: Vec<(Arc<Audio>, f64)> = Vec::new();
-        for c in self.tracks.iter().flat_map(|t| &t.clips) {
+        for c in self.tracks.iter().flat_map(|t| t.clips.iter().chain(t.slots.iter().flatten())) {
             if let (Some((key, factor)), Some(w)) = (c.awaiting_stretch(), c.warp.as_ref()) {
                 if !jobs.iter().any(|(s, f)| Arc::as_ptr(s) as usize == key && (f - factor).abs() < 1e-9) {
                     jobs.push((w.source.clone(), factor));
@@ -84,7 +143,7 @@ impl App {
         loop {
             match rx.try_recv() {
                 Ok((key, factor, audio, peaks)) => {
-                    for c in self.tracks.iter_mut().flat_map(|t| t.clips.iter_mut()) {
+                    for c in self.tracks.iter_mut().flat_map(|t| t.clips.iter_mut().chain(t.slots.iter_mut().flatten())) {
                         if c.awaiting_stretch().is_some_and(|(k, f)| k == key && (f - factor).abs() < 1e-9) {
                             (c.audio, c.peaks) = (audio.clone(), peaks.clone());
                             if let Some(w) = c.warp.as_mut() {
@@ -105,4 +164,12 @@ impl App {
             self.refresh_playback();
         }
     }
+}
+
+/// Whether any warped clip in `tracks` (in a slot, or inside a group) is laid out for another tempo.
+fn off_tempo(tracks: &[Track], tempo: f64) -> bool {
+    tempo > 0.0
+        && tracks.iter().flat_map(|t| t.clips.iter().chain(t.slots.iter().flatten())).any(|c| {
+            c.warp.as_ref().is_some_and(|w| (w.tempo - tempo).abs() >= 1e-6) || c.group.as_ref().is_some_and(|g| off_tempo(g, tempo))
+        })
 }

@@ -608,11 +608,14 @@ impl App {
         let Some(inner) = clip.group.clone() else { return };
         // Playing on into the group: the same moment, now counted from the group's start.
         let playing = self.player.is_playing().then(|| self.player.position());
-        // A playing Session slot: where its loop is now, to carry on from there inside.
-        let in_slot = playing.filter(|_| c >= SLOT).and_then(|pos| {
-            let (_, from, _) = self.session_play.get(t)?.segments.iter().rev().find(|seg| seg.0 == c - SLOT && seg.2.is_none()).copied()?;
-            let inside = pos.saturating_sub(from) % clip.len.max(1);
-            Some((pos, inside))
+        // A Session slot: where its loop is now, to carry on from there inside. One waiting for
+        // its launch is placed to reach its start on time; one not launched at all keeps to the
+        // song's bars.
+        let in_slot = playing.filter(|_| c >= SLOT).map(|pos| {
+            let from = self.session_play.get(t).and_then(|p| p.segments.iter().rev().find(|seg| seg.0 == c - SLOT && seg.2.is_none())).map_or(0, |seg| seg.1);
+            let len = clip.len.max(1) as i64;
+            let inside = (pos as i64 - from as i64).rem_euclid(len) as usize;
+            (pos, inside)
         });
         self.nest.push(NestFrame {
             tracks: std::mem::replace(&mut self.tracks, (*inner).clone()),

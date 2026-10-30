@@ -221,6 +221,13 @@ impl App {
                         }
                     }
                     "leavegroup" => self.leave_group(),
+                    // sleep:ms lets the transport run on for that long (the UI waits).
+                    "sleep" => std::thread::sleep(std::time::Duration::from_millis(arg.parse().unwrap_or(0))),
+                    // pos: print where the transport is, and what it plays.
+                    "pos" => {
+                        let s = self.player.shared.lock().unwrap();
+                        eprintln!("pos {arg} playing {} at {:.0} range {}..{} looping {} nest {} session {:?}", s.playing, s.pos, s.start, s.end, s.looping, self.nest.len(), self.session_play.iter().map(|p| p.segments.clone()).collect::<Vec<_>>());
+                    }
                     "launch" => {
                         // launch:t|s launches the clip in track t's slot s.
                         let v: Vec<usize> = arg.split('|').filter_map(|x| x.parse().ok()).collect();
