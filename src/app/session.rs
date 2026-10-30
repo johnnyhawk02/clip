@@ -450,6 +450,10 @@ impl App {
             });
         }
         let resp = ui.interact(r, id.with("click"), Sense::click());
+        // The play triangle launches, so it shows the hand.
+        if clip_name.is_some() && ui.input(|i| i.pointer.hover_pos()).is_some_and(|q| r.contains(q) && q.x < r.left() + 22.0) && ui.ctx().dragged_id().is_none() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
         if clip_name.is_some() {
             let current = self.tracks[t].slots[s].as_ref().and_then(|c| c.color).unwrap_or(self.tracks[t].color);
             resp.context_menu(|ui| {
