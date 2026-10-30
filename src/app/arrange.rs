@@ -897,6 +897,7 @@ impl App {
             if self.arr_loop_grab.take().is_some() || self.arr_loop_drag.take().is_some() {
                 self.dirty = true;
                 // Playing on, now round the new loop (as Live does).
+                self.refresh_playback();
                 if let (true, true, Some((ls, le))) = (self.player.is_playing(), self.looping, self.arr_loop) {
                     self.play_origin = ls;
                     self.player.set_range(ls, le, true);

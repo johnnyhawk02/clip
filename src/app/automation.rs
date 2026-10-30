@@ -109,6 +109,7 @@ impl App {
                         self.arr_loop = Some((bar(a), bar(b)));
                         self.looping = true;
                         // As letting go of a dragged brace: playing on round it.
+                        self.refresh_playback();
                         if self.player.is_playing() {
                             self.player.set_range(bar(a), bar(b), true);
                         }

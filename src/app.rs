@@ -712,7 +712,9 @@ impl App {
                 let session = if self.nest.is_empty() { &self.session_play[..] } else { &[] };
                 // Return tracks belong to the song, not to an open group.
                 let returns = if self.nest.is_empty() { &self.returns[..] } else { &[] };
-                let song = tracks::song(&self.tracks, returns, self.rate(), self.arrangement_frames(), self.master_gain, click, self.beat_frames(), session);
+                // A loop running past the last clip plays on through silence to its end, as in Live.
+                let end = self.arrangement_frames().max(self.arr_loop.filter(|_| self.looping).map_or(0, |l| l.1));
+                let song = tracks::song(&self.tracks, returns, self.rate(), end, self.master_gain, click, self.beat_frames(), session);
                 self.player.set_song(Arc::new(song));
                 self.play_audio = None;
                 return;
@@ -1022,7 +1024,8 @@ impl App {
                 self.arr_cursor = 0;
             }
             if let (true, Some((ls, le))) = (self.looping, self.arr_loop) {
-                // Loop on: play the loop range round and round.
+                // Loop on: play the loop range round and round (the song reaching its end).
+                self.refresh_playback();
                 self.play_origin = ls;
                 self.player.play(ls, le, true);
                 return;
