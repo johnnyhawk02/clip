@@ -740,9 +740,31 @@ impl App {
         if self.session_rec {
             self.record_session();
         }
+        // Remember what was playing, so Space can start it again.
+        let playing: Vec<(usize, usize)> = self.session_play.iter().enumerate().filter_map(|(t, p)| p.segments.iter().rev().find(|seg| seg.2.is_none()).map(|seg| (t, seg.0))).collect();
+        if !playing.is_empty() {
+            self.session_last = playing;
+        }
         for p in &mut self.session_play {
             p.segments.clear();
         }
+    }
+
+    /// Space in the Session view with the transport stopped: start again the clips that were
+    /// playing when it stopped (or the selected clip), as the song plays on around them.
+    /// Returns false when there's nothing to start there.
+    pub(super) fn session_play_again(&mut self) -> bool {
+        let mut picks: Vec<(usize, usize)> = self.session_last.iter().copied().filter(|&(t, s)| self.clip((t, SLOT + s)).is_some()).collect();
+        if picks.is_empty() {
+            picks.extend(self.sel_slot.filter(|&(t, s)| self.clip((t, SLOT + s)).is_some()));
+        }
+        if picks.is_empty() {
+            return false;
+        }
+        for (t, s) in picks {
+            self.launch_slot(t, s);
+        }
+        true
     }
 
     /// Write every launched clip, from its launch to where it stopped, into its track in the

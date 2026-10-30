@@ -394,6 +394,8 @@ pub struct App {
     returns: Vec<Track>,
     /// Each return track's level meter.
     return_meter: Vec<f32>,
+    /// The Session clips that were playing when the transport last stopped (track, slot).
+    session_last: Vec<(usize, usize)>,
     /// How far the Session view's track columns are scrolled sideways (px).
     session_scroll: f32,
     device_edit: bool,
@@ -633,6 +635,7 @@ impl App {
             devices_over: (None, None),
             device_target: 0,
             session_scroll: 0.0,
+            session_last: Vec::new(),
             returns: default_returns(),
             return_meter: Vec::new(),
             device_edit: false,
@@ -997,6 +1000,9 @@ impl App {
                 self.player.stop();
                 self.session_stopped();
                 self.refresh_playback();
+                return;
+            }
+            if self.show_session && self.nest.is_empty() && self.session_play_again() {
                 return;
             }
             let end = self.arrangement_frames();
