@@ -243,10 +243,10 @@ impl Player {
         }
     }
 
-    /// Device `i` of track `t`: an Auto Filter's cutoff right now (Hz), when running.
-    pub fn filter_cutoff(&self, t: usize, i: usize) -> Option<f32> {
+    /// Device `i` of track `t`: an Auto Filter's cutoff right now (Hz) and sequencer step, when running.
+    pub fn filter_view(&self, t: usize, i: usize) -> Option<(f32, Option<usize>)> {
         match &self.shared.lock().unwrap().source {
-            Source::Song(song) => song.layers.iter().chain(&song.returns).find(|l| l.track == t)?.device_state.lock().unwrap().get(i)?.as_ref()?.filter_cutoff(),
+            Source::Song(song) => song.layers.iter().chain(&song.returns).find(|l| l.track == t)?.device_state.lock().unwrap().get(i)?.as_ref()?.filter_view(),
             Source::Buffer(_) => None,
         }
     }

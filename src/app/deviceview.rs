@@ -84,7 +84,7 @@ impl App {
         let cuts: Vec<_> = (0..chain.len()).map(|i| self.player.spacer_cuts(t, i).filter(|_| playing)).collect();
         let tames: Vec<_> = (0..chain.len()).map(|i| self.player.tame_view(t, i).filter(|_| playing)).collect();
         let optos: Vec<_> = (0..chain.len()).map(|i| self.player.opto_gr(t, i).filter(|_| playing)).collect();
-        let cutoffs: Vec<_> = (0..chain.len()).map(|i| self.player.filter_cutoff(t, i).filter(|_| playing)).collect();
+        let cutoffs: Vec<_> = (0..chain.len()).map(|i| self.player.filter_view(t, i).filter(|_| playing)).collect();
         let mut remove = None;
         let mut add = None;
         let mut active = false;
@@ -407,12 +407,13 @@ pub(super) fn opto_panel(ui: &mut egui::Ui, s: &mut opto::Settings, gr: Option<f
 }
 
 /// Auto Filter's panel width (three columns of controls and its curve).
-pub(super) const AUTOFILTER_W: f32 = 1300.0;
+pub(super) const AUTOFILTER_W: f32 = 1640.0;
 
 /// Auto Filter's controls, as Live's: the filter, its envelope follower, its LFO, and its curve
-/// (drag it: across for Frequency, up and down for Resonance), with the cutoff where the
-/// modulation has it now while playing (`cutoff`).
-pub(super) fn autofilter_panel(ui: &mut egui::Ui, s: &mut autofilter::Settings, cutoff: Option<f32>) -> bool {
+/// (drag it: across for Frequency, up and down for Resonance), and its step sequencer; while
+/// playing (`view`), the cutoff where the modulation has it now and the step it's on.
+pub(super) fn autofilter_panel(ui: &mut egui::Ui, s: &mut autofilter::Settings, view: Option<(f32, Option<usize>)>) -> bool {
+    let cutoff = view.map(|v| v.0);
     let mut active = false;
     ui.spacing_mut().slider_width = 90.0;
     ui.spacing_mut().interact_size.y = 18.0;
@@ -480,6 +481,7 @@ pub(super) fn autofilter_panel(ui: &mut egui::Ui, s: &mut autofilter::Settings, 
                     ui.selectable_value(&mut s.gen_trigger, 0, "Off");
                     ui.selectable_value(&mut s.gen_trigger, 1, "Sync").on_hover_text("On a grid of the song's beats (Drift moves it too)");
                     ui.selectable_value(&mut s.gen_trigger, 2, "Input").on_hover_text("On each hit in the sound, held while it stays loud");
+                    ui.selectable_value(&mut s.gen_trigger, 3, "Seq").on_hover_text("On each gated step of the sequencer, held through slides");
                 });
                 if s.gen_trigger == 1 {
                     sync_rate(ui, "af_genrate", &mut s.gen_beats);
@@ -544,9 +546,127 @@ pub(super) fn autofilter_panel(ui: &mut egui::Ui, s: &mut autofilter::Settings, 
             ui.end_row();
         });
         ui.add_space(14.0);
+        active |= autofilter_seq(ui, s, view.and_then(|v| v.1));
+        ui.add_space(14.0);
         active |= autofilter_curve(ui, s, cutoff);
     });
     active
+}
+
+/// Auto Filter's step sequencer: a strip of steps (drag in the bars to draw values; click the
+/// Gate, Slide and Accent rows to toggle them), then its settings in two rows. `playing` is
+/// the step it's on.
+fn autofilter_seq(ui: &mut egui::Ui, s: &mut autofilter::Settings, playing: Option<usize>) -> bool {
+    const SW: f32 = 18.0;
+    const ROW: f32 = 11.0;
+    const LABEL: f32 = 14.0;
+    let mut active = false;
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 2.0;
+        let h = (ui.available_height() - 46.0).clamp(54.0, 120.0);
+        let (r, resp) = ui.allocate_exact_size(Vec2::new(LABEL + SW * autofilter::STEPS as f32, h), Sense::click_and_drag());
+        let bars = Rect::from_min_max(Pos2::new(r.left() + LABEL, r.top()), Pos2::new(r.right(), r.bottom() - 3.0 * ROW - 2.0));
+        let rows = |k: usize| Rect::from_min_max(Pos2::new(r.left() + LABEL, bars.bottom() + 2.0 + ROW * k as f32), Pos2::new(r.right(), bars.bottom() + 2.0 + ROW * (k + 1) as f32));
+        let len = (s.seq_len as usize).clamp(1, autofilter::STEPS);
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let i = (((pos.x - bars.left()) / SW).floor().max(0.0) as usize).min(autofilter::STEPS - 1);
+            // Drawing values: anywhere a drag passes over the bars.
+            if (resp.dragged() || resp.clicked()) && bars.expand2(Vec2::new(0.0, 4.0)).contains(pos) {
+                s.seq_steps[i] = (1.0 - 2.0 * (pos.y - bars.top()) / bars.height()).clamp(-1.0, 1.0);
+                active = true;
+            } else if resp.clicked() {
+                for (k, mask) in [&mut s.seq_gate, &mut s.seq_slide, &mut s.seq_accent].into_iter().enumerate() {
+                    if rows(k).contains(pos) {
+                        *mask ^= 1 << i;
+                    }
+                }
+            }
+        }
+        let resp = resp.on_hover_text("Drag in the bars to draw each step's cutoff. Below: G gate (off holds the step before), S slide (glides into the step), A accent (a kick of cutoff and resonance)");
+        let p = ui.painter_at(r.expand(1.0));
+        p.rect_filled(bars, 2.0, gray(238));
+        p.line_segment([Pos2::new(bars.left(), bars.center().y), Pos2::new(bars.right(), bars.center().y)], Stroke::new(1.0, gray(215)));
+        for (k, name) in ["G", "S", "A"].iter().enumerate() {
+            p.text(Pos2::new(r.left() + LABEL / 2.0, rows(k).center().y), Align2::CENTER_CENTER, *name, FontId::proportional(8.5), muted());
+        }
+        for i in 0..autofilter::STEPS {
+            let x = bars.left() + SW * i as f32;
+            let used = i < len;
+            let gate = s.seq_gate >> i & 1 == 1;
+            let col = if !used { gray(205) } else if gate { ink() } else { gray(170) };
+            let v = s.seq_steps[i];
+            let y = bars.center().y - v * bars.height() / 2.0;
+            let bar = Rect::from_min_max(Pos2::new(x + 3.0, y.min(bars.center().y)), Pos2::new(x + SW - 3.0, y.max(bars.center().y) + 1.0));
+            p.rect_filled(bar, 1.0, col);
+            if playing == Some(i) {
+                p.rect_stroke(Rect::from_min_max(Pos2::new(x + 1.0, bars.top() + 1.0), Pos2::new(x + SW - 1.0, bars.bottom() - 1.0)), 2.0, Stroke::new(1.5, Color32::from_rgb(255, 173, 86)), egui::StrokeKind::Inside);
+            }
+            if i % 4 == 0 && i > 0 {
+                p.line_segment([Pos2::new(x, bars.top()), Pos2::new(x, rows(2).bottom())], Stroke::new(1.0, gray(215)));
+            }
+            for (k, mask) in [s.seq_gate, s.seq_slide, s.seq_accent].into_iter().enumerate() {
+                let cell = Rect::from_center_size(Pos2::new(x + SW / 2.0, rows(k).center().y), Vec2::splat(ROW - 3.0));
+                if mask >> i & 1 == 1 {
+                    p.rect_filled(cell, 1.5, if used { ink() } else { gray(190) });
+                } else {
+                    p.rect_stroke(cell, 1.5, Stroke::new(1.0, gray(190)), egui::StrokeKind::Inside);
+                }
+            }
+        }
+        _ = resp;
+        ui.horizontal(|ui| {
+            ui.toggle_value(&mut s.seq_on, "Seq").on_hover_text("Turn the step sequencer on");
+            let mut p = s.seq_amount * 100.0;
+            let w = ui.add(egui::DragValue::new(&mut p).range(-100.0..=100.0).speed(0.5).prefix("Amount ").suffix(" %").fixed_decimals(0)).on_hover_text("How far the steps move the cutoff, up or down (±4 octaves)");
+            s.seq_amount = p / 100.0;
+            active |= busy(&w);
+            sync_rate(ui, "af_seqrate", &mut s.seq_beats);
+            let mut n = s.seq_len as u32;
+            let w = ui.add(egui::DragValue::new(&mut n).range(1..=autofilter::STEPS as u32).prefix("Length ")).on_hover_text("Steps used");
+            s.seq_len = n as u8;
+            active |= busy(&w);
+        });
+        ui.horizontal(|ui| {
+            let w = ui.add(egui::DragValue::new(&mut s.seq_glide).range(1.0..=2000.0).speed(2.0).prefix("Glide ").suffix(" ms").fixed_decimals(0)).on_hover_text("How long a slide takes");
+            active |= busy(&w);
+            let dir = autofilter::DIRECTIONS.get(s.seq_dir as usize).copied().unwrap_or("Forward");
+            egui::ComboBox::from_id_salt("af_seqdir").width(78.0).selected_text(dir).show_ui(ui, |ui| {
+                for (i, n) in autofilter::DIRECTIONS.iter().enumerate() {
+                    ui.selectable_value(&mut s.seq_dir, i as u8, *n);
+                }
+            });
+            ui.checkbox(&mut s.seq_drift, "Drift").on_hover_text("The LFO's Drift moves the steps in and out of time too");
+            if ui.small_button("Randomise").on_hover_text("New values, and a few slides, accents and rests").clicked() {
+                randomise_steps(s);
+            }
+            if ui.small_button("Clear").on_hover_text("All steps to the middle, gated, no slides or accents").clicked() {
+                s.seq_steps = [0.0; autofilter::STEPS];
+                s.seq_gate = u16::MAX;
+                s.seq_slide = 0;
+                s.seq_accent = 0;
+            }
+        });
+    });
+    active
+}
+
+/// New random step values, with about one in five sliding, one in four accented and one in eight resting.
+fn randomise_steps(s: &mut autofilter::Settings) {
+    let mut seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
+    let mut rand = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f32 / (1u64 << 53) as f32
+    };
+    let (mut gate, mut slide, mut accent) = (0u16, 0u16, 0u16);
+    for i in 0..autofilter::STEPS {
+        s.seq_steps[i] = (rand() * 2.0 - 1.0).clamp(-1.0, 1.0);
+        gate |= ((rand() > 0.125) as u16) << i;
+        slide |= ((rand() < 0.2) as u16) << i;
+        accent |= ((rand() < 0.25) as u16) << i;
+    }
+    (s.seq_gate, s.seq_slide, s.seq_accent) = (gate, slide, accent);
 }
 
 /// A −100..100 % slider for a −1..1 setting.

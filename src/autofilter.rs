@@ -36,6 +36,12 @@
 //!   cycle), then glides back, every three stretches of two bars (four seconds in Hz). It is a
 //!   function of the song position, so it repeats the same each time round; the synced envelope
 //!   drifts with it.
+//! - the step sequencer, up to ±`SEQ_OCT`: up to 16 steps on a grid of the song's beats, each
+//!   with a value, a gate (off: it holds the step before), a slide (it glides into the step over
+//!   Glide, as a 303 slides) and an accent (a cutoff kick and more resonance, dying away over
+//!   the step). It plays forward, backward, ping-pong or at random (repeatably, from the song
+//!   position), drifts with the LFO's Drift if asked, and can trigger the envelope on each step
+//!   (Seq), holding its gate through slides.
 
 use serde::{Deserialize, Serialize};
 
@@ -99,6 +105,31 @@ pub struct Settings {
     pub gen_sustain: f32,
     #[serde(default = "gen_release")]
     pub gen_release: f32,
+    /// The step sequencer: on, −1..1 of ±`SEQ_OCT` octaves, steps used, step length (beats,
+    /// `SYNC_RATES`), glide (ms, for slides), direction (`DIRECTIONS`), whether the LFO's Drift
+    /// moves it too, and per step its value (−1..1) and gate, slide and accent (bit i for step i).
+    #[serde(default)]
+    pub seq_on: bool,
+    #[serde(default = "half")]
+    pub seq_amount: f32,
+    #[serde(default = "sixteen")]
+    pub seq_len: u8,
+    #[serde(default = "quarter")]
+    pub seq_beats: f32,
+    #[serde(default = "seq_glide")]
+    pub seq_glide: f32,
+    #[serde(default)]
+    pub seq_dir: u8,
+    #[serde(default = "yes")]
+    pub seq_drift: bool,
+    #[serde(default = "seq_steps")]
+    pub seq_steps: [f32; STEPS],
+    #[serde(default = "all_steps")]
+    pub seq_gate: u16,
+    #[serde(default)]
+    pub seq_slide: u16,
+    #[serde(default)]
+    pub seq_accent: u16,
     /// Output gain, dB.
     pub output: f32,
     /// 0..1: dry against wet.
@@ -108,6 +139,35 @@ pub struct Settings {
 
 fn one() -> f32 {
     1.0
+}
+
+fn half() -> f32 {
+    0.5
+}
+
+fn quarter() -> f32 {
+    0.25
+}
+
+fn sixteen() -> u8 {
+    STEPS as u8
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn seq_glide() -> f32 {
+    60.0
+}
+
+fn all_steps() -> u16 {
+    u16::MAX
+}
+
+/// A pattern to start from: a rising and falling line with some jumps.
+fn seq_steps() -> [f32; STEPS] {
+    [0.0, 0.5, -0.25, 0.75, -0.5, 0.25, 1.0, -0.75, 0.0, 0.5, -0.25, 0.75, -1.0, 0.25, 0.5, -0.5]
 }
 
 fn gen_attack() -> f32 {
@@ -148,6 +208,17 @@ impl Default for Settings {
             gen_decay: gen_decay(),
             gen_sustain: 0.0,
             gen_release: gen_release(),
+            seq_on: false,
+            seq_amount: half(),
+            seq_len: STEPS as u8,
+            seq_beats: quarter(),
+            seq_glide: seq_glide(),
+            seq_dir: 0,
+            seq_drift: true,
+            seq_steps: seq_steps(),
+            seq_gate: all_steps(),
+            seq_slide: 0,
+            seq_accent: 0,
             output: 0.0,
             mix: 1.0,
             on: true,
@@ -176,7 +247,34 @@ pub const SYNC_RATES: [(&str, f32); 16] = [
 ];
 
 /// What starts the envelope, by `gen_trigger`.
-pub const TRIGGERS: [&str; 3] = ["Off", "Sync", "Input"];
+pub const TRIGGERS: [&str; 4] = ["Off", "Sync", "Input", "Seq"];
+
+/// The sequencer's steps, octaves at full Amount, and its directions (by `seq_dir`).
+pub const STEPS: usize = 16;
+pub const SEQ_OCT: f32 = 4.0;
+pub const DIRECTIONS: [&str; 4] = ["Forward", "Backward", "Ping-Pong", "Random"];
+/// An accent: this many octaves of cutoff kick and this much more feedback, at its start.
+const ACCENT_OCT: f32 = 1.0;
+const ACCENT_K: f32 = 0.6;
+
+/// Which step plays as the `n`th of the song, for `len` steps in direction `dir`.
+pub fn step_at(n: i64, len: usize, dir: u8) -> usize {
+    let len = len.clamp(1, STEPS) as i64;
+    let i = match dir {
+        1 => len - 1 - n.rem_euclid(len),
+        2 if len > 1 => {
+            let m = n.rem_euclid(2 * len - 2);
+            if m < len { m } else { 2 * len - 2 - m }
+        }
+        3 => (((hash(n.wrapping_mul(31).wrapping_add(17)) + 1.0) * 0.5 * len as f64) as i64).min(len - 1),
+        _ => n.rem_euclid(len),
+    };
+    i as usize
+}
+
+fn bit(mask: u16, i: usize) -> bool {
+    mask >> i & 1 == 1
+}
 
 /// Drift: beats (synced) or seconds (Hz) in each stretch of holding, gliding out and gliding back.
 const DRIFT_BEATS: f64 = 8.0;
@@ -394,8 +492,17 @@ pub struct AutoFilter {
     p: Option<Params>,
     dry: Vec<[f32; 2]>,
     dpos: usize,
-    /// The cutoff now, Hz, after the modulation (for the display).
+    /// The cutoff now, Hz, after the modulation, and the sequencer's step (for the display).
     pub cutoff: f32,
+    pub step: Option<usize>,
+    /// The sequencer: the step of the song it's on, where it's heading and is now, whether it's
+    /// sliding, whether the envelope's gate carries on into the next step, and the accent left.
+    seq_n: Option<i64>,
+    seq_to: f32,
+    seq_v: f32,
+    seq_sliding: bool,
+    seq_tie: bool,
+    accent: f32,
 }
 
 impl AutoFilter {
@@ -414,6 +521,13 @@ impl AutoFilter {
             dry: vec![[0.0; 2]; oversample::LATENCY],
             dpos: 0,
             cutoff: 1000.0,
+            step: None,
+            seq_n: None,
+            seq_to: 0.0,
+            seq_v: 0.0,
+            seq_sliding: false,
+            seq_tie: false,
+            accent: 0.0,
         }
     }
 
@@ -436,6 +550,11 @@ impl AutoFilter {
         // (The attack heads for 1.3, so reaches full in about 1.47 time constants.)
         let gen_k = [step_coef(s.gen_attack.clamp(0.1, 5000.0) / 1.47, sr), step_coef(s.gen_decay.clamp(1.0, 10000.0), sr), step_coef(s.gen_release.clamp(1.0, 10000.0), sr)];
         let gen_sus = s.gen_sustain.clamp(0.0, 1.0);
+        let seq_beats = s.seq_beats.clamp(0.0625, 32.0) as f64;
+        let seq_len = (s.seq_len as usize).clamp(1, STEPS);
+        let seq_oct = if s.seq_on { s.seq_amount.clamp(-1.0, 1.0) * SEQ_OCT } else { 0.0 };
+        let (glide_k, snap_k) = (step_coef(s.seq_glide.clamp(1.0, 2000.0), sr), step_coef(1.0, sr));
+        let accent_k = (-1.0 / (0.3 * seq_beats as f32 * beat as f32)).exp();
         let (fast_a, fast_r, slow_a, slow_r) = (dynamics::coef(0.5, sr), dynamics::coef(30.0, sr), dynamics::coef(40.0, sr), dynamics::coef(300.0, sr));
         let hp = s.highpass();
         let top = (0.48 * sr).min(22000.0).log2();
@@ -483,11 +602,44 @@ impl AutoFilter {
                         self.eg.release();
                     }
                 }
+                // (Seq: the sequencer, below.)
+                3 if s.seq_on => {}
                 _ => {
                     if self.eg.gate {
                         self.eg.release();
                     }
                 }
+            }
+            // The sequencer: a new step of the song, then gliding (or snapping) to its value.
+            if s.seq_on {
+                let at = beats / seq_beats + if s.seq_drift { dr } else { 0.0 };
+                let n = at.floor() as i64;
+                if self.seq_n != Some(n) {
+                    self.seq_n = Some(n);
+                    let i = step_at(n, seq_len, s.seq_dir);
+                    self.step = Some(i);
+                    if bit(s.seq_gate, i) {
+                        self.seq_to = s.seq_steps[i].clamp(-1.0, 1.0);
+                        self.seq_sliding = bit(s.seq_slide, i);
+                        if bit(s.seq_accent, i) {
+                            self.accent = 1.0;
+                        }
+                        if s.gen_trigger == 3 && !(self.seq_sliding && self.eg.gate) {
+                            self.eg.trigger();
+                        }
+                    }
+                    // A 303 holds the gate into a step that slides.
+                    let next = step_at(n + 1, seq_len, s.seq_dir);
+                    self.seq_tie = bit(s.seq_gate, next) && bit(s.seq_slide, next);
+                } else if s.gen_trigger == 3 && self.eg.gate && !self.seq_tie && at - at.floor() >= 0.5 {
+                    self.eg.release();
+                }
+                self.seq_v += (self.seq_to - self.seq_v) * if self.seq_sliding { glide_k } else { snap_k };
+                self.accent *= accent_k;
+            } else {
+                self.seq_n = None;
+                self.step = None;
+                self.accent = 0.0;
             }
             if s.gen_trigger != 1 {
                 self.eg.step = None;
@@ -509,14 +661,15 @@ impl AutoFilter {
                 } else {
                     0.0
                 };
-                *o = (p.oct + env_oct * e + gen_oct * eg + lfo_oct * lfo).clamp(20f32.log2(), top);
+                *o = (p.oct + env_oct * e + gen_oct * eg + lfo_oct * lfo + seq_oct * self.seq_v + ACCENT_OCT * self.accent).clamp(20f32.log2(), top);
             }
             self.cutoff = octs[0].exp2();
             let gg = octs.map(|o| {
                 let g = (std::f64::consts::PI * o.exp2() as f64 / os).tan();
                 g / (1.0 + g)
             });
-            let (k, gin) = (p.k as f64, p.gin as f64 * IN_SCALE);
+            // (An accent's extra feedback stays under 4, where the loop's solve is sure.)
+            let (k, gin) = ((p.k + ACCENT_K * self.accent).min(3.8) as f64, p.gin as f64 * IN_SCALE);
             let back = p.gin as f64 / gin;
             let dry = std::mem::replace(&mut self.dry[self.dpos], *f);
             self.dpos = (self.dpos + 1) % self.dry.len();
@@ -772,5 +925,72 @@ mod tests {
             was_high = high;
         }
         assert_eq!(hits, 4);
+    }
+
+    #[test]
+    fn sequencer_steps_follow_the_song() {
+        // 1/16 steps (6000 frames at 120 BPM), full Amount: the middle of each step is at
+        // 1 kHz moved by four octaves times its value.
+        let s = Settings { seq_on: true, seq_amount: 1.0, seq_beats: 0.25, seq_len: 5, ..Default::default() };
+        let run = cutoffs(&s, 0.0, 12 * 6000, 512);
+        for n in 0..12 {
+            let want = 1000f32.log2() + SEQ_OCT * s.seq_steps[n % 5];
+            let got = run[n * 6000 + 3000].log2();
+            assert!((got - want).abs() < 0.02, "step {n}: {got} {want}");
+        }
+        // Started from the middle of the song, it is on the same step.
+        let late = cutoffs(&s, 7.0 * 6000.0 + 1000.0, 2000, 64);
+        let same = run[7 * 6000 + 2999];
+        assert!((late[1999] / same - 1.0).abs() < 0.01, "{} {same}", late[1999]);
+        // Gate off holds the step before.
+        let gaps = Settings { seq_gate: 0b11101, ..s };
+        let run = cutoffs(&gaps, 0.0, 4 * 6000, 512);
+        assert!((run[6000 + 3000] / run[3000] - 1.0).abs() < 0.01);
+        assert!((run[6000 + 3000] / run[2 * 6000 + 3000] - 1.0).abs() > 0.1);
+    }
+
+    #[test]
+    fn slides_glide_and_steps_never_click() {
+        let mut steps = [0.0; STEPS];
+        for (i, v) in steps.iter_mut().enumerate() {
+            *v = if i % 2 == 0 { 1.0 } else { -1.0 };
+        }
+        let base = Settings { seq_on: true, seq_amount: 1.0, seq_steps: steps, seq_glide: 50.0, ..Default::default() };
+        let biggest = |s: &Settings| {
+            let run = cutoffs(s, 0.0, 8 * 6000, 512);
+            run.windows(2).map(|w| (w[1].log2() - w[0].log2()).abs()).fold(0.0f32, f32::max)
+        };
+        let slid = biggest(&Settings { seq_slide: u16::MAX, ..base });
+        let hard = biggest(&base);
+        eprintln!("biggest move a sample: sliding {slid:.4} octaves, stepping {hard:.4}");
+        // Sliding glides: eight octaves over ~50 ms, no faster.
+        assert!(slid < 8.0 / (0.05 * SR as f32) * 1.05, "{slid}");
+        // Steps move fast, but over a millisecond, not in one sample.
+        assert!(hard > 0.05 && hard < 0.2, "{hard}");
+    }
+
+    #[test]
+    fn step_orders() {
+        let order = |dir| (0..10).map(|n| step_at(n, 4, dir)).collect::<Vec<_>>();
+        assert_eq!(order(0), [0, 1, 2, 3, 0, 1, 2, 3, 0, 1]);
+        assert_eq!(order(1), [3, 2, 1, 0, 3, 2, 1, 0, 3, 2]);
+        assert_eq!(order(2), [0, 1, 2, 3, 2, 1, 0, 1, 2, 3]);
+        let random = order(3);
+        assert!(random.iter().all(|&i| i < 4) && random != order(0));
+        assert_eq!(random, order(3));
+        assert_eq!(step_at(5, 1, 2), 0);
+    }
+
+    #[test]
+    fn seq_triggers_the_envelope_and_accents_kick() {
+        // Envelope on Seq: each gated step opens it (from closed, as the decay is short).
+        let s = Settings { seq_on: true, seq_amount: 0.0, seq_gate: 0b0101, seq_len: 4, gen_amount: 0.8, gen_trigger: 3, gen_attack: 1.0, gen_decay: 20.0, ..Default::default() };
+        let run = cutoffs(&s, 0.0, 8 * 6000, 512);
+        let opens = run.windows(2).filter(|w| w[0] < 4000.0 && w[1] >= 4000.0).count();
+        assert_eq!(opens, 4);
+        // An accent kicks the cutoff up at the start of its step.
+        let a = Settings { seq_on: true, seq_amount: 0.0, seq_accent: 0b10, ..Default::default() };
+        let run = cutoffs(&a, 0.0, 2 * 6000, 512);
+        assert!(run[6000 + 200] > 1.8 * run[3000], "{} {}", run[6000 + 200], run[3000]);
     }
 }

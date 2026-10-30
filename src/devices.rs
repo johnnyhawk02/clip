@@ -230,10 +230,10 @@ impl State {
         }
     }
 
-    /// Auto Filter's cutoff right now (after its modulation), Hz.
-    pub fn filter_cutoff(&self) -> Option<f32> {
+    /// Auto Filter's cutoff right now (after its modulation), Hz, and its sequencer's step.
+    pub fn filter_view(&self) -> Option<(f32, Option<usize>)> {
         match self {
-            State::AutoFilter(f) => Some(f.cutoff),
+            State::AutoFilter(f) => Some((f.cutoff, f.step)),
             _ => None,
         }
     }
