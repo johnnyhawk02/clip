@@ -211,6 +211,13 @@ impl App {
                         self.status = format!("saveproj {arg}: {r:?}");
                     }
                     "openproj" => self.open_project(PathBuf::from(arg)),
+                    "device" => {
+                        // device:t|Name adds an effect to track t.
+                        let mut it = arg.splitn(2, '|');
+                        if let (Some(t), Some(name)) = (it.next().and_then(|v| v.parse::<usize>().ok()), it.next()) {
+                            self.add_device(t, name);
+                        }
+                    }
                     "send" => {
                         // send:t|r|amount sets track t's send to return r.
                         let v: Vec<&str> = arg.split('|').collect();

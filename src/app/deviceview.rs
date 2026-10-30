@@ -109,6 +109,7 @@ impl App {
                             Device::Spacer(s) => spacer_panel(&mut inner, s, &others, cuts[i]),
                             Device::Reverb(s) => reverb_panel(&mut inner, s),
                             Device::Delay(s) => delay_panel(&mut inner, s),
+                            Device::Spring(s) => spring_panel(&mut inner, s),
                         };
                     }
                     // + Add Effect, as Live's "Drop Audio Effects Here".
@@ -295,6 +296,32 @@ fn delay_panel(ui: &mut egui::Ui, s: &mut fx::DelaySettings) -> bool {
             let b = ui.add(egui::DragValue::new(&mut s.high_cut).range(500.0..=20000.0).speed(20.0).suffix(" Hz").fixed_decimals(0));
             active |= busy(&a) || busy(&b);
         });
+        ui.end_row();
+        ui.label("Dry / Wet");
+        active |= pct(ui, &mut s.mix);
+        ui.end_row();
+    });
+    active
+}
+
+/// Spring's controls.
+fn spring_panel(ui: &mut egui::Ui, s: &mut fx::SpringSettings) -> bool {
+    let mut active = false;
+    ui.spacing_mut().slider_width = 160.0;
+    egui::Grid::new("springgrid").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+        ui.label("Length");
+        let w = ui.add(egui::Slider::new(&mut s.length, 20.0..=120.0).suffix(" ms").fixed_decimals(0)).on_hover_text("Time between echoes");
+        active |= busy(&w);
+        ui.end_row();
+        ui.label("Decay");
+        active |= pct(ui, &mut s.decay);
+        ui.end_row();
+        ui.label("Tone");
+        let w = ui.add(egui::Slider::new(&mut s.tone, 1500.0..=7000.0).logarithmic(true).suffix(" Hz").fixed_decimals(0)).on_hover_text("The spring's transition frequency: the boing sits below it (applies when you let go)");
+        active |= busy(&w);
+        ui.end_row();
+        ui.label("Chirp");
+        active |= pct(ui, &mut s.chirp);
         ui.end_row();
         ui.label("Dry / Wet");
         active |= pct(ui, &mut s.mix);

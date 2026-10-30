@@ -61,7 +61,9 @@ the top of each track's mixer, in the song view in the track header when it's ta
 returns show as columns beside Main in the Session view and as rows above Master in the song
 view, with their own volume, pan and on/off; click one's name for its effects. Tracks ▸ Insert
 Return Track adds another, right-click one to delete it. Reverb (size, damping, width,
-pre-delay) and Delay (tempo-synced time, feedback, ping-pong, filter) can go on any track too.
+pre-delay), Spring (a spring reverb tank after Parker and Välimäki: chirping, boingy echoes, with
+Length, Decay, Tone, Chirp) and Delay (tempo-synced time, feedback, ping-pong, filter) can go on
+any track too.
 
 ### Spacer
 
