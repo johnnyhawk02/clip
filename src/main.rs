@@ -14,6 +14,7 @@ mod player;
 mod project;
 mod spacer;
 mod tape;
+mod phaser;
 mod recorder;
 
 fn main() -> eframe::Result {

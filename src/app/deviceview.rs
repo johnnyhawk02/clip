@@ -6,6 +6,7 @@ use super::*;
 use crate::devices::{self, Device};
 use crate::fx;
 use crate::tape;
+use crate::phaser;
 
 /// Width of one device panel.
 const DEV_W: f32 = 560.0;
@@ -112,6 +113,7 @@ impl App {
                             Device::Delay(s) => delay_panel(&mut inner, s),
                             Device::Spring(s) => spring_panel(&mut inner, s),
                             Device::Tape(s) => tape_panel(&mut inner, s),
+                            Device::Phaser(s) => phaser_panel(&mut inner, s),
                         };
                     }
                     // + Add Effect, as Live's "Drop Audio Effects Here".
@@ -383,6 +385,22 @@ pub(super) fn tape_panel(ui: &mut egui::Ui, s: &mut tape::Settings) -> bool {
             active |= busy(&w);
             ui.end_row();
         });
+    });
+    active
+}
+
+/// Phaser's controls: the pedal's speed knob, and how much of it is heard.
+pub(super) fn phaser_panel(ui: &mut egui::Ui, s: &mut phaser::Settings) -> bool {
+    let mut active = false;
+    ui.spacing_mut().slider_width = 160.0;
+    egui::Grid::new("phasergrid").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
+        ui.label("Speed");
+        let w = ui.add(egui::Slider::new(&mut s.speed, 0.05..=10.0).logarithmic(true).suffix(" Hz").fixed_decimals(2));
+        active |= busy(&w);
+        ui.end_row();
+        ui.label("Dry / Wet");
+        active |= pct(ui, &mut s.mix);
+        ui.end_row();
     });
     active
 }
