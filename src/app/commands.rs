@@ -526,7 +526,7 @@ impl App {
             Action::DeleteTime => self.delete_time(),
             Action::InsertTime => self.insert_time(),
             Action::Preferences => self.prefs_open = Some((self.phrase_bars, repitch_mode(), APPEARANCE.load(std::sync::atomic::Ordering::Relaxed))),
-            Action::Spacer => self.show_spacer = true,
+            Action::Spacer => self.add_device(self.active, "Spacer"),
             Action::TrackColor => {
                 let t = &mut self.tracks[self.active];
                 t.color = (t.color + 1) % LIVE_PALETTE.len();

@@ -204,7 +204,7 @@ impl App {
                     p.rect_stroke(head, 0.0, Stroke::new(1.5, ink()), egui::StrokeKind::Inside);
                 }
                 if ui.interact(head, ui.scope_id().with(("shead", t)), Sense::click()).clicked() {
-                    self.set_active(t);
+                    self.show_track_devices(t);
                 }
             }
             ui.set_clip_rect(full_clip);

@@ -18,6 +18,7 @@ use crate::menu::NativeMenu;
 use crate::player::Player;
 use crate::project::{self, ClipData, ProjectFile, TrackData};
 use crate::recorder::Recorder;
+use crate::devices;
 use crate::spacer;
 
 mod clip;
@@ -39,7 +40,7 @@ mod timesel;
 mod clipview;
 mod locators;
 mod session;
-mod spacerview;
+mod deviceview;
 
 use self::clip::*;
 use self::chop::*;
@@ -382,11 +383,13 @@ pub struct App {
     show_cues: bool,
     recorder: Option<Recorder>,
     show_record: bool,
-    /// The Spacer window (for the selected track), and whether a change in it is under way.
-    show_spacer: bool,
+    /// The device view (the selected track's effects) showing in the detail area, the selection
+    /// it was opened over (another selection closes it), and whether a change is under way.
+    show_devices: bool,
+    devices_over: (Option<(usize, usize)>, Option<(usize, usize)>),
     /// How far the Session view's track columns are scrolled sideways (px).
     session_scroll: f32,
-    spacer_edit: bool,
+    device_edit: bool,
     rec_meter: f32,
     curve: Option<CurveKind>,
     env_points: Vec<(f32, f32)>,
@@ -607,9 +610,10 @@ impl App {
             show_cues: false,
             recorder: None,
             show_record: false,
-            show_spacer: false,
+            show_devices: false,
+            devices_over: (None, None),
             session_scroll: 0.0,
-            spacer_edit: false,
+            device_edit: false,
             rec_meter: 0.0,
             curve: None,
             env_points: CurveKind::Envelope.flat(),
@@ -765,20 +769,24 @@ impl App {
         let any_solo = tracks.iter().any(|t| t.solo);
         let idx: Vec<usize> = (0..tracks.len()).filter(|&i| if any_solo { tracks[i].solo } else { !tracks[i].mute }).collect();
         let mut rendered: Vec<(Audio, f32, f32)> = idx.iter().map(|&i| (self.render_track(&tracks[i]), tracks[i].gain, tracks[i].pan)).collect();
-        // Spacers, as the live engine runs them: each ducked by its source after that track's volume.
+        // Each track's effects, as the live engine runs them (a Spacer hears its source after
+        // that track's volume).
         let ducked: Vec<Audio> = (0..idx.len())
             .map(|k| {
                 let t = &tracks[idx[k]];
-                let Some(set) = t.spacer.filter(|s| s.on) else { return rendered[k].0.clone() };
-                let Some(src) = idx.iter().position(|&i| i == set.source).filter(|&s| s != k) else { return rendered[k].0.clone() };
+                if !t.devices.iter().any(|d| d.on()) {
+                    return rendered[k].0.clone();
+                }
                 let frames = |a: &Audio, g: f32, n: usize| -> Vec<[f32; 2]> {
                     let ch = |c: usize, i: usize| a.channels.get(c.min(a.num_channels().saturating_sub(1))).and_then(|v| v.get(i)).copied().unwrap_or(0.0) * g;
                     (0..n).map(|i| [ch(0, i), ch(1, i)]).collect()
                 };
                 let n = rendered[k].0.frames();
                 let mut main = frames(&rendered[k].0, 1.0, n);
-                let sc = frames(&rendered[src].0, rendered[src].1, n);
-                spacer::Spacer::new(self.rate()).process(&set, &mut main, &sc);
+                for d in t.devices.iter().filter(|d| d.on()) {
+                    let side = d.source().and_then(|s| idx.iter().position(|&i| i == s)).filter(|&s| s != k).map(|s| frames(&rendered[s].0, rendered[s].1, n));
+                    devices::State::new(d, self.rate()).process(d, &mut main, side.as_deref());
+                }
                 Audio { rate: self.rate(), channels: vec![main.iter().map(|f| f[0]).collect(), main.iter().map(|f| f[1]).collect()] }
             })
             .collect();
@@ -1282,8 +1290,13 @@ impl eframe::App for App {
             View::Editor { track, clip } => Some((track, clip)),
             View::Arrangement => self.clip_view_clip().filter(|&p| self.clip(p).is_some_and(|c| c.group.is_none())),
         };
+        // Selecting a clip or slot takes the detail view back from the device view.
+        if self.show_devices && (self.sel_clip, self.sel_slot) != self.devices_over {
+            self.show_devices = false;
+        }
+        let devices = self.show_devices && self.view == View::Arrangement && !self.tracks.is_empty();
         // A double-click opens the clip in full: the editor fills the window.
-        self.split = detail.is_some() && !self.tracks.is_empty() && !(self.full_edit && matches!(self.view, View::Editor { .. }));
+        self.split = (devices || detail.is_some()) && !self.tracks.is_empty() && !(self.full_edit && matches!(self.view, View::Editor { .. }));
         if let (View::Arrangement, Some(p)) = (self.view, detail) {
             if self.detail_key != self.detail_key_of(p) {
                 self.load_detail(p);
@@ -1307,7 +1320,7 @@ impl eframe::App for App {
                 if let Some(q) = ui.input(|i| i.pointer.press_origin().filter(|_| i.pointer.any_pressed())) {
                     if top.contains(q) && self.view != View::Arrangement {
                         self.back_to_arrangement();
-                    } else if let (true, View::Arrangement, Some(p)) = (wave.contains(q), self.view, detail) {
+                    } else if let (false, true, View::Arrangement, Some(p)) = (devices, wave.contains(q), self.view, detail) {
                         self.edit_clip(p);
                         self.full_edit = false;
                     }
@@ -1316,9 +1329,14 @@ impl eframe::App for App {
                 let session = self.show_session;
                 ui.scope_builder(egui::UiBuilder::new().max_rect(top), |ui| if session { self.session(ui) } else { self.arrangement(ui) });
                 ui.painter().rect_filled(Rect::from_min_max(bottom.min, Pos2::new(bottom.right(), bottom.top() + 1.0)), 0.0, rule());
-                ui.scope_builder(egui::UiBuilder::new().max_rect(side), |ui| self.clip_view(ui, side));
-                ui.painter().line_segment([Pos2::new(side.right(), bottom.top()), side.right_bottom()], Stroke::new(1.0, rule()));
-                ui.scope_builder(egui::UiBuilder::new().max_rect(wave), |ui| self.waveform(ui));
+                if devices {
+                    let r = Rect::from_min_max(Pos2::new(bottom.left(), bottom.top() + 1.0), bottom.max);
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(r), |ui| self.device_view(ui, r));
+                } else {
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(side), |ui| self.clip_view(ui, side));
+                    ui.painter().line_segment([Pos2::new(side.right(), bottom.top()), side.right_bottom()], Stroke::new(1.0, rule()));
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(wave), |ui| self.waveform(ui));
+                }
             } else if self.show_session && self.view == View::Arrangement && !self.tracks.is_empty() {
                 let full = ui.max_rect();
                 let bar = Rect::from_min_size(full.min, Vec2::new(full.width(), 34.0));
@@ -1347,9 +1365,6 @@ impl eframe::App for App {
         if self.show_record || self.recorder.is_some() {
             self.show_record = true;
             self.record_window(&ctx);
-        }
-        if self.show_spacer {
-            self.spacer_window(&ctx);
         }
         if self.show_spectrum {
             self.spectrum_window(&ctx);

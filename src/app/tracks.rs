@@ -38,9 +38,7 @@ pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32, click: 
     let mut layers = layers;
     let order: Vec<usize> = layers.iter().map(|l| l.track).collect();
     for l in &mut layers {
-        if let Some(set) = tracks[l.track].spacer {
-            l.spacer = order.iter().position(|&t| t == set.source).map(|src| (src, set));
-        }
+        l.devices = tracks[l.track].devices.iter().map(|d| (*d, d.source().and_then(|s| order.iter().position(|&t| t == s)))).collect();
     }
     // While a Session clip plays on, so does the transport.
     let end = if open { end.max(1) + FOREVER } else { end };
@@ -71,13 +69,10 @@ impl App {
         }
     }
 
-    /// Keep each Spacer pointing at the same track after tracks move (none if it's gone).
+    /// Keep each effect listening to the same track after tracks move (dropped if it's gone).
     fn remap_spacers(&mut self, f: impl Fn(usize) -> Option<usize>) {
         for t in &mut self.tracks {
-            t.spacer = t.spacer.and_then(|mut s| {
-                s.source = f(s.source)?;
-                Some(s)
-            });
+            t.devices = std::mem::take(&mut t.devices).into_iter().filter_map(|d| d.remap(&f)).collect();
         }
     }
 

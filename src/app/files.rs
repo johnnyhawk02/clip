@@ -278,7 +278,8 @@ impl App {
                     pan: t.pan,
                     color: t.color,
                     palette: true,
-                    spacer: t.spacer,
+                    spacer: None,
+                    devices: t.devices.clone(),
                     mute: t.mute,
                     solo: t.solo,
                     clips: t
@@ -365,7 +366,12 @@ impl App {
             data.iter()
                 .map(|t| {
                     let mut track = Track::new(t.name.clone());
-                    (track.gain, track.pan, track.mute, track.solo, track.spacer) = (t.gain, t.pan, t.mute, t.solo, t.spacer);
+                    (track.gain, track.pan, track.mute, track.solo) = (t.gain, t.pan, t.mute, t.solo);
+                    // Projects from before the device chain kept one Spacer per track.
+                    track.devices = t.devices.clone();
+                    if let (true, Some(s)) = (track.devices.is_empty(), t.spacer) {
+                        track.devices.push(devices::Device::Spacer(s));
+                    }
                     // Older projects had six colours (grey, blue, green, amber, red, purple):
                     // their nearest in Live's palette.
                     track.color = if t.palette { t.color } else { [27, 22, 19, 15, 14, 24][t.color % 6] };

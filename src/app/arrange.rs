@@ -339,8 +339,9 @@ impl App {
         if item(ui, if mute { "Unmute" } else { "Mute" }, true) {
             chosen = Some(Action::MuteTrack);
         }
-        if item(ui, "Spacer…", self.tracks.len() > 1) {
-            chosen = Some(Action::Spacer);
+        ui.menu_button("Add Effect", |ui| self.add_effect_menu(ui, t));
+        if item(ui, "Show Effects", true) {
+            self.show_track_devices(t);
         }
         ui.separator();
         if item(ui, "Collapse Track to One Clip", has_clips) {
@@ -441,7 +442,8 @@ impl App {
             });
         }
         if let Some(ti) = activate {
-            self.set_active(ti);
+            // Clicking a track's header shows its effects below, as in Live.
+            self.show_track_devices(ti);
         }
         if changed {
             self.dirty = true;

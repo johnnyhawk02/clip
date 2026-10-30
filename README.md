@@ -46,10 +46,16 @@ swatch, or right-clicking its header, sets the track's colour, which its clips f
 they have their own. New tracks get the next colour in turn. Clip ▸ Preferences ▸ Appearance
 picks Clip Light, any of the 18 themes that come with Live 12 (Default Dark Neutral Medium, Angst Robot, Riparian and the rest), or Match the Mac (Clip Light by day, Live's default dark theme by night). Live Set exports keep the colours.
 
-## Spacer
+## Effects
 
-A Trackspacer-style ducker on any track: Tracks ▸ Spacer… (or right-click a track header) and
-pick the track to make room for. Wherever that track plays, this one is turned down only at the
+Each track has a chain of built-in effects, as Live's devices: click a track's name (or its
+header) and they show along the bottom, each with its on/off switch, settings and × to remove,
+and + Add Effect at the end. Right-click a track ▸ Add Effect, or Tracks ▸ Add Spacer, adds one
+too. Effects run in order, live and in exports, and are saved with the project.
+
+### Spacer
+
+A Trackspacer-style ducker: add it and pick the track to make room for. Wherever that track plays, this one is turned down only at the
 same frequencies (32 bands, 30 Hz to 18 kHz, zero latency), so a bass sits under a kick or a pad
 under a vocal without pumping the whole sound. Amount, Low Cut / High Cut (which bands may duck),
 Attack, Release, Stereo (Linked, L / R or Mid / Side) and Output; the window shows the cut in

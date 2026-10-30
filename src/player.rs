@@ -91,8 +91,11 @@ impl Player {
         if let (Source::Song(old), Source::Song(new)) = (&s.source, &source) {
             for l in &new.layers {
                 if let Some(o) = old.layers.iter().find(|o| o.track == l.track) {
-                    let state = o.spacer_state.lock().unwrap().take();
-                    *l.spacer_state.lock().unwrap() = state;
+                    // Only while the chain is the same effects in the same order.
+                    if o.devices.len() == l.devices.len() && o.devices.iter().zip(&l.devices).all(|(a, b)| a.0.name() == b.0.name()) {
+                        let state = std::mem::take(&mut *o.device_state.lock().unwrap());
+                        *l.device_state.lock().unwrap() = state;
+                    }
                 }
             }
         }
@@ -172,10 +175,10 @@ impl Player {
         }
     }
 
-    /// Track `t`'s Spacer cuts right now (dB per band, two rows), when it's running.
-    pub fn spacer_cuts(&self, t: usize) -> Option<[[f32; crate::spacer::BANDS]; 2]> {
+    /// Device `i` of track `t`: a Spacer's cuts right now (dB per band, two rows), when running.
+    pub fn spacer_cuts(&self, t: usize, i: usize) -> Option<[[f32; crate::spacer::BANDS]; 2]> {
         match &self.shared.lock().unwrap().source {
-            Source::Song(song) => song.layers.iter().find(|l| l.track == t)?.spacer_state.lock().unwrap().as_ref().map(|s| s.cut),
+            Source::Song(song) => song.layers.iter().find(|l| l.track == t)?.device_state.lock().unwrap().get(i)?.as_ref()?.spacer_cuts(),
             Source::Buffer(_) => None,
         }
     }

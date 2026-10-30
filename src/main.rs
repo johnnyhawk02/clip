@@ -5,6 +5,7 @@ mod actions;
 mod app;
 mod audio;
 mod crossfeed;
+mod devices;
 mod effects;
 mod engine;
 mod menu;

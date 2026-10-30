@@ -472,7 +472,7 @@ impl Action {
             BatchConvert => "Batch Convert…",
             OffsetTrack => "Offset Track…",
             TrackColor => "Next Track Colour",
-            Spacer => "Spacer…",
+            Spacer => "Add Spacer",
             LayerUp => "Move Track Up",
             LayerDown => "Move Track Down",
             Preferences => "Preferences…",

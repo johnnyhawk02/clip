@@ -6,7 +6,7 @@ use std::f32::consts::FRAC_PI_2;
 use std::sync::Arc;
 
 use crate::audio::Audio;
-use crate::spacer;
+use crate::devices::{self, Device};
 
 /// One clip, ready to read from the audio thread. Positions are song frames at the tempo the
 /// song is laid out for.
@@ -160,15 +160,15 @@ pub struct LayerSrc {
     pub track: usize,
     /// Loudest it's been since the meters last looked (f32 bits).
     pub peak: std::sync::atomic::AtomicU32,
-    /// Spacer: the layer (index in `Song::layers`) it makes room for, and how.
-    pub spacer: Option<(usize, spacer::Settings)>,
-    /// The Spacer's filters and envelopes, carried from block to block.
-    pub spacer_state: std::sync::Mutex<Option<spacer::Spacer>>,
+    /// Its effects in order, each with the layer (index in `Song::layers`) it listens to.
+    pub devices: Vec<(Device, Option<usize>)>,
+    /// The effects' running state (filters, envelopes), carried from block to block.
+    pub device_state: std::sync::Mutex<Vec<Option<devices::State>>>,
 }
 
 impl LayerSrc {
     pub fn new(track: usize, gain: f32, pan: (f32, f32), clips: Vec<ClipSrc>) -> LayerSrc {
-        LayerSrc { gain, pan, clips, track, peak: std::sync::atomic::AtomicU32::new(0), spacer: None, spacer_state: std::sync::Mutex::new(None) }
+        LayerSrc { gain, pan, clips, track, peak: std::sync::atomic::AtomicU32::new(0), devices: Vec::new(), device_state: std::sync::Mutex::new(Vec::new()) }
     }
 }
 
@@ -211,13 +211,25 @@ impl Song {
                 }
             }
         }
+        // Each layer's effects, in order. One that listens to another track (a Spacer's
+        // sidechain) hears that track after its volume, before its own effects.
+        let dry: Vec<Vec<[f32; 2]>> = if self.layers.iter().any(|l| l.devices.iter().any(|d| d.1.is_some())) { bufs.clone() } else { Vec::new() };
         for (li, layer) in self.layers.iter().enumerate() {
-            let Some((src, set)) = layer.spacer.filter(|(src, set)| set.on && *src != li && *src < bufs.len()) else { continue };
-            // The sidechain is the other track after its volume.
-            let g = self.layers[src].gain;
-            let sc: Vec<[f32; 2]> = bufs[src].iter().map(|f| [f[0] * g, f[1] * g]).collect();
-            let mut state = layer.spacer_state.lock().unwrap();
-            state.get_or_insert_with(|| spacer::Spacer::new(self.rate)).process(&set, &mut bufs[li], &sc);
+            if layer.devices.is_empty() {
+                continue;
+            }
+            let mut state = layer.device_state.lock().unwrap();
+            state.resize_with(layer.devices.len(), || None);
+            for ((d, src), st) in layer.devices.iter().zip(state.iter_mut()) {
+                if !d.on() {
+                    continue;
+                }
+                let side: Option<Vec<[f32; 2]>> = src.filter(|&s| s != li && s < dry.len()).map(|s| {
+                    let g = self.layers[s].gain;
+                    dry[s].iter().map(|f| [f[0] * g, f[1] * g]).collect()
+                });
+                st.get_or_insert_with(|| devices::State::new(d, self.rate)).process(d, &mut bufs[li], side.as_deref());
+            }
         }
         let mut peaks = vec![0.0f32; self.layers.len()];
         for (k, frame) in out.iter_mut().enumerate() {

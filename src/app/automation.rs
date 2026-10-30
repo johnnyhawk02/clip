@@ -216,7 +216,7 @@ impl App {
                         let mut it = arg.split('|').filter_map(|v| v.parse::<usize>().ok());
                         if let (Some(t), Some(src)) = (it.next(), it.next()) {
                             if let Some(tr) = self.tracks.get_mut(t) {
-                                tr.spacer = Some(spacer::Settings::new(src));
+                                tr.devices.push(devices::Device::Spacer(spacer::Settings::new(src)));
                             }
                             self.refresh_playback();
                         }
