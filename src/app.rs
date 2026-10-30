@@ -36,6 +36,7 @@ mod commands;
 mod undo;
 mod clipruler;
 mod tempo;
+mod devicefx;
 mod timesel;
 mod clipview;
 mod locators;
@@ -343,6 +344,11 @@ pub struct App {
     automation: Option<Automation>,
     menu: NativeMenu,
     dialog: Option<Dialog>,
+    /// A track effect being printed into the sound (its settings), and the last settings of each.
+    device_fx: Option<devices::Device>,
+    device_fx_last: Vec<devices::Device>,
+    /// Printing a whole looping clip: the tail wraps round to its start.
+    device_fx_wrap: bool,
 
     tool: Tool,
     pencil: Option<PencilStroke>,
@@ -605,6 +611,9 @@ impl App {
                 NativeMenu::install(&cc.egui_ctx)
             },
             dialog: None,
+            device_fx: None,
+            device_fx_last: Vec::new(),
+            device_fx_wrap: true,
             tool: Tool::Select,
             pencil: None,
             zoom_band: None,
@@ -1313,7 +1322,7 @@ impl eframe::App for App {
         let title = if self.tracks.is_empty() { "Clip".into() } else { format!("{name}{} — Clip", if self.dirty { " (edited)" } else { "" }) };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        let modal_open = self.pending.is_some() || self.dialog.is_some() || self.curve.is_some() || self.loc_rename.is_some() || self.prefs_open.is_some();
+        let modal_open = self.pending.is_some() || self.dialog.is_some() || self.device_fx.is_some() || self.curve.is_some() || self.loc_rename.is_some() || self.prefs_open.is_some();
         for a in self.menu.poll() {
             if !modal_open {
                 self.run(a, &ctx);
@@ -1496,6 +1505,7 @@ impl eframe::App for App {
         }
 
         self.dialog_window(&ctx);
+        self.device_fx_window(&ctx);
         self.curve_window(&ctx);
         self.confirm_dialog(&ctx);
         self.run_automation(&ctx);

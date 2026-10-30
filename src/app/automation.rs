@@ -227,6 +227,16 @@ impl App {
                         }
                     }
                     "leavegroup" => self.leave_group(),
+                    // devicefx:Name — print that track effect (last settings) into the sound, wrapped.
+                    "devicefx" => {
+                        self.open_device_fx(arg);
+                        if let Some(d) = self.device_fx.take() {
+                            let before = self.audio.as_ref().map_or(0.0, |a| a.channels[0].iter().map(|v| v * v).sum::<f32>());
+                            self.apply_device_fx(d, self.sel.is_none());
+                            let after = self.audio.as_ref().map_or(0.0, |a| a.channels[0].iter().map(|v| v * v).sum::<f32>());
+                            eprintln!("devicefx {arg}: energy {before:.1} -> {after:.1}, frames {}", self.frames());
+                        }
+                    }
                     // sleep:ms lets the transport run on for that long (the UI waits).
                     "sleep" => std::thread::sleep(std::time::Duration::from_millis(arg.parse().unwrap_or(0))),
                     // pos: print where the transport is, and what it plays.

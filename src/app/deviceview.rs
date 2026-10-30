@@ -243,7 +243,7 @@ fn pct(ui: &mut egui::Ui, v: &mut f32) -> bool {
 }
 
 /// Reverb's controls.
-fn reverb_panel(ui: &mut egui::Ui, s: &mut fx::ReverbSettings) -> bool {
+pub(super) fn reverb_panel(ui: &mut egui::Ui, s: &mut fx::ReverbSettings) -> bool {
     let mut active = false;
     ui.spacing_mut().slider_width = 160.0;
     egui::Grid::new("reverbgrid").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
@@ -268,7 +268,7 @@ fn reverb_panel(ui: &mut egui::Ui, s: &mut fx::ReverbSettings) -> bool {
 }
 
 /// Delay's controls: the time in notes (synced to the tempo).
-fn delay_panel(ui: &mut egui::Ui, s: &mut fx::DelaySettings) -> bool {
+pub(super) fn delay_panel(ui: &mut egui::Ui, s: &mut fx::DelaySettings) -> bool {
     const TIMES: [(&str, f32); 8] = [("1/16", 0.25), ("1/8", 0.5), ("3/16", 0.75), ("1/4", 1.0), ("3/8", 1.5), ("1/2", 2.0), ("3/4", 3.0), ("1 bar", 4.0)];
     let mut active = false;
     ui.spacing_mut().slider_width = 160.0;
@@ -305,7 +305,7 @@ fn delay_panel(ui: &mut egui::Ui, s: &mut fx::DelaySettings) -> bool {
 }
 
 /// Spring's controls.
-fn spring_panel(ui: &mut egui::Ui, s: &mut fx::SpringSettings) -> bool {
+pub(super) fn spring_panel(ui: &mut egui::Ui, s: &mut fx::SpringSettings) -> bool {
     let mut active = false;
     ui.spacing_mut().slider_width = 160.0;
     egui::Grid::new("springgrid").num_columns(2).spacing(Vec2::new(10.0, 3.0)).show(ui, |ui| {
