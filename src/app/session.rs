@@ -683,9 +683,21 @@ impl App {
             return;
         }
         self.push_undo("Record Session");
+        let mut prev: Option<(usize, usize)> = None;
         for (t, s, from, to) in played {
             let Some(mut c) = self.clip((t, SLOT + s)).cloned() else { continue };
-            (c.start, c.len) = (from, to - from);
+            // A group changed while it played starts again further on in its loop, as from
+            // before that moment (see leave_group): record it from there, after what came first.
+            let at = match prev {
+                Some((pt, end)) if pt == t => from.max(end),
+                _ => from,
+            };
+            prev = Some((t, to));
+            if at >= to {
+                continue;
+            }
+            c.trim = c.source(at - from);
+            (c.start, c.len) = (at, to - at);
             self.tracks[t].clips.push(c);
             let i = self.tracks[t].clips.len() - 1;
             self.place_over((t, i));

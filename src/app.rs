@@ -813,7 +813,15 @@ impl App {
         let showed_all = c.trim == 0 && c.len >= c.audio.frames();
         let audio = Arc::new(self.group_mix(&tracks, c.loop_points));
         c.peaks = Arc::new(Peaks::build(&audio));
-        c.len = if showed_all { audio.frames() } else { c.len.min(audio.frames().saturating_sub(c.trim)) };
+        // A looping group keeps its length in the song, repeating its new mix (as set_audio).
+        c.len = if c.looping {
+            c.trim = c.trim.min(audio.frames().saturating_sub(1));
+            c.len
+        } else if showed_all {
+            audio.frames()
+        } else {
+            c.len.min(audio.frames().saturating_sub(c.trim))
+        };
         c.audio = audio;
         c.group = Some(Arc::new(tracks));
         // (A group re-pitched while its mix was rendering for a new tempo has its mix now.)

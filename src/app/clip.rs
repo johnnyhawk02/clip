@@ -697,9 +697,21 @@ impl App {
         if let (Some(pos), Some(c)) = (playing.filter(|_| f.clip < SLOT), self.clip((f.track, f.clip))) {
             let out = c.start + pos.saturating_sub(c.trim);
             self.go_to_frame(out);
-        } else if let (true, Some((at, when))) = (playing.is_some(), f.outer_at) {
-            // Back in the Session view, the slot has played on all the while.
+        } else if let (Some(inside), Some((at, when))) = (playing, f.outer_at) {
+            // Back in the Session view, the slot has played on all the while: on from where it
+            // was heard inside, however the group was changed there (its brace, its length).
             let now = at + (when.elapsed().as_secs_f64() * self.rate() as f64) as usize;
+            let trim = self.clip((f.track, f.clip)).map_or(0, |c| c.trim);
+            let from = now.saturating_sub(inside.saturating_sub(trim));
+            let near = self.rate() as usize / 50;
+            if let Some(p) = self.session_play.get_mut(f.track) {
+                if let Some(seg) = p.segments.iter_mut().rev().find(|seg| seg.0 == f.clip - SLOT && seg.2.is_none() && seg.1 < now && seg.1.abs_diff(from) > near) {
+                    // (What played before stays as it was, for Arrangement Record.)
+                    seg.2 = Some(now);
+                    p.segments.push((f.clip - SLOT, from, None));
+                }
+            }
+            self.refresh_playback();
             self.player.play(now, usize::MAX, false);
         }
     }
