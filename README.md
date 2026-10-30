@@ -55,7 +55,9 @@ track, a row per scene (8 to start; + Scene adds more). It holds audio loops onl
   ⌥-drag to copy. Right-click a song clip ▸ Copy to Session puts it in the track's first empty slot.
 - Click a slot's triangle to launch it; launches wait for the next bar (Launch quantize in the bar
   above changes that). One clip plays per track, and the scene buttons on the right launch a whole
-  row. Each column's square stops its track; Stop All Clips stops them all.
+  row from the Main column. The square under each column stops its track; Stop All Clips stops them
+  all. The mixer along the bottom has Live's pan knobs, meters, vertical faders (double-click for
+  0 dB), track activators and Solo; it folds to just the buttons while the detail view is open.
 - Click a clip to see it in the detail view under the grid; double-click it to open the full clip
   editor. Shift-click slots and ⌘G groups them into one clip whose parts play in turn, and a group
   opens like any other.

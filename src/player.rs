@@ -146,6 +146,14 @@ impl Player {
     }
 
     /// The loudest output on each side since the last call (for the level meters).
+    /// Each heard track's loudest level since the last look (song playback only).
+    pub fn take_track_peaks(&self) -> Vec<(usize, f32)> {
+        match &self.shared.lock().unwrap().source {
+            Source::Song(song) => song.take_track_peaks(),
+            Source::Buffer(_) => Vec::new(),
+        }
+    }
+
     pub fn take_peaks(&self) -> [f32; 2] {
         std::mem::take(&mut self.shared.lock().unwrap().peak)
     }

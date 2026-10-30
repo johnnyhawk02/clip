@@ -133,7 +133,17 @@ impl App {
         for (m, now) in self.meter.iter_mut().zip(peaks) {
             *m = now.max(*m * 0.85);
         }
-        if self.meter.iter().any(|m| *m > 0.001) {
+        let now = self.player.take_track_peaks();
+        self.track_meter.resize(self.tracks.len(), 0.0);
+        for m in self.track_meter.iter_mut() {
+            *m *= 0.85;
+        }
+        for (t, p) in now {
+            if let Some(m) = self.track_meter.get_mut(t) {
+                *m = m.max(p);
+            }
+        }
+        if self.meter.iter().chain(&self.track_meter).any(|m| *m > 0.001) {
             ctx.request_repaint();
         }
     }

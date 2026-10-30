@@ -155,6 +155,16 @@ pub struct LayerSrc {
     /// Left and right gains from the track's pan.
     pub pan: (f32, f32),
     pub clips: Vec<ClipSrc>,
+    /// Which track it is.
+    pub track: usize,
+    /// Loudest it's been since the meters last looked (f32 bits).
+    pub peak: std::sync::atomic::AtomicU32,
+}
+
+impl LayerSrc {
+    pub fn new(track: usize, gain: f32, pan: (f32, f32), clips: Vec<ClipSrc>) -> LayerSrc {
+        LayerSrc { gain, pan, clips, track, peak: std::sync::atomic::AtomicU32::new(0) }
+    }
 }
 
 /// The whole song for the audio thread.
@@ -178,21 +188,26 @@ impl Song {
             .iter()
             .map(|l| l.clips.iter().filter(|c| (c.start as f64) < to && (c.end() as f64) > from).collect())
             .collect();
+        let mut peaks = vec![0.0f32; self.layers.len()];
         for (k, frame) in out.iter_mut().enumerate() {
             let t = from + step * k as f64;
             let ti = t as usize;
             *frame = [0.0, 0.0];
             for (li, layer) in self.layers.iter().enumerate() {
                 let w = layer.gain;
+                let (pl, pr) = layer.pan;
+                let mut lr = [0.0f32; 2];
                 for c in &clips[li] {
                     if ti < c.start || ti >= c.end() {
                         continue;
                     }
                     let g = w * c.gain(ti);
-                    let (pl, pr) = self.layers[li].pan;
-                    frame[0] += c.sample(t, 0) * g * pl;
-                    frame[1] += c.sample(t, 1) * g * pr;
+                    lr[0] += c.sample(t, 0) * g * pl;
+                    lr[1] += c.sample(t, 1) * g * pr;
                 }
+                frame[0] += lr[0];
+                frame[1] += lr[1];
+                peaks[li] = peaks[li].max(lr[0].abs()).max(lr[1].abs());
             }
             frame[0] *= self.master;
             frame[1] *= self.master;
@@ -202,6 +217,18 @@ impl Song {
                 frame[1] += c;
             }
         }
+        // Each track's meter, as heard (before the master volume).
+        for (layer, p) in self.layers.iter().zip(peaks) {
+            let old = f32::from_bits(layer.peak.load(std::sync::atomic::Ordering::Relaxed));
+            if p > old {
+                layer.peak.store(p.to_bits(), std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Each heard track's loudest level since the last look, as (track, level), resetting them.
+    pub fn take_track_peaks(&self) -> Vec<(usize, f32)> {
+        self.layers.iter().map(|l| (l.track, f32::from_bits(l.peak.swap(0, std::sync::atomic::Ordering::Relaxed)))).collect()
     }
 }
 
@@ -225,7 +252,7 @@ mod tests {
         // A ramp 0, 1, 2… read at speed 2: song frame t hears source frame 2t.
         let audio = Arc::new(Audio { rate: 1000, channels: vec![(0..100).map(|i| i as f32).collect()] });
         let clip = ClipSrc { audio, speed: 2.0, start: 10, len: 40, trim: 0, looping: None, frames: 50, fades: (0, 0), gain: 1.0 };
-        let song = Song { layers: vec![LayerSrc { gain: 1.0, pan: (1.0, 1.0), clips: vec![clip] }], end: 50, rate: 1000, master: 1.0, click: None };
+        let song = Song { layers: vec![LayerSrc::new(0, 1.0, (1.0, 1.0), vec![clip])], end: 50, rate: 1000, master: 1.0, click: None };
         let mut out = vec![[0.0; 2]; 4];
         song.render(20.0, 1.0, &mut out);
         assert_eq!(out.iter().map(|f| f[0]).collect::<Vec<_>>(), vec![20.0, 22.0, 24.0, 26.0]);

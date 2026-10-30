@@ -31,7 +31,7 @@ pub(super) fn song(tracks: &[Track], rate: u32, end: usize, master: f32, click: 
                     clips.push(clip_src(&c, (0, 0), rate));
                 }
             }
-            engine::LayerSrc { gain: t.gain, pan: if t.pan == 0.0 { (1.0, 1.0) } else { effects::pan_gains(t.pan) }, clips }
+            engine::LayerSrc::new(i, t.gain, if t.pan == 0.0 { (1.0, 1.0) } else { effects::pan_gains(t.pan) }, clips)
         })
         .collect();
     // While a Session clip plays on, so does the transport.

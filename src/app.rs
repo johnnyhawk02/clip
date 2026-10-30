@@ -332,6 +332,8 @@ pub struct App {
     show_controls: bool,
     show_info: bool,
     meter: Vec<f32>,
+    /// Each track's level meter (the Session view's mixer).
+    track_meter: Vec<f32>,
     /// (audio pointer, selection) -> peak level, so Info doesn't rescan every frame.
     info_peak: Option<((usize, Option<Sel>), f32)>,
     /// The area behind the document window; floating windows are placed relative to it.
@@ -567,6 +569,7 @@ impl App {
             show_controls: true,
             show_info: false,
             meter: Vec::new(),
+            track_meter: Vec::new(),
             info_peak: None,
             desk: Rect::NOTHING,
             cues: Vec::new(),
