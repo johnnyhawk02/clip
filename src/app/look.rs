@@ -97,7 +97,7 @@ pub(super) fn gray(v: u8) -> Color32 {
 
 /// A light wash over the canvas (a darkening one in dark mode).
 pub(super) fn wash(alpha: u8) -> Color32 {
-    if dark() { Color32::from_black_alpha(alpha) } else { wash(alpha) }
+    if dark() { Color32::from_black_alpha(alpha) } else { Color32::from_white_alpha(alpha) }
 }
 
 /// Text, secondary text, panel and line colours.
