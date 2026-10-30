@@ -1,0 +1,32 @@
+[package]
+name = "clip-vst"
+version = "1.0.0"
+edition = "2024"
+description = "Clip's devices as standalone VST3 plugins; pick one with a cargo feature"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug", rev = "de421011f41a6d10fc8c7a6084e4f4dee0143683" }
+nih_plug_egui = { git = "https://github.com/robbert-vdh/nih-plug", rev = "de421011f41a6d10fc8c7a6084e4f4dee0143683" }
+serde = { version = "1", features = ["derive"] }
+
+# One plugin per build: scripts/install-vst.sh builds each of these on its own.
+[features]
+reverb = []
+spring = []
+delay = []
+tape = []
+phaser = []
+chorus = []
+pultec = []
+riser = []
+tame = []
+opto = []
+autofilter = []
+spacer = []
+
+[profile.release]
+lto = "thin"
+strip = "symbols"

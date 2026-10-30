@@ -371,3 +371,17 @@ macOS needs for recording, signs it ad hoc and copies it to /Applications.
 For headless checks, `SOUND_EDIT_ACTIONS="sel:1-2,fadeout"` and `SOUND_EDIT_SNAPSHOT=out.png`
 run scripted actions on the opened file, save a screenshot and quit (`run:<Action>` runs any
 command, `dumpmenu` prints the menu bar).
+
+## VST3 plugins
+
+Each of Clip's devices also builds as a standalone VST3 (`Clip Tape`, `Clip Reverb`, ...), vendor Johnny:
+
+    scripts/install-vst.sh            # all twelve, into ~/Library/Audio/Plug-Ins/VST3/Johnny
+    scripts/install-vst.sh tape opto  # just these
+
+`vst/` is its own crate on [nih-plug](https://github.com/robbert-vdh/nih-plug). It includes Clip's DSP
+files by path, so a change to a device's sound reaches its plugin at the next build. `vst/src/effects.rs`
+lists each plugin's controls. `vst/check` is a muted test host: see its CMakeLists.txt.
+
+Clip Spacer ducks against its Sidechain input and passes the sound through when nothing is routed there.
+nih-plug's VST3 bindings are GPLv3, which covers any plugin binaries you give to others.
